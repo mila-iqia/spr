@@ -43,25 +43,9 @@ def get_argparser():
                         help='Size of features')
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
-    parser.add_argument("--wandb-proj", type=str, default="curl-atari-neurips-scratch")
+    parser.add_argument("--wandb-proj", type=str, default="awm")
     parser.add_argument("--num_rew_evals", type=int, default=10)
-    # rl-probe specific arguments
-    parser.add_argument("--checkpoint-index", type=int, default=-1)
 
-    # bert specific arguments
-    parser.add_argument("--num_transformer_layers", type=int, default=2)
-    parser.add_argument("--num_lin_projections", type=int, default=8)
-    parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument('--seq_len', type=int, default=5,
-                        help='Sequence length.')
-    parser.add_argument("--d_ff", type=int, default=512)
-    parser.add_argument("--beta", type=float, default=1.0)
-
-    # naff-specific arguments
-    parser.add_argument("--naff_fc_size", type=int, default=2048,
-                        help="fully connected layer width for naff")
-    parser.add_argument("--pred_offset", type=int, default=1,
-                        help="how many steps in future to predict")
     # CPC-specific arguments
     parser.add_argument('--sequence_length', type=int, default=100,
                         help='Sequence length.')
@@ -84,8 +68,6 @@ def get_argparser():
     parser.add_argument('--probe-lr', type=float, default=5e-2)
     parser.add_argument("--probe-collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
                         default="random_agent")
-    parser.add_argument('--zoo-algos', nargs='+', default=["a2c"])
-    parser.add_argument('--zoo-tags', nargs='+', default=["10HR"])
     parser.add_argument('--num-runs', type=int, default=1)
     return parser
 
@@ -202,55 +184,6 @@ def generate_video():
     ])
 
 
-class appendabledict(defaultdict):
-    def __init__(self, type_=list, *args, **kwargs):
-        self.type_ = type_
-        super().__init__(type_, *args, **kwargs)
-
-    #     def map_(self, func):
-    #         for k, v in self.items():
-    #             self.__setitem__(k, func(v))
-
-    def subslice(self, slice_):
-        """indexes every value in the dict according to a specified slice
-
-        Parameters
-        ----------
-        slice : int or slice type
-            An indexing slice , e.g., ``slice(2, 20, 2)`` or ``2``.
-
-
-        Returns
-        -------
-        sliced_dict : dict (not appendabledict type!)
-            A dictionary with each value from this object's dictionary, but the value is sliced according to slice_
-            e.g. if this dictionary has {a:[1,2,3,4], b:[5,6,7,8]}, then self.subslice(2) returns {a:3,b:7}
-                 self.subslice(slice(1,3)) returns {a:[2,3], b:[6,7]}
-
-         """
-        sliced_dict = {}
-        for k, v in self.items():
-            sliced_dict[k] = v[slice_]
-        return sliced_dict
-
-    def append_update(self, other_dict):
-        """appends current dict's values with values from other_dict
-
-        Parameters
-        ----------
-        other_dict : dict
-            A dictionary that you want to append to this dictionary
-
-
-        Returns
-        -------
-        Nothing. The side effect is this dict's values change
-
-         """
-        for k, v in other_dict.items():
-            self.__getitem__(k).append(v)
-
-
 # Thanks Bjarten! (https://github.com/Bjarten/early-stopping-pytorch)
 class EarlyStopping(object):
     """Early stops the training if validation loss doesn't improve after a given patience."""
@@ -300,31 +233,6 @@ class EarlyStopping(object):
         save_dir = self.wandb.run.dir
         torch.save(model.state_dict(), save_dir + "/" + self.name + ".pt")
         self.val_acc_max = val_acc
-
-
-def bucket_coord(coord, num_buckets, min_coord=0, max_coord=255, stride=1):
-    # stride is how much a variable is incremented by (usually 1)
-    try:
-        assert (coord <= max_coord and coord >= min_coord)
-    except:
-        print("coord: %i, max: %i, min: %i, num_buckets: %i" % (coord, max_coord, min_coord, num_buckets))
-        assert False, coord
-    coord_range = (max_coord - min_coord) + 1
-
-    # thresh is how many units in raw_coord space correspond to one bucket
-    if coord_range < num_buckets:  # we never want to upsample from the original coord
-        thresh = stride
-    else:
-        thresh = coord_range / num_buckets
-    bucketed_coord = np.floor((coord - min_coord) / thresh)
-    return bucketed_coord
-
-
-def bucket_discrete(coord, possible_values):
-    # possible values is a list of all values a coord can take on
-    inds = range(len(possible_values))
-    hash_table = dict(zip(possible_values, inds))
-    return hash_table[coord]
 
 
 class Cutout(object):

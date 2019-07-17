@@ -1,0 +1,4 @@
+gym[atari]
+matplotlib
+wandb
+opencv-python
