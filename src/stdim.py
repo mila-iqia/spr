@@ -54,10 +54,8 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                 # Get one sample from this episode
                 t, t_hat = 0, 0
                 t, t_hat = np.random.randint(0, len(episode)), np.random.randint(0, len(episode))
-                x_t.append(episode[t])
-
-                x_tprev.append(episode[t - 1])
-                ts.append([t])
+                x_t.append(episode[t][0])
+                x_tprev.append(episode[t - 1][0])
             yield torch.stack(x_t).to(self.device) / 255., torch.stack(x_tprev).to(self.device) / 255.
 
     def do_one_epoch(self, epoch, episodes):
