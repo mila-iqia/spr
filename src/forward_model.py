@@ -18,8 +18,8 @@ class MLP(nn.Module):
         return self.network(x, action)
 
 
-class ForwardModel(object):
-    def __int__(self, args, encoder, device):
+class ForwardModel():
+    def __init__(self, args, encoder, device):
         self.args = args
         self.device = device
         self.encoder = encoder

@@ -13,6 +13,8 @@ from a2c_ppo_acktr.envs import make_vec_envs
 from a2c_ppo_acktr.utils import get_vec_normalize
 from collections import defaultdict
 
+train_encoder_methods = ["infonce-stdim"]
+
 
 def get_argparser():
     parser = argparse.ArgumentParser()
@@ -26,6 +28,9 @@ def get_argparser():
                         help='Number of steps to pretrain representations (default: 100000)')
     parser.add_argument('--num-processes', type=int, default=8,
                         help='Number of parallel environments to collect samples from (default: 8)')
+    parser.add_argument('--method', type=str, default='infonce-stdim',
+                        choices=train_encoder_methods,
+                        help='Method to use for training representations (default: infonce-stdim)')
 
     parser.add_argument('--lr', type=float, default=3e-4,
                         help='Learning Rate foe learning representations (default: 5e-4)')
@@ -42,32 +47,14 @@ def get_argparser():
     parser.add_argument('--feature-size', type=int, default=256,
                         help='Size of features')
     parser.add_argument("--patience", type=int, default=15)
+    parser.add_argument("--color", action='store_true', default=False)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
     parser.add_argument("--wandb-proj", type=str, default="awm")
     parser.add_argument("--num_rew_evals", type=int, default=10)
 
-    # CPC-specific arguments
-    parser.add_argument('--sequence_length', type=int, default=100,
-                        help='Sequence length.')
-    parser.add_argument('--steps_start', type=int, default=0,
-                        help='Number of immediate future steps to ignore.')
-    parser.add_argument('--steps_end', type=int, default=99,
-                        help='Number of future steps to predict.')
-    parser.add_argument('--steps_step', type=int, default=4,
-                        help='Skip every these many frames.')
-    parser.add_argument('--gru_size', type=int, default=256,
-                        help='Hidden size of the GRU layers.')
-    parser.add_argument('--gru_layers', type=int, default=2,
-                        help='Number of GRU layers.')
     parser.add_argument("--collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
                         default="random_agent")
 
-    # probe arguments
-    parser.add_argument("--weights-path", type=str, default="None")
-    parser.add_argument("--train-encoder", action='store_true', default=True)
-    parser.add_argument('--probe-lr', type=float, default=5e-2)
-    parser.add_argument("--probe-collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
-                        default="random_agent")
     parser.add_argument('--num-runs', type=int, default=1)
     return parser
 
