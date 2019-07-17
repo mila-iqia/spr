@@ -105,4 +105,5 @@ venv.bak/
 
 .idea
 *.pt
-
+tmp/
+wandb/
