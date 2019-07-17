@@ -130,4 +130,4 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                                                                      prefix.capitalize()))
         self.wandb.log({prefix + '_loss': epoch_loss,
                         prefix + '_loss1': epoch_loss1,
-                        prefix + '_loss2': epoch_loss2}, step=epoch_idx, commit=False)
+                        prefix + '_loss2': epoch_loss2}, step=epoch_idx)

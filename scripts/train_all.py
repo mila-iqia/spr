@@ -13,7 +13,6 @@ from src.episodes import get_random_agent_episodes
 
 def train_policy(args):
     device = torch.device("cuda:" + str(args.cuda_id) if torch.cuda.is_available() else "cpu")
-
     tr_eps, val_eps = get_random_agent_episodes(args, device, args.pretraining_steps)
     encoder = train_encoder(args, tr_eps, val_eps)
     forward_model = train_model(args, encoder, tr_eps, val_eps)
@@ -23,7 +22,7 @@ def train_policy(args):
 def train_encoder(args, tr_eps, val_eps):
     device = torch.device("cuda:" + str(args.cuda_id) if torch.cuda.is_available() else "cpu")
 
-    observation_shape = tr_eps[0][0].shape
+    observation_shape = tr_eps[0][0][0].shape
     if args.encoder_type == "Nature":
         encoder = NatureCNN(observation_shape[0], args)
     elif args.encoder_type == "Impala":
