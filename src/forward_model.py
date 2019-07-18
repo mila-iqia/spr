@@ -15,7 +15,7 @@ class MLP(nn.Module):
         )
 
     def forward(self, x, action):
-        return self.network(x, action)
+        return self.network(torch.cat((x, action), dim=-1))
 
 
 class ForwardModel():
@@ -43,13 +43,13 @@ class ForwardModel():
                 x_t.append(episode[t][0])
                 a_t.append(episode[t][1])
                 x_t_next.append(episode[t + 1][0])
-            yield torch.stack(x_t).to(self.device) / 255., torch.stack(x_t_next).to(self.device) / 255., torch.stack(a_t)
+            yield torch.stack(x_t).to(self.device) / 255., torch.stack(x_t_next).to(self.device) / 255., torch.stack(a_t).float()
 
     def do_one_epoch(self, epoch, episodes):
         data_generator = self.generate_batch(episodes)
         epoch_loss, steps = 0., 0
         for x_t, x_t_next, a_t in data_generator:
-            with torch.no_grad:
+            with torch.no_grad():
                 f_t, f_t_next = self.encoder(x_t), self.encoder(x_t_next)
             predictions = self.model(f_t, a_t)
             loss = F.mse_loss(predictions, f_t_next - f_t) # predict |s_{t+1} - s_t| instead of s_{t+1} directly
@@ -57,7 +57,7 @@ class ForwardModel():
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            epoch_loss += loss.detach.item()
+            epoch_loss += loss.detach().item()
             steps += 1
         self.log_metrics(epoch, epoch_loss / steps)
 
