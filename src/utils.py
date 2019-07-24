@@ -55,6 +55,9 @@ def get_argparser():
     parser.add_argument("--collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
                         default="random_agent")
 
+    parser.add_argument('--forward-hidden-size', type=int, default=256,
+                        help='Hidden Size for the Forward Model MLP')
+
     parser.add_argument('--num-runs', type=int, default=1)
     return parser
 
