@@ -25,9 +25,9 @@ def get_random_agent_episodes(args, device, steps):
                 episode_rewards.append(info['episode']['r'])
 
             if done[i] != 1:
-                episodes[i][-1].append((obs[i].clone(), action[i]))
+                episodes[i][-1].append((obs[i].clone(), action[i], reward[i].clone()))
             else:
-                episodes[i].append([(obs[i].clone(), action[i].clone())])
+                episodes[i].append([(obs[i].clone(), action[i].clone(), reward[i].clone())])
 
     # Convert to 2d list from 3d list
     episodes = list(chain.from_iterable(episodes))
