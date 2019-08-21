@@ -7,7 +7,7 @@ from collections import deque
 from aari.envs import make_vec_envs
 
 
-def get_random_agent_episodes(args, device, steps):
+def get_random_agent_episodes(args, device, steps, valid=False):
     envs = make_vec_envs(args, args.num_processes)
     obs = envs.reset()
     episode_rewards = deque(maxlen=10)
@@ -25,13 +25,16 @@ def get_random_agent_episodes(args, device, steps):
                 episode_rewards.append(info['episode']['r'])
 
             if done[i] != 1:
-                episodes[i][-1].append((obs[i].clone(), action[i], reward[i].clone()))
+                episodes[i][-1].append((obs[i].clone(), action[i], reward[i].clone(), done))
             else:
-                episodes[i].append([(obs[i].clone(), action[i].clone(), reward[i].clone())])
+                episodes[i].append([(obs[i].clone(), action[i].clone(), reward[i].clone()), done])
 
     # Convert to 2d list from 3d list
     episodes = list(chain.from_iterable(episodes))
     envs.close()
+
+    if not valid:
+        return episodes
 
     inds = np.arange(len(episodes))
     rng = np.random.RandomState(seed=args.seed)
@@ -40,3 +43,8 @@ def get_random_agent_episodes(args, device, steps):
     tr_eps, val_eps = episodes[:val_split_ind], episodes[val_split_ind:]
 
     return tr_eps, val_eps
+
+
+def sample_state(real_transitions, batch_size=1):
+    ep_idx = np.random.randint(0, len(real_transitions))
+    return np.random.choice(real_transitions[ep_idx])
