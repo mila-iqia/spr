@@ -82,7 +82,8 @@ class ForwardModel():
             self.do_one_epoch(e, train_eps)
 
     def predict(self, z, a):
-        pass
+        hidden = self.hidden(z, a)
+        return self.sd_predictor(hidden), self.reward_predictor(hidden)
 
     def log_metrics(self, epoch_idx, epoch_loss, sd_loss, reward_loss):
         print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {}".
