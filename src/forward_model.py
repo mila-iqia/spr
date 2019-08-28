@@ -61,12 +61,13 @@ class ForwardModel():
             s_t = s_t.view(self.args.batch_size * 4, s_t.shape[-2], s_t.shape[-1])
             with torch.no_grad():
                 f_t, f_t_next = self.encoder(s_t), self.encoder(x_t_next)
-                f_t = f_t.view(self.args.batch_size, -1)
+                f_t = f_t.view(self.args.batch_size, 4, -1)
+            f_t_last = f_t[:, -1, :]
             hiddens = self.hidden(f_t, a_t)
             sd_predictions = self.sd_predictor(hiddens)
             reward_predictions = self.reward_predictor(hiddens)
             # predict |s_{t+1} - s_t| instead of s_{t+1} directly
-            sd_loss = F.mse_loss(sd_predictions, f_t_next - f_t)
+            sd_loss = F.mse_loss(sd_predictions, f_t_last - f_t)
             reward_loss = F.mse_loss(reward_predictions, r_t)
 
             loss = sd_loss + reward_loss
