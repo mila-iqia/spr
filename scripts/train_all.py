@@ -10,21 +10,21 @@ from agent import Agent
 from main import dqn
 from memory import ReplayMemory
 from src.encoders import NatureCNN, ImpalaCNN
-from src.envs import make_vec_envs
+from src.envs import make_vec_envs, Env
 from src.forward_model import ForwardModel
 from src.stdim import InfoNCESpatioTemporalTrainer
 from src.utils import get_argparser
-from src.episodes import get_random_agent_episodes, sample_state
+from src.episodes import get_random_agent_episodes, sample_state, Transition
 
 
 def train_policy(args):
     device = torch.device("cuda:" + str(args.cuda_id) if torch.cuda.is_available() else "cpu")
-    env = make_vec_envs(args, 1)
+    env = Env(args)
+    env.train()
 
-    # get intial exploration data
-    real_transitions = get_random_agent_episodes(args, device, args.inital_exploration_steps, valid=False)
+    # get initial exploration data
+    real_transitions = get_random_agent_episodes(args)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
-    real_transitions.append([])
     j, rollout_length = 0, args.rollout_length
     dqn = Agent(args, args.env)
 
@@ -34,14 +34,18 @@ def train_policy(args):
         encoder = train_encoder(args, real_transitions)
         forward_model = train_model(args, encoder, real_transitions)
 
+        timestep, done = 0, True
         for e in range(args.env_steps_per_epoch):
-            # Take action in env acc. to current policy, and add to real_transitions
-            action = dqn.act(state)
-            next_state, reward, done, info = env.step(action)
             if done:
-                real_transitions[-1].append((next_state.clone(), action, reward.clone(), done))
-            else:
-                real_transitions.append([(next_state.clone(), action.clone(), reward.clone()), done])
+                state, done = env.reset(), False
+            state = state[-1].mul(255).to(dtype=torch.uint8,
+                                          device=torch.device('cpu')) # Only store last frame and discretise to save memory
+            # Take action in env acc. to current policy, and add to real_transitions
+            action = dqn.act(encoder(state))
+            next_state, reward, done = env.step(action)
+            real_transitions.append(Transition(timestep, state, action, reward, not done))
+            state = next_state
+            timestep = 0 if done else timestep + 1
 
             for m in range(args.num_model_rollouts // args.rollout_batch_size):
                 # sample a state uniformly from real_transitions
@@ -51,7 +55,7 @@ def train_policy(args):
                 # Add imagined data to model_transitions
                 for k in range(rollout_length):
                     action = dqn.act(s)
-                    next_state, reward = forward_model.predict(s, action)
+                    next_obs, reward = forward_model.predict(s, action)
                     # figure out what to do about terminal state here
                     model_transitions.append(state, action, reward, False)
 
@@ -61,10 +65,10 @@ def train_policy(args):
         j += 1
 
 
-def train_encoder(args, tr_eps, val_eps=None):
+def train_encoder(args, transitions, val_eps=None):
     device = torch.device("cuda:" + str(args.cuda_id) if torch.cuda.is_available() else "cpu")
 
-    observation_shape = tr_eps[0][0][0].shape
+    observation_shape = transitions[0].state.shape
     if args.encoder_type == "Nature":
         encoder = NatureCNN(observation_shape[0], args)
     elif args.encoder_type == "Impala":
@@ -80,7 +84,7 @@ def train_encoder(args, tr_eps, val_eps=None):
     else:
         assert False, "method {} has no trainer".format(args.method)
 
-    trainer.train(tr_eps, val_eps)
+    trainer.train(transitions, val_eps)
     return encoder
 
 

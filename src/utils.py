@@ -20,7 +20,7 @@ def get_argparser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env-name', default='MontezumaRevengeNoFrameskip-v4',
                         help='environment to train on (default: MontezumaRevengeNoFrameskip-v4)')
-    parser.add_argument('--num-frame-stack', type=int, default=1,
+    parser.add_argument('--num-frame-stack', type=int, default=4,
                         help='Number of frames to stack for a state')
     parser.add_argument('--no-downsample', action='store_true', default=True,
                         help='Whether to use a linear classifier')

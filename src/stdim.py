@@ -23,7 +23,6 @@ class Classifier(nn.Module):
 
 
 class InfoNCESpatioTemporalTrainer(Trainer):
-    # TODO: Make it work for all modes, right now only it defaults to pcl.
     def __init__(self, encoder, config, device=torch.device('cpu'), wandb=None):
         super().__init__(encoder, wandb, device)
         self.config = config
@@ -38,24 +37,21 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                                           lr=config['lr'], eps=1e-5)
         self.early_stopper = EarlyStopping(patience=self.patience, verbose=False, wandb=self.wandb, name="encoder")
 
-    def generate_batch(self, episodes):
-        total_steps = sum([len(e) for e in episodes])
-        print('Total Steps: {}'.format(total_steps))
+    def generate_batch(self, transitions):
+        total_steps = len(transitions)
+        print('Total Steps: {}'.format(len(transitions)))
         # Episode sampler
         # Sample `num_samples` episodes then batchify them with `self.batch_size` episodes per batch
-        sampler = BatchSampler(RandomSampler(range(len(episodes)),
-                                             replacement=True, num_samples=total_steps),
-                               self.batch_size, drop_last=True)
-        for indices in sampler:
-            episodes_batch = [episodes[x] for x in indices]
-            x_t, x_tprev, x_that, ts, thats = [], [], [], [], []
-            for episode in episodes_batch:
+        for idx in range(total_steps // self.batch_size):
+            indices = np.random.randint(0, total_steps, size=self.batch_size)
+            x_t, x_tnext = [], []
+            for t in indices:
                 # Get one sample from this episode
-                t, t_hat = 0, 0
-                t, t_hat = np.random.randint(0, len(episode)), np.random.randint(0, len(episode))
-                x_t.append(episode[t][0])
-                x_tprev.append(episode[t - 1][0])
-            yield torch.stack(x_t).to(self.device) / 255., torch.stack(x_tprev).to(self.device) / 255.
+                while transitions[t].nonterminal is False:
+                    t = np.random.randint(0, total_steps)
+                x_t.append(transitions[t].state)
+                x_tnext.append(transitions[t+1].state)
+            yield torch.stack(x_t).to(self.device) / 255., torch.stack(x_tnext).to(self.device) / 255.
 
     def do_one_epoch(self, epoch, episodes):
         mode = "train" if self.encoder.training and self.classifier1.training else "val"
@@ -63,37 +59,24 @@ class InfoNCESpatioTemporalTrainer(Trainer):
         accuracy1, accuracy2 = 0., 0.
         epoch_loss1, epoch_loss2 = 0., 0.
         data_generator = self.generate_batch(episodes)
-        for x_t, x_tprev in data_generator:
-            f_t_maps, f_t_prev_maps = self.encoder(x_t, fmaps=True), self.encoder(x_tprev, fmaps=True)
+        for x_t, x_tnext in data_generator:
+            f_t_maps, f_t_next_maps = self.encoder(x_t, fmaps=True), self.encoder(x_tnext, fmaps=True)
 
             # Loss 1: Global at time t, f5 patches at time t-1
-            f_t, f_t_prev = f_t_maps['out'], f_t_prev_maps['f5']
-            sy = f_t_prev.size(1)
-            sx = f_t_prev.size(2)
+            f_t, f_t_next = f_t_maps['out'], f_t_next_maps['f5']
+            sy = f_t_next.size(1)
+            sx = f_t_next.size(2)
 
             N = f_t.size(0)
             loss1 = 0.
             for y in range(sy):
                 for x in range(sx):
                     predictions = self.classifier1(f_t)
-                    positive = f_t_prev[:, y, x, :]
+                    positive = f_t_next[:, y, x, :]
                     logits = torch.matmul(predictions, positive.t())
                     step_loss = F.cross_entropy(logits, torch.arange(N).to(self.device))
                     loss1 += step_loss
-            loss1 = loss1 / (sx * sy)
-
-            # Loss 2: f5 patches at time t, with f5 patches at time t-1
-            f_t = f_t_maps['f5']
-            loss2 = 0.
-            for y in range(sy):
-                for x in range(sx):
-                    predictions = self.classifier2(f_t[:, y, x, :])
-                    positive = f_t_prev[:, y, x, :]
-                    logits = torch.matmul(predictions, positive.t())
-                    step_loss = F.cross_entropy(logits, torch.arange(N).to(self.device))
-                    loss2 += step_loss
-            loss2 = loss2 / (sx * sy)
-            loss = loss1 + loss2
+            loss = loss1 / (sx * sy)
 
             if mode == "train":
                 self.optimizer.zero_grad()
@@ -102,7 +85,6 @@ class InfoNCESpatioTemporalTrainer(Trainer):
 
             epoch_loss += loss.detach().item()
             epoch_loss1 += loss1.detach().item()
-            epoch_loss2 += loss2.detach().item()
             #preds1 = torch.sigmoid(self.classifier1(x1, x2).squeeze())
             #accuracy1 += calculate_accuracy(preds1, target)
             #preds2 = torch.sigmoid(self.classifier2(x1_p, x2_p).squeeze())
