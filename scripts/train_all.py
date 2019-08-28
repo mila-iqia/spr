@@ -49,15 +49,16 @@ def train_policy(args):
 
             for m in range(args.num_model_rollouts // args.rollout_batch_size):
                 # sample a state uniformly from real_transitions
-                s = sample_state(real_transitions)
+                s = sample_state(real_transitions, encoder)
 
                 # Perform k-step model rollout starting from s using current policy
                 # Add imagined data to model_transitions
                 for k in range(rollout_length):
                     action = dqn.act(s)
-                    next_obs, reward = forward_model.predict(s, action)
+                    next_z, reward = forward_model.predict(s, action)
                     # figure out what to do about terminal state here
-                    model_transitions.append(state, action, reward, False)
+                    model_transitions.append(s, action, reward, False)
+                    s.append(next_z)
 
             # Update policy parameters on model data
             for g in range(args.updates_per_epoch):
@@ -88,10 +89,10 @@ def train_encoder(args, transitions, val_eps=None):
     return encoder
 
 
-def train_model(args, encoder, tr_eps, val_eps=None):
+def train_model(args, encoder, real_transitions, val_eps=None):
     device = torch.device("cuda:" + str(args.cuda_id) if torch.cuda.is_available() else "cpu")
     forward_model = ForwardModel(args, encoder, device)
-    forward_model.train(tr_eps)
+    forward_model.train(real_transitions)
     return forward_model
 
 

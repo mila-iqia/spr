@@ -30,7 +30,7 @@ def get_random_agent_episodes(args):
     return transitions
 
 
-def sample_state(real_transitions):
+def sample_state(real_transitions, encoder):
     history = 4
     transition = np.array([None] * history)
     idx = np.random.randint(0, len(real_transitions))
@@ -41,4 +41,27 @@ def sample_state(real_transitions):
             transition[t] = blank_trans  # If future frame has timestep 0
         else:
             transition[t] = real_transitions[idx - history + 1 + t]
+    return LatentState(encoder(transition))
+
+
+class LatentState():
+    def __init__(self, latents=None):
+        if not latents:
+            self.latents = deque(maxlen=4)
+        else:
+            self.latents = latents
+
+    def append(self, latent):
+        self.latents.append(latent)
+
+
+def get_framestacked_transition(idx, transitions):
+    history = 4
+    transition = np.array([None] * 4)
+    transition[history - 1] = transitions[idx]
+    for t in range(4 - 2, -1, -1):  # e.g. 2 1 0
+      if transition[t + 1].timestep == 0:
+        transition[t] = blank_trans  # If future frame has timestep 0
+      else:
+        transition[t] = transitions[idx - history + 1 + t]
     return transition

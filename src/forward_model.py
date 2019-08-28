@@ -5,6 +5,8 @@ import wandb
 from torch.utils.data import RandomSampler, BatchSampler
 import torch.nn.functional as F
 
+from src.episodes import get_framestacked_transition
+
 
 class MLP(nn.Module):
     def __init__(self, input_size=256, action_size=1, hidden_size=256):
@@ -32,33 +34,34 @@ class ForwardModel():
         self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) + list(self.sd_predictor.parameters()) +
                                           self.reward_predictor.parameters())
 
-    def generate_batch(self, episodes):
-        total_steps = sum([len(e) for e in episodes])
+    def generate_batch(self, transitions):
+        total_steps = len(transitions)
         print('Total Steps: {}'.format(total_steps))
-        # Episode sampler
-        # Sample `num_samples` episodes then batchify them with `self.batch_size` episodes per batch
-        sampler = BatchSampler(RandomSampler(range(len(episodes)),
-                                             replacement=True, num_samples=total_steps),
-                               self.args.batch_size, drop_last=True)
-        for indices in sampler:
-            episodes_batch = [episodes[x] for x in indices]
-            x_t, x_t_next, a_t, r_t = [], [], [], []
-            for episode in episodes_batch:
+        for idx in range(total_steps // self.args.batch_size):
+            indices = np.random.randint(0, total_steps, size=self.args.batch_size)
+            s_t, x_t_next, a_t, r_t = [], [], [], []
+            for t in indices:
                 # Get one sample from this episode
-                t = np.random.randint(0, len(episode) - 1)
-                x_t.append(episode[t][0])
-                a_t.append(episode[t][1])
-                r_t.append(episode[t][2])
-                x_t_next.append(episode[t + 1][0])
-            yield torch.stack(x_t).to(self.device) / 255., torch.stack(x_t_next).to(self.device) / 255., \
+                while transitions[t].nonterminal is False:
+                    t = np.random.randint(0, total_steps)
+                # s_t = Framestacked state at timestep t
+                framestacked_transition = get_framestacked_transition(t, transitions)
+                s_t = torch.stack([trans.state for trans in framestacked_transition])
+                x_t_next.append(transitions[t + 1].state)
+                a_t.append(framestacked_transition[-1].action)
+                r_t.append(framestacked_transition[-1].reward)
+
+            yield torch.stack(s_t).to(self.device) / 255., torch.stack(x_t_next).to(self.device) / 255., \
                   torch.stack(a_t).float(), torch.stack(r_t)
 
     def do_one_epoch(self, epoch, episodes):
         data_generator = self.generate_batch(episodes)
         epoch_loss, epoch_sd_loss, epoch_reward_loss, steps = 0., 0., 0., 0
-        for x_t, x_t_next, a_t, r_t in data_generator:
+        for s_t, x_t_next, a_t, r_t in data_generator:
+            s_t = s_t.view(self.args.batch_size * 4, s_t.shape[-2], s_t.shape[-1])
             with torch.no_grad():
-                f_t, f_t_next = self.encoder(x_t), self.encoder(x_t_next)
+                f_t, f_t_next = self.encoder(s_t), self.encoder(x_t_next)
+                f_t = f_t.view(self.args.batch_size, -1)
             hiddens = self.hidden(f_t, a_t)
             sd_predictions = self.sd_predictor(hiddens)
             reward_predictions = self.reward_predictor(hiddens)
@@ -77,9 +80,9 @@ class ForwardModel():
             steps += 1
         self.log_metrics(epoch, epoch_loss / steps, epoch_reward_loss / steps, epoch_reward_loss / steps)
 
-    def train(self, train_eps):
+    def train(self, real_transitions):
         for e in range(self.args.epochs):
-            self.do_one_epoch(e, train_eps)
+            self.do_one_epoch(e, real_transitions)
 
     def predict(self, z, a):
         hidden = self.hidden(z, a)
