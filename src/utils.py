@@ -3,6 +3,7 @@ import copy
 import os
 import subprocess
 
+import atari_py
 import torch
 from torchvision.utils import make_grid
 import torch.nn.functional as F
@@ -18,11 +19,11 @@ train_encoder_methods = ["infonce-stdim"]
 
 def get_argparser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env-name', default='MontezumaRevengeNoFrameskip-v4',
+    parser.add_argument('--env-name', default='breakout',
                         help='environment to train on (default: MontezumaRevengeNoFrameskip-v4)')
     parser.add_argument('--num-frame-stack', type=int, default=4,
                         help='Number of frames to stack for a state')
-    parser.add_argument('--no-downsample', action='store_true', default=True,
+    parser.add_argument('--no-downsample', action='store_true', default=False,
                         help='Whether to use a linear classifier')
     parser.add_argument('--pretraining-steps', type=int, default=100000,
                         help='Number of steps to pretrain representations (default: 100000)')
@@ -34,8 +35,6 @@ def get_argparser():
 
     parser.add_argument('--lr', type=float, default=3e-4,
                         help='Learning Rate foe learning representations (default: 5e-4)')
-    parser.add_argument('--batch-size', type=int, default=64,
-                        help='Mini-Batch Size (default: 64)')
     parser.add_argument('--epochs', type=int, default=100,
                         help='Number of epochs for  (default: 100)')
     parser.add_argument('--cuda-id', type=int, default=0,
@@ -58,7 +57,62 @@ def get_argparser():
     parser.add_argument('--forward-hidden-size', type=int, default=256,
                         help='Hidden Size for the Forward Model MLP')
 
-    parser.add_argument('--num-runs', type=int, default=1)
+    # MBPO Args
+    parser.add_argument("--total_steps", type=int, default=1000)
+    parser.add_argument('--fake-buffer-capacity', type=int, default=int(1e7),
+                        help='Size of the replay buffer for rollout transitions')
+    parser.add_argument("--rollout_length", type=int, default=2)
+    parser.add_argument("--num_model_rollouts", type=int, default=400)
+    parser.add_argument("--env_steps_per_epoch", type=int, default=10)
+    parser.add_argument("--updates_per_step", type=int, default=20)
+    parser.add_argument("--initial_exp_steps", type=int, default=5000)
+
+    parser.add_argument('--id', type=str, default='default', help='Experiment ID')
+    parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
+    parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')
+    parser.add_argument('--T-max', type=int, default=int(50e6), metavar='STEPS',
+                        help='Number of training steps (4x number of frames)')
+    parser.add_argument('--max-episode-length', type=int, default=int(108e3), metavar='LENGTH',
+                        help='Max episode length in game frames (0 to disable)')
+    parser.add_argument('--history-length', type=int, default=4, metavar='T',
+                        help='Number of consecutive states processed')
+    parser.add_argument('--architecture', type=str, default='canonical', choices=['canonical', 'data-efficient'],
+                        metavar='ARCH', help='Network architecture')
+    parser.add_argument('--hidden-size', type=int, default=256, metavar='SIZE', help='Network hidden size')
+    parser.add_argument('--noisy-std', type=float, default=0.1, metavar='σ',
+                        help='Initial standard deviation of noisy linear layers')
+    parser.add_argument('--atoms', type=int, default=51, metavar='C', help='Discretised size of value distribution')
+    parser.add_argument('--V-min', type=float, default=-10, metavar='V', help='Minimum of value distribution support')
+    parser.add_argument('--V-max', type=float, default=10, metavar='V', help='Maximum of value distribution support')
+    parser.add_argument('--model', type=str, metavar='PARAMS', help='Pretrained model (state dict)')
+    parser.add_argument('--memory-capacity', type=int, default=int(1e6), metavar='CAPACITY',
+                        help='Experience replay memory capacity')
+    parser.add_argument('--replay-frequency', type=int, default=4, metavar='k',
+                        help='Frequency of sampling from memory')
+    parser.add_argument('--priority-exponent', type=float, default=0.5, metavar='ω',
+                        help='Prioritised experience replay exponent (originally denoted α)')
+    parser.add_argument('--priority-weight', type=float, default=0.4, metavar='β',
+                        help='Initial prioritised experience replay importance sampling weight')
+    parser.add_argument('--multi-step', type=int, default=3, metavar='n', help='Number of steps for multi-step return')
+    parser.add_argument('--discount', type=float, default=0.99, metavar='γ', help='Discount factor')
+    parser.add_argument('--target-update', type=int, default=int(8e3), metavar='τ',
+                        help='Number of steps after which to update target network')
+    parser.add_argument('--reward-clip', type=int, default=1, metavar='VALUE', help='Reward clipping (0 to disable)')
+    parser.add_argument('--learning-rate', type=float, default=0.0000625, metavar='η', help='Learning rate')
+    parser.add_argument('--adam-eps', type=float, default=1.5e-4, metavar='ε', help='Adam epsilon')
+    parser.add_argument('--batch-size', type=int, default=32, metavar='SIZE', help='Batch size')
+    parser.add_argument('--learn-start', type=int, default=int(20e3), metavar='STEPS',
+                        help='Number of steps before starting training')
+    parser.add_argument('--evaluate', action='store_true', help='Evaluate only')
+    parser.add_argument('--evaluation-interval', type=int, default=100000, metavar='STEPS',
+                        help='Number of training steps between evaluations')
+    parser.add_argument('--evaluation-episodes', type=int, default=10, metavar='N',
+                        help='Number of evaluation episodes to average over')
+    parser.add_argument('--evaluation-size', type=int, default=500, metavar='N',
+                        help='Number of transitions to use for validating Q')
+    parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
+    parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
+
     return parser
 
 

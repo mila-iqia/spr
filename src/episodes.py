@@ -31,22 +31,22 @@ def get_random_agent_episodes(args):
 
 
 def sample_state(real_transitions, encoder):
-    history = 4
-    transition = np.array([None] * history)
     idx = np.random.randint(0, len(real_transitions))
-    transition[3] = real_transitions[idx]
-
-    for t in range(4 - 2, -1, -1):  # e.g. 2 1 0
-        if transition[t + 1].timestep == 0:
-            transition[t] = blank_trans  # If future frame has timestep 0
-        else:
-            transition[t] = real_transitions[idx - history + 1 + t]
-    return LatentState(encoder(transition))
+    transition = get_framestacked_transition(idx, real_transitions)
+    # trans_deque = deque(maxlen=4)
+    # for trans in transition:
+    #     trans_deque.append(trans)
+    with torch.no_grad():
+        z = encoder(torch.stack([trans.state.float() / 255. for trans in transition]))
+    state_deque = deque(maxlen=4)
+    for s in z.unbind():
+        state_deque.append(s)
+    return state_deque
 
 
 class LatentState():
     def __init__(self, latents=None):
-        if not latents:
+        if latents is not None:
             self.latents = deque(maxlen=4)
         else:
             self.latents = latents
@@ -57,7 +57,7 @@ class LatentState():
 
 def get_framestacked_transition(idx, transitions):
     history = 4
-    transition = np.array([None] * 4)
+    transition = np.array([None] * history)
     transition[history - 1] = transitions[idx]
     for t in range(4 - 2, -1, -1):  # e.g. 2 1 0
       if transition[t + 1].timestep == 0:

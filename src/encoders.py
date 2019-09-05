@@ -92,49 +92,59 @@ class NatureCNN(nn.Module):
                                nn.init.calculate_gain('relu'))
         self.flatten = Flatten()
 
-        if self.downsample:
-            self.final_conv_size = 32 * 7 * 7
-            self.final_conv_shape = (32, 7, 7)
-            self.main = nn.Sequential(
-                init_(nn.Conv2d(input_channels, 32, 8, stride=4)),
-                nn.ReLU(),
-                init_(nn.Conv2d(32, 64, 4, stride=2)),
-                nn.ReLU(),
-                init_(nn.Conv2d(64, 32, 3, stride=1)),
-                nn.ReLU(),
-                Flatten(),
-                init_(nn.Linear(self.final_conv_size, self.feature_size)),
-                #nn.ReLU()
-            )
-        else:
-            self.final_conv_size = 64 * 9 * 6
-            self.final_conv_shape = (64, 9, 6)
-            self.main = nn.Sequential(
-                init_(nn.Conv2d(input_channels, 32, 8, stride=4)),
-                nn.ReLU(),
-                init_(nn.Conv2d(32, 64, 4, stride=2)),
-                nn.ReLU(),
-                init_(nn.Conv2d(64, 128, 4, stride=2)),
-                nn.ReLU(),
-                init_(nn.Conv2d(128, 64, 3, stride=1)),
-                nn.ReLU(),
-                Flatten(),
-                init_(nn.Linear(self.final_conv_size, self.feature_size)),
-                #nn.ReLU()
-            )
+        self.final_conv_size = 64 * 3 * 3
+        self.final_conv_shape = None
+
+        self.main = nn.Sequential(
+            nn.Conv2d(input_channels, 32, 5, stride=5, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 5, stride=5, padding=0),
+            nn.ReLU(),
+            Flatten(),
+            nn.Linear(self.final_conv_size, args.feature_size)
+        )
+
+        # if self.downsample:
+        #     self.final_conv_size = 32 * 7 * 7
+        #     self.final_conv_shape = (32, 7, 7)
+        #     self.main = nn.Sequential(
+        #         init_(nn.Conv2d(input_channels, 32, 8, stride=4)),
+        #         nn.ReLU(),
+        #         init_(nn.Conv2d(32, 64, 4, stride=2)),
+        #         nn.ReLU(),
+        #         init_(nn.Conv2d(64, 32, 3, stride=1)),
+        #         nn.ReLU(),
+        #         Flatten(),
+        #         init_(nn.Linear(self.final_conv_size, self.feature_size)),
+        #         #nn.ReLU()
+        #     )
+        # else:
+        #     self.final_conv_size = 64 * 9 * 6
+        #     self.final_conv_shape = (64, 9, 6)
+        #     self.main = nn.Sequential(
+        #         init_(nn.Conv2d(input_channels, 32, 8, stride=4)),
+        #         nn.ReLU(),
+        #         init_(nn.Conv2d(32, 64, 4, stride=2)),
+        #         nn.ReLU(),
+        #         init_(nn.Conv2d(64, 128, 4, stride=2)),
+        #         nn.ReLU(),
+        #         init_(nn.Conv2d(128, 64, 3, stride=1)),
+        #         nn.ReLU(),
+        #         Flatten(),
+        #         init_(nn.Linear(self.final_conv_size, self.feature_size)),
+        #         #nn.ReLU()
+        #     )
         self.train()
 
     def forward(self, inputs, fmaps=False):
-        f5 = self.main[:6](inputs)
-        f7 = self.main[6:8](f5)
-        out = self.main[8:](f7)
+        f5 = self.main[:4](inputs)
+        out = self.main[4:](f5)
         if self.end_with_relu:
             assert self.args.method != "vae", "can't end with relu and use vae!"
             out = F.relu(out)
         if fmaps:
             return {
                 'f5': f5.permute(0, 2, 3, 1),
-                'f7': f7.permute(0, 2, 3, 1),
                 'out': out
             }
         return out
