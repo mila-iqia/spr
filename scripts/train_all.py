@@ -1,3 +1,4 @@
+from collections import deque
 from itertools import chain
 
 import torch
@@ -6,8 +7,7 @@ import numpy as np
 
 import wandb
 
-from agent import Agent
-from main import dqn
+from src.agent import Agent
 from memory import ReplayMemory
 from src.encoders import NatureCNN, ImpalaCNN
 from src.envs import make_vec_envs, Env
@@ -26,7 +26,7 @@ def train_policy(args):
     real_transitions = get_random_agent_episodes(args)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
     j, rollout_length = 0, args.rollout_length
-    dqn = Agent(args, args.env)
+    dqn = Agent(args, env)
 
     state, done = env.reset(), False
     while j * args.env_steps_per_epoch < args.total_steps:
@@ -38,30 +38,33 @@ def train_policy(args):
         for e in range(args.env_steps_per_epoch):
             if done:
                 state, done = env.reset(), False
-            state = state[-1].mul(255).to(dtype=torch.uint8,
-                                          device=torch.device('cpu')) # Only store last frame and discretise to save memory
             # Take action in env acc. to current policy, and add to real_transitions
-            action = dqn.act(encoder(state))
+            real_z = encoder(state).view(-1)
+            action = dqn.act(real_z)
             next_state, reward, done = env.step(action)
+            state = state[-1].mul(255).to(dtype=torch.uint8, device=torch.device('cpu'))
             real_transitions.append(Transition(timestep, state, action, reward, not done))
             state = next_state
             timestep = 0 if done else timestep + 1
 
-            for m in range(args.num_model_rollouts // args.rollout_batch_size):
+            for m in range(args.num_model_rollouts):
                 # sample a state uniformly from real_transitions
-                s = sample_state(real_transitions, encoder)
-
+                state_deque = sample_state(real_transitions, encoder)
                 # Perform k-step model rollout starting from s using current policy
                 # Add imagined data to model_transitions
                 for k in range(rollout_length):
-                    action = dqn.act(s)
-                    next_z, reward = forward_model.predict(s, action)
+                    z = torch.stack(list(state_deque))
+                    z = z.view(-1)
+                    action = dqn.act(z)
+                    with torch.no_grad():
+                        next_z, reward = forward_model.predict(z, action)
                     # figure out what to do about terminal state here
-                    model_transitions.append(s, action, reward, False)
-                    s.append(next_z)
+                    z = z.view(4, -1)
+                    model_transitions.append(z, action, reward, False)
+                    state_deque.append(next_z)
 
             # Update policy parameters on model data
-            for g in range(args.updates_per_epoch):
+            for g in range(args.updates_per_step):
                 dqn.learn(model_transitions)
         j += 1
 
@@ -100,6 +103,12 @@ if __name__ == '__main__':
     wandb.init()
     parser = get_argparser()
     args = parser.parse_args()
+    if torch.cuda.is_available() and not args.disable_cuda:
+        args.device = torch.device('cuda')
+        torch.cuda.manual_seed(np.random.randint(1, 10000))
+        torch.backends.cudnn.enabled = args.enable_cudnn
+    else:
+        args.device = torch.device('cpu')
     tags = []
     wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags)
     train_policy(args)
