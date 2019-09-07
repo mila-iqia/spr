@@ -53,11 +53,11 @@ def train_policy(args):
 
             for m in range(args.num_model_rollouts):
                 # sample a state uniformly from real_transitions
-                state_deque = sample_state(real_transitions, encoder)
+                state_deque = sample_state(real_transitions, encoder, device=device)
                 # Perform k-step model rollout starting from s using current policy
                 # Add imagined data to model_transitions
                 for k in range(rollout_length):
-                    z = torch.stack(list(state_deque)).to(device)
+                    z = torch.stack(list(state_deque))
                     z = z.view(-1)
                     action = dqn.act(z)
                     with torch.no_grad():

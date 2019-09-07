@@ -30,14 +30,14 @@ def get_random_agent_episodes(args):
     return transitions
 
 
-def sample_state(real_transitions, encoder):
+def sample_state(real_transitions, encoder, device=torch.device('cpu')):
     idx = np.random.randint(0, len(real_transitions))
     transition = get_framestacked_transition(idx, real_transitions)
     # trans_deque = deque(maxlen=4)
     # for trans in transition:
     #     trans_deque.append(trans)
     with torch.no_grad():
-        z = encoder(torch.stack([trans.state.float() / 255. for trans in transition]))
+        z = encoder(torch.stack([trans.state.float() / 255. for trans in transition]).to(device=device))
     state_deque = deque(maxlen=4)
     for s in z.unbind():
         state_deque.append(s)
