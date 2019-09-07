@@ -8,7 +8,7 @@ import os
 import wandb
 
 from src.agent import Agent
-from memory import ReplayMemory
+from src.memory import ReplayMemory
 from src.encoders import NatureCNN, ImpalaCNN
 from src.envs import make_vec_envs, Env
 from src.eval import test

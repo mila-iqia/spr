@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from collections import deque, namedtuple
 
-from memory import blank_trans
+from src.memory import blank_trans
 from src.envs import Env
 
 Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'nonterminal'))
