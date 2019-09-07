@@ -57,7 +57,7 @@ def train_policy(args):
                 # Perform k-step model rollout starting from s using current policy
                 # Add imagined data to model_transitions
                 for k in range(rollout_length):
-                    z = torch.stack(list(state_deque))
+                    z = torch.stack(list(state_deque)).to(device)
                     z = z.view(-1)
                     action = dqn.act(z)
                     with torch.no_grad():
