@@ -8,29 +8,15 @@ import torch.nn.functional as F
 from src.episodes import get_framestacked_transition
 
 
-class MLP(nn.Module):
-    def __init__(self, input_size=256, action_size=1, hidden_size=256):
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(input_size + action_size, hidden_size),
-            nn.ReLU()
-        )
-        self.state_diff = nn.Linear(hidden_size, input_size)
-        self.reward_predictor = nn.Linear(hidden_size, 1)
-
-    def forward(self, x, action):
-        return self.network(torch.cat((x, action), dim=-1))
-
-
 class ForwardModel():
     def __init__(self, args, encoder, device):
         self.args = args
         self.device = device
         self.encoder = encoder
         hidden_size = args.forward_hidden_size
-        self.hidden = nn.Linear(args.feature_size * 4, hidden_size)
-        self.sd_predictor = nn.Linear(hidden_size, args.feature_size)
-        self.reward_predictor = nn.Linear(hidden_size, 1)
+        self.hidden = nn.Linear(args.feature_size * 4, hidden_size).to(device)
+        self.sd_predictor = nn.Linear(hidden_size, args.feature_size).to(device)
+        self.reward_predictor = nn.Linear(hidden_size, 1).to(device)
         self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) + list(self.sd_predictor.parameters()) +
                                           list(self.reward_predictor.parameters()))
 
