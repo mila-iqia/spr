@@ -4,16 +4,17 @@ from itertools import chain
 import torch
 import torch.nn as nn
 import numpy as np
-
+import os
 import wandb
 
 from src.agent import Agent
 from memory import ReplayMemory
 from src.encoders import NatureCNN, ImpalaCNN
 from src.envs import make_vec_envs, Env
+from src.eval import test
 from src.forward_model import ForwardModel
 from src.stdim import InfoNCESpatioTemporalTrainer
-from src.utils import get_argparser
+from src.utils import get_argparser, log
 from src.episodes import get_random_agent_episodes, sample_state, Transition
 
 
@@ -27,6 +28,9 @@ def train_policy(args):
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
     j, rollout_length = 0, args.rollout_length
     dqn = Agent(args, env)
+    dqn.train()
+    results_dir = os.path.join('results', args.id)
+    metrics = {'steps': [], 'rewards': [], 'Qs': [], 'best_avg_reward': -float('inf')}
 
     state, done = env.reset(), False
     while j * args.env_steps_per_epoch < args.total_steps:
@@ -66,6 +70,18 @@ def train_policy(args):
             # Update policy parameters on model data
             for g in range(args.updates_per_step):
                 dqn.learn(model_transitions)
+
+        steps = (j+1) * args.env_steps_per_epoch
+        if (j * args.env_steps_per_epoch) % args.evaluation_interval == 0:
+            dqn.eval()  # Set DQN (online network) to evaluation mode
+            avg_reward = test(args, steps, dqn, encoder, metrics, results_dir)  # Test
+            log(steps, avg_reward)
+            dqn.train()  # Set DQN (online network) back to training mode
+
+        # Update target network
+        if (j * args.env_steps_per_epoch) % args.target_update == 0:
+            dqn.update_target_net()
+
         j += 1
 
 
