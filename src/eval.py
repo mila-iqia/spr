@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.graph_objs.scatter import Line
 import torch
 
-from env import Env
+from src.envs import Env
 
 
 # Test DQN
