@@ -27,7 +27,7 @@ class InfoNCESpatioTemporalTrainer(Trainer):
         super().__init__(encoder, wandb, device)
         self.config = config
         self.patience = self.config["patience"]
-        self.classifier1 = nn.Linear(self.encoder.hidden_size, 128).to(device)  # x1 = global, x2=patch, n_channels = 32
+        self.classifier1 = nn.Linear(self.encoder.hidden_size, 64).to(device)  # x1 = global, x2=patch, n_channels = 32
         self.classifier2 = nn.Linear(128, 128).to(device)
         self.epochs = config['epochs']
         self.batch_size = config['batch_size']
@@ -43,15 +43,15 @@ class InfoNCESpatioTemporalTrainer(Trainer):
         # Episode sampler
         # Sample `num_samples` episodes then batchify them with `self.batch_size` episodes per batch
         for idx in range(total_steps // self.batch_size):
-            indices = np.random.randint(0, total_steps, size=self.batch_size)
+            indices = np.random.randint(0, total_steps-1, size=self.batch_size)
             x_t, x_tnext = [], []
             for t in indices:
                 # Get one sample from this episode
                 while transitions[t].nonterminal is False:
-                    t = np.random.randint(0, total_steps)
+                    t = np.random.randint(0, total_steps-1)
                 x_t.append(transitions[t].state)
                 x_tnext.append(transitions[t+1].state)
-            yield torch.stack(x_t).to(self.device) / 255., torch.stack(x_tnext).to(self.device) / 255.
+            yield torch.stack(x_t).to(self.device).float() / 255., torch.stack(x_tnext).to(self.device).float() / 255.
 
     def do_one_epoch(self, epoch, episodes):
         mode = "train" if self.encoder.training and self.classifier1.training else "val"

@@ -1,5 +1,6 @@
 import argparse
 import copy
+from datetime import datetime
 import os
 import subprocess
 
@@ -13,6 +14,7 @@ from sklearn.metrics import f1_score as compute_f1_score
 from a2c_ppo_acktr.envs import make_vec_envs
 from a2c_ppo_acktr.utils import get_vec_normalize
 from collections import defaultdict
+import wandb
 
 train_encoder_methods = ["infonce-stdim"]
 
@@ -58,12 +60,12 @@ def get_argparser():
                         help='Hidden Size for the Forward Model MLP')
 
     # MBPO Args
-    parser.add_argument("--total_steps", type=int, default=1000)
+    parser.add_argument("--total_steps", type=int, default=100000)
     parser.add_argument('--fake-buffer-capacity', type=int, default=int(1e7),
                         help='Size of the replay buffer for rollout transitions')
     parser.add_argument("--rollout_length", type=int, default=2)
     parser.add_argument("--num_model_rollouts", type=int, default=400)
-    parser.add_argument("--env_steps_per_epoch", type=int, default=10)
+    parser.add_argument("--env_steps_per_epoch", type=int, default=1000)
     parser.add_argument("--updates_per_step", type=int, default=20)
     parser.add_argument("--initial_exp_steps", type=int, default=5000)
 
@@ -104,7 +106,7 @@ def get_argparser():
     parser.add_argument('--learn-start', type=int, default=int(20e3), metavar='STEPS',
                         help='Number of steps before starting training')
     parser.add_argument('--evaluate', action='store_true', help='Evaluate only')
-    parser.add_argument('--evaluation-interval', type=int, default=100000, metavar='STEPS',
+    parser.add_argument('--evaluation-interval', type=int, default=10000, metavar='STEPS',
                         help='Number of training steps between evaluations')
     parser.add_argument('--evaluation-episodes', type=int, default=10, metavar='N',
                         help='Number of evaluation episodes to average over')
@@ -318,3 +320,10 @@ class Cutout(object):
         img = img * mask
 
         return img
+
+
+# Simple ISO 8601 timestamped logger
+def log(steps, avg_reward):
+    s = 'T = ' + str(steps) + ' | Avg. reward: ' + str(avg_reward)
+    print('[' + str(datetime.now().strftime('%Y-%m-%dT%H:%M:%S')) + '] ' + s)
+    wandb.log({'avg_reward': avg_reward, 'step': steps})
