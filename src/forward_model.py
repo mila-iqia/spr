@@ -9,14 +9,14 @@ from src.episodes import get_framestacked_transition
 
 
 class ForwardModel():
-    def __init__(self, args, encoder, device):
+    def __init__(self, args, encoder):
         self.args = args
-        self.device = device
+        self.device = args.device
         self.encoder = encoder
         hidden_size = args.forward_hidden_size
-        self.hidden = nn.Linear(args.feature_size * 4, hidden_size).to(device)
-        self.sd_predictor = nn.Linear(hidden_size, args.feature_size).to(device)
-        self.reward_predictor = nn.Linear(hidden_size, 1).to(device)
+        self.hidden = nn.Linear(args.feature_size * 4, hidden_size).to(self.device)
+        self.sd_predictor = nn.Linear(hidden_size, args.feature_size).to(self.device)
+        self.reward_predictor = nn.Linear(hidden_size, 1).to(self.device)
         self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) + list(self.sd_predictor.parameters()) +
                                           list(self.reward_predictor.parameters()))
 

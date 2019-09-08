@@ -19,7 +19,6 @@ from src.episodes import get_random_agent_episodes, sample_state, Transition
 
 
 def train_policy(args):
-    device = torch.device("cuda:" + str(args.cuda_id) if torch.cuda.is_available() else "cpu")
     env = Env(args)
     env.train()
 
@@ -53,7 +52,7 @@ def train_policy(args):
 
             for m in range(args.num_model_rollouts):
                 # sample a state uniformly from real_transitions
-                state_deque = sample_state(real_transitions, encoder, device=device)
+                state_deque = sample_state(real_transitions, encoder, device=args.device)
                 # Perform k-step model rollout starting from s using current policy
                 # Add imagined data to model_transitions
                 for k in range(rollout_length):
@@ -86,21 +85,20 @@ def train_policy(args):
 
 
 def train_encoder(args, transitions, val_eps=None):
-    device = torch.device("cuda:" + str(args.cuda_id) if torch.cuda.is_available() else "cpu")
 
     observation_shape = transitions[0].state.shape
     if args.encoder_type == "Nature":
         encoder = NatureCNN(observation_shape[0], args)
     elif args.encoder_type == "Impala":
         encoder = ImpalaCNN(observation_shape[0], args)
-    encoder.to(device)
+    encoder.to(args.device)
     torch.set_num_threads(1)
 
     config = {}
     config.update(vars(args))
     config['obs_space'] = observation_shape  # weird hack
     if args.method == "infonce-stdim":
-        trainer = InfoNCESpatioTemporalTrainer(encoder, config, device=device, wandb=wandb)
+        trainer = InfoNCESpatioTemporalTrainer(encoder, config, device=args.device, wandb=wandb)
     else:
         assert False, "method {} has no trainer".format(args.method)
 
@@ -109,8 +107,7 @@ def train_encoder(args, transitions, val_eps=None):
 
 
 def train_model(args, encoder, real_transitions, val_eps=None):
-    device = torch.device("cuda:" + str(args.cuda_id) if torch.cuda.is_available() else "cpu")
-    forward_model = ForwardModel(args, encoder, device)
+    forward_model = ForwardModel(args, encoder)
     forward_model.train(real_transitions)
     return forward_model
 
