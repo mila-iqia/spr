@@ -1,7 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from a2c_ppo_acktr.utils import init
+
+
+def init(module, weight_init, bias_init, gain=1):
+    weight_init(module.weight.data, gain=gain)
+    bias_init(module.bias.data)
+    return module
 
 
 class Flatten(nn.Module):
@@ -104,36 +109,6 @@ class NatureCNN(nn.Module):
             nn.Linear(self.final_conv_size, args.feature_size)
         )
 
-        # if self.downsample:
-        #     self.final_conv_size = 32 * 7 * 7
-        #     self.final_conv_shape = (32, 7, 7)
-        #     self.main = nn.Sequential(
-        #         init_(nn.Conv2d(input_channels, 32, 8, stride=4)),
-        #         nn.ReLU(),
-        #         init_(nn.Conv2d(32, 64, 4, stride=2)),
-        #         nn.ReLU(),
-        #         init_(nn.Conv2d(64, 32, 3, stride=1)),
-        #         nn.ReLU(),
-        #         Flatten(),
-        #         init_(nn.Linear(self.final_conv_size, self.feature_size)),
-        #         #nn.ReLU()
-        #     )
-        # else:
-        #     self.final_conv_size = 64 * 9 * 6
-        #     self.final_conv_shape = (64, 9, 6)
-        #     self.main = nn.Sequential(
-        #         init_(nn.Conv2d(input_channels, 32, 8, stride=4)),
-        #         nn.ReLU(),
-        #         init_(nn.Conv2d(32, 64, 4, stride=2)),
-        #         nn.ReLU(),
-        #         init_(nn.Conv2d(64, 128, 4, stride=2)),
-        #         nn.ReLU(),
-        #         init_(nn.Conv2d(128, 64, 3, stride=1)),
-        #         nn.ReLU(),
-        #         Flatten(),
-        #         init_(nn.Linear(self.final_conv_size, self.feature_size)),
-        #         #nn.ReLU()
-        #     )
         self.train()
 
     def forward(self, inputs, fmaps=False):
