@@ -1,6 +1,6 @@
 # abstract-world-models
 
-### Dependencies: 
+## Dependencies: 
 * PyTorch 
 * wandb (logging tool)
 * gym
@@ -14,7 +14,12 @@ conda install pytorch torchvision -c pytorch
 pip install -r requirements.txt
 ```
 
-### References:
+## Usage:
+```bash
+python -m scripts.train_all
+```
+
+## References:
 Kaixin's Rainbow implementation: https://github.com/Kaixhin/Rainbow
 
 MBPO: https://arxiv.org/abs/1906.08253
