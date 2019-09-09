@@ -17,20 +17,11 @@ train_encoder_methods = ["infonce-stdim"]
 
 def get_argparser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env-name', default='breakout',
-                        help='environment to train on (default: MontezumaRevengeNoFrameskip-v4)')
-    parser.add_argument('--num-frame-stack', type=int, default=4,
-                        help='Number of frames to stack for a state')
-    parser.add_argument('--no-downsample', action='store_true', default=False,
-                        help='Whether to use a linear classifier')
     parser.add_argument('--pretraining-steps', type=int, default=100000,
                         help='Number of steps to pretrain representations (default: 100000)')
-    parser.add_argument('--num-processes', type=int, default=8,
-                        help='Number of parallel environments to collect samples from (default: 8)')
     parser.add_argument('--method', type=str, default='infonce-stdim',
                         choices=train_encoder_methods,
                         help='Method to use for training representations (default: infonce-stdim)')
-
     parser.add_argument('--lr', type=float, default=3e-4,
                         help='Learning Rate foe learning representations (default: 5e-4)')
     parser.add_argument('--epochs', type=int, default=100,
@@ -44,14 +35,11 @@ def get_argparser():
     parser.add_argument('--feature-size', type=int, default=256,
                         help='Size of features')
     parser.add_argument("--patience", type=int, default=15)
-    parser.add_argument("--color", action='store_true', default=False)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
     parser.add_argument("--wandb-proj", type=str, default="awm")
     parser.add_argument("--num_rew_evals", type=int, default=10)
-
     parser.add_argument("--collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
                         default="random_agent")
-
     parser.add_argument('--forward-hidden-size', type=int, default=256,
                         help='Hidden Size for the Forward Model MLP')
 
@@ -65,6 +53,7 @@ def get_argparser():
     parser.add_argument("--updates_per_step", type=int, default=20)
     parser.add_argument("--initial_exp_steps", type=int, default=5000)
 
+    # Rainbow Args
     parser.add_argument('--id', type=str, default='default', help='Experiment ID')
     parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
     parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')
