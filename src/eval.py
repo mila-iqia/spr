@@ -23,7 +23,7 @@ def test(args, T, dqn, encoder, metrics, results_dir, evaluate=False):
       if done:
         state, reward_sum, done = env.reset(), 0, False
 
-      state = encoder(state.unsqueeze(dim=1)).view(-1)
+      state = encoder(state).view(-1)
       action = dqn.act_e_greedy(state)  # Choose an action ε-greedily
       state, reward, done = env.step(action)  # Step
       reward_sum += reward
