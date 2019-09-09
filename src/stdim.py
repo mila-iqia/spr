@@ -106,7 +106,7 @@ class InfoNCESpatioTemporalTrainer(Trainer):
 
                 if self.early_stopper.early_stop:
                     break
-        torch.save(self.encoder.state_dict(), os.path.join(self.wandb.run.dir, self.config['env_name'] + '.pt'))
+        torch.save(self.encoder.state_dict(), os.path.join(self.wandb.run.dir, self.config['game'] + '.pt'))
 
     def log_results(self, epoch_idx, epoch_loss1, epoch_loss2, epoch_loss, prefix=""):
         print("{} Epoch: {}, Epoch Loss: {}, {}".format(prefix.capitalize(), epoch_idx, epoch_loss,

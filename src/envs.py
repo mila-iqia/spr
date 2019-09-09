@@ -16,7 +16,7 @@ class Env():
         self.ale.setFloat('repeat_action_probability', 0.25)  # Disable sticky actions
         self.ale.setInt('frame_skip', 0)
         self.ale.setBool('color_averaging', False)
-        self.ale.loadROM(atari_py.get_game_path(args.env_name))  # ROM loading must be done after setting options
+        self.ale.loadROM(atari_py.get_game_path(args.game))  # ROM loading must be done after setting options
         actions = self.ale.getMinimalActionSet()
         self.actions = dict([i, e] for i, e in zip(range(len(actions)), actions))
         self.lives = 0  # Life counter (used in DeepMind training)
