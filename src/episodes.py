@@ -1,42 +1,67 @@
-from itertools import chain
-
 import torch
 import numpy as np
-from collections import deque
+from collections import deque, namedtuple
 
-from aari.envs import make_vec_envs
+from src.memory import blank_trans
+from src.envs import Env
+
+Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'nonterminal'))
 
 
-def get_random_agent_episodes(args, device, steps):
-    envs = make_vec_envs(args, args.num_processes)
-    obs = envs.reset()
-    episode_rewards = deque(maxlen=10)
+def get_random_agent_episodes(args):
+    env = Env(args)
+    env.train()
+    action_space = env.action_space()
     print('-------Collecting samples----------')
-    episodes = [[[]] for _ in range(args.num_processes)]  # (n_processes * n_episodes * episode_len)
-    actions = [[[]] for _ in range(args.num_processes)]
-    for step in range(steps // args.num_processes):
-        # Take action using a random policy
-        action = torch.tensor(
-            np.array([np.random.randint(envs.action_space.n) for _ in range(args.num_processes)])) \
-            .unsqueeze(dim=1).to(device)
-        obs, reward, done, infos = envs.step(action)
-        for i, info in enumerate(infos):
-            if 'episode' in info.keys():
-                episode_rewards.append(info['episode']['r'])
+    transitions = []
+    timestep, done = 0, True
+    for T in range(args.initial_exp_steps):
+        if done:
+            state, done = env.reset(), False
+        state = state[-1].mul(255).to(dtype=torch.uint8,
+                                      device=torch.device('cpu'))  # Only store last frame and discretise to save memory
+        action = np.random.randint(0, action_space)
+        next_state, reward, done = env.step(action)
+        transitions.append(Transition(timestep, state, action, reward, not done))
+        state = next_state
+        timestep = 0 if done else timestep + 1
 
-            if done[i] != 1:
-                episodes[i][-1].append((obs[i].clone(), action[i], reward[i].clone()))
-            else:
-                episodes[i].append([(obs[i].clone(), action[i].clone(), reward[i].clone())])
+    env.close()
+    return transitions
 
-    # Convert to 2d list from 3d list
-    episodes = list(chain.from_iterable(episodes))
-    envs.close()
 
-    inds = np.arange(len(episodes))
-    rng = np.random.RandomState(seed=args.seed)
-    rng.shuffle(inds)
-    val_split_ind = int(0.9 * len(inds))
-    tr_eps, val_eps = episodes[:val_split_ind], episodes[val_split_ind:]
+def sample_state(real_transitions, encoder, device=torch.device('cpu')):
+    idx = np.random.randint(0, len(real_transitions))
+    transition = get_framestacked_transition(idx, real_transitions)
+    # trans_deque = deque(maxlen=4)
+    # for trans in transition:
+    #     trans_deque.append(trans)
+    with torch.no_grad():
+        z = encoder(torch.stack([trans.state.float() / 255. for trans in transition]).to(device=device))
+    state_deque = deque(maxlen=4)
+    for s in z.unbind():
+        state_deque.append(s)
+    return state_deque
 
-    return tr_eps, val_eps
+
+class LatentState():
+    def __init__(self, latents=None):
+        if latents is not None:
+            self.latents = deque(maxlen=4)
+        else:
+            self.latents = latents
+
+    def append(self, latent):
+        self.latents.append(latent)
+
+
+def get_framestacked_transition(idx, transitions):
+    history = 4
+    transition = np.array([None] * history)
+    transition[history - 1] = transitions[idx]
+    for t in range(4 - 2, -1, -1):  # e.g. 2 1 0
+      if transition[t + 1].timestep == 0:
+        transition[t] = blank_trans  # If future frame has timestep 0
+      else:
+        transition[t] = transitions[idx - history + 1 + t]
+    return transition
