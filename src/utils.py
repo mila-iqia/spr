@@ -24,7 +24,7 @@ def get_argparser():
                         help='Method to use for training representations (default: infonce-stdim)')
     parser.add_argument('--lr', type=float, default=3e-4,
                         help='Learning Rate foe learning representations (default: 5e-4)')
-    parser.add_argument('--epochs', type=int, default=100,
+    parser.add_argument('--epochs', type=int, default=20,
                         help='Number of epochs for  (default: 100)')
     parser.add_argument('--cuda-id', type=int, default=0,
                         help='CUDA device index')
