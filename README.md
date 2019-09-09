@@ -16,4 +16,5 @@ pip install -r requirements.txt
 
 ### References:
 Kaixin's Rainbow implementation: https://github.com/Kaixhin/Rainbow
+
 MBPO: https://arxiv.org/abs/1906.08253
