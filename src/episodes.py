@@ -60,8 +60,8 @@ def get_framestacked_transition(idx, transitions):
     transition = np.array([None] * history)
     transition[history - 1] = transitions[idx]
     for t in range(4 - 2, -1, -1):  # e.g. 2 1 0
-      if transition[t + 1].timestep == 0:
-        transition[t] = blank_trans  # If future frame has timestep 0
-      else:
-        transition[t] = transitions[idx - history + 1 + t]
+        if transition[t + 1].timestep == 0:
+            transition[t] = blank_trans  # If future frame has timestep 0
+        else:
+            transition[t] = transitions[idx - history + 1 + t]
     return transition
