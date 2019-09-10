@@ -63,7 +63,7 @@ def train_policy(args):
                         next_z, reward = forward_model.predict(z, action)
                     # figure out what to do about terminal state here
                     z = z.view(4, -1)
-                    model_transitions.append(z, action, reward, False)
+                    model_transitions.append(z, action, reward, True)
                     state_deque.append(next_z)
 
             # Update policy parameters on model data
