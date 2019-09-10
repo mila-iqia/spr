@@ -66,7 +66,7 @@ class ForwardModel():
             epoch_reward_loss += reward_loss.detach().item()
             epoch_loss += loss.detach().item()
             steps += 1
-        self.log_metrics(epoch, epoch_loss / steps, epoch_reward_loss / steps, epoch_reward_loss / steps)
+        self.log_metrics(epoch, epoch_loss / steps, epoch_sd_loss / steps, epoch_reward_loss / steps)
 
     def train(self, real_transitions):
         for e in range(self.args.epochs):
