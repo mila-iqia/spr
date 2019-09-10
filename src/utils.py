@@ -47,7 +47,7 @@ def get_argparser():
     parser.add_argument("--total_steps", type=int, default=100000)
     parser.add_argument('--fake-buffer-capacity', type=int, default=int(1e7),
                         help='Size of the replay buffer for rollout transitions')
-    parser.add_argument("--rollout_length", type=int, default=2)
+    parser.add_argument("--rollout_length", type=int, default=1)
     parser.add_argument("--num_model_rollouts", type=int, default=400)
     parser.add_argument("--env_steps_per_epoch", type=int, default=1000)
     parser.add_argument("--updates_per_step", type=int, default=20)
@@ -80,7 +80,7 @@ def get_argparser():
                         help='Prioritised experience replay exponent (originally denoted α)')
     parser.add_argument('--priority-weight', type=float, default=0.4, metavar='β',
                         help='Initial prioritised experience replay importance sampling weight')
-    parser.add_argument('--multi-step', type=int, default=3, metavar='n', help='Number of steps for multi-step return')
+    parser.add_argument('--multi-step', type=int, default=1, metavar='n', help='Number of steps for multi-step return')
     parser.add_argument('--discount', type=float, default=0.99, metavar='γ', help='Discount factor')
     parser.add_argument('--target-update', type=int, default=int(8e3), metavar='τ',
                         help='Number of steps after which to update target network')
