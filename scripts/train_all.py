@@ -113,15 +113,16 @@ def train_model(args, encoder, real_transitions, val_eps=None):
 
 
 if __name__ == '__main__':
-    wandb.init()
     parser = get_argparser()
     args = parser.parse_args()
+    tags = []
+    wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags)
+    wandb.config.update(vars(args))
+
     if torch.cuda.is_available() and not args.disable_cuda:
         args.device = torch.device('cuda')
         torch.cuda.manual_seed(np.random.randint(1, 10000))
         torch.backends.cudnn.enabled = args.enable_cudnn
     else:
         args.device = torch.device('cpu')
-    tags = []
-    wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags)
     train_policy(args)

@@ -81,4 +81,4 @@ class ForwardModel():
               format(epoch_idx, epoch_loss, sd_loss, reward_loss))
         wandb.log({'Dynamics loss': epoch_loss,
                    'SD Loss': sd_loss,
-                   'Reward Loss': reward_loss}, step=epoch_idx)
+                   'Reward Loss': reward_loss})
