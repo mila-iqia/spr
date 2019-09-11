@@ -15,7 +15,7 @@ from src.eval import test
 from src.forward_model import ForwardModel
 from src.stdim import InfoNCESpatioTemporalTrainer
 from src.utils import get_argparser, log
-from src.episodes import get_random_agent_episodes, sample_state, Transition
+from src.episodes import get_random_agent_episodes, sample_state, Transition, sample_real_transitions
 
 
 def train_policy(args):
@@ -25,7 +25,7 @@ def train_policy(args):
     # get initial exploration data
     real_transitions = get_random_agent_episodes(args)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
-    j, rollout_length = 0, args.rollout_length
+    j = 0
     dqn = Agent(args, env)
     dqn.train()
     results_dir = os.path.join('results', args.id)
@@ -50,21 +50,29 @@ def train_policy(args):
             state = next_state
             timestep = 0 if done else timestep + 1
 
-            for m in range(args.num_model_rollouts):
-                # sample a state uniformly from real_transitions
-                state_deque = sample_state(real_transitions, encoder, device=args.device)
-                # Perform k-step model rollout starting from s using current policy
+            # sample states from real_transitions
+            samples = sample_real_transitions(real_transitions, args.num_model_rollouts)
+            samples = samples.flatten(0, 1)
+            H, N = args.history_length, args.num_model_rollouts
+            with torch.no_grad():
+                z = encoder(samples).view(H, N, -1)
+            state_deque = deque(maxlen=4)
+            for s in z.unbind():
+                state_deque.append(s)
+
+            # Perform k-step model rollout starting from s using current policy
+            for k in range(args.rollout_length):
+                z = torch.stack(list(state_deque))
+                z = z.view(N, H, -1).view(N, -1)  # take a second look at this later
+                actions = dqn.act(z, batch=True)
+                with torch.no_grad():
+                    next_z, rewards = forward_model.predict(z, actions.float())
+                z = z.view(N, H, -1)
+
                 # Add imagined data to model_transitions
-                for k in range(rollout_length):
-                    z = torch.stack(list(state_deque))
-                    z = z.view(-1)
-                    action = dqn.act(z)
-                    with torch.no_grad():
-                        next_z, reward = forward_model.predict(z, action)
-                    # figure out what to do about terminal state here
-                    z = z.view(4, -1)
-                    model_transitions.append(z, action, reward, True)
-                    state_deque.append(next_z)
+                for i in range(N):
+                    model_transitions.append(z[i], actions[i], rewards[i], True)
+                state_deque.append(next_z)
 
             # Update policy parameters on model data
             for g in range(args.updates_per_step):
