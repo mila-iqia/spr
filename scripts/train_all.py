@@ -37,6 +37,13 @@ def train_policy(args):
         encoder = train_encoder(args, real_transitions)
         forward_model = train_model(args, encoder, real_transitions)
 
+        steps = j * args.env_steps_per_epoch
+        if steps % args.evaluation_interval == 0:
+            dqn.eval()  # Set DQN (online network) to evaluation mode
+            avg_reward = test(args, steps, dqn, encoder, metrics, results_dir)  # Test
+            log(steps, avg_reward)
+            dqn.train()  # Set DQN (online network) back to training mode
+
         timestep, done = 0, True
         for e in range(args.env_steps_per_epoch):
             if done:
@@ -78,15 +85,8 @@ def train_policy(args):
             for g in range(args.updates_per_step):
                 dqn.learn(model_transitions)
 
-        steps = (j+1) * args.env_steps_per_epoch
-        if (j * args.env_steps_per_epoch) % args.evaluation_interval == 0:
-            dqn.eval()  # Set DQN (online network) to evaluation mode
-            avg_reward = test(args, steps, dqn, encoder, metrics, results_dir)  # Test
-            log(steps, avg_reward)
-            dqn.train()  # Set DQN (online network) back to training mode
-
         # Update target network
-        if (j * args.env_steps_per_epoch) % args.target_update == 0:
+        if steps % args.target_update == 0:
             dqn.update_target_net()
 
         j += 1
