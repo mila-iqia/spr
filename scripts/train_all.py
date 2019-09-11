@@ -25,7 +25,7 @@ def train_policy(args):
     # get initial exploration data
     real_transitions = get_random_agent_episodes(args)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
-    encoder = train_encoder(args, real_transitions)
+    encoder, encoder_trainer = train_encoder(args, real_transitions)
     forward_model = train_model(args, encoder, real_transitions)
 
     j = 0
@@ -38,7 +38,7 @@ def train_policy(args):
     while j * args.env_steps_per_epoch < args.total_steps:
         # Train encoder and forward model on real data
         if j != 0:
-            encoder.train(real_transitions)
+            encoder_trainer.train(real_transitions)
             forward_model.train(real_transitions)
 
         steps = j * args.env_steps_per_epoch
@@ -115,7 +115,7 @@ def train_encoder(args, transitions, val_eps=None):
         assert False, "method {} has no trainer".format(args.method)
 
     trainer.train(transitions, val_eps)
-    return encoder
+    return encoder, trainer
 
 
 def train_model(args, encoder, real_transitions, val_eps=None):
