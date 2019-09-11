@@ -131,6 +131,10 @@ if __name__ == '__main__':
     wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags)
     wandb.config.update(vars(args))
 
+    results_dir = os.path.join('results', args.id)
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+
     if torch.cuda.is_available() and not args.disable_cuda:
         args.device = torch.device('cuda')
         torch.cuda.manual_seed(np.random.randint(1, 10000))
