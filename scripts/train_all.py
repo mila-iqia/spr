@@ -15,7 +15,7 @@ from src.eval import test
 from src.forward_model import ForwardModel
 from src.stdim import InfoNCESpatioTemporalTrainer
 from src.utils import get_argparser, log
-from src.episodes import get_random_agent_episodes, sample_state, Transition, sample_real_transitions
+from src.episodes import get_random_agent_episodes, Transition, sample_real_transitions
 
 
 def train_policy(args):
