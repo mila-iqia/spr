@@ -44,8 +44,10 @@ class Agent():
         self.online_net.reset_noise()
 
     # Acts based on single state (no batch)
-    def act(self, state):
+    def act(self, state, batch=False):
         with torch.no_grad():
+            if batch:
+                return (self.online_net(state) * self.support).sum(2).argmax(1).unsqueeze(1)
             return (self.online_net(state.unsqueeze(0)) * self.support).sum(2).argmax(1).item()
 
     # Acts with an ε-greedy policy (used for evaluation only)
