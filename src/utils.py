@@ -229,4 +229,4 @@ class Cutout(object):
 def log(steps, avg_reward):
     s = 'T = ' + str(steps) + ' | Avg. reward: ' + str(avg_reward)
     print('[' + str(datetime.now().strftime('%Y-%m-%dT%H:%M:%S')) + '] ' + s)
-    wandb.log({'avg_reward': avg_reward, 'step': steps})
+    wandb.log({'avg_reward': avg_reward, 'total_steps': steps})
