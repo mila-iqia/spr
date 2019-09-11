@@ -51,7 +51,7 @@ def train_policy(args):
             timestep = 0 if done else timestep + 1
 
             # sample states from real_transitions
-            samples = sample_real_transitions(real_transitions, args.num_model_rollouts)
+            samples = sample_real_transitions(real_transitions, args.num_model_rollouts).to(args.device)
             samples = samples.flatten(0, 1)
             H, N = args.history_length, args.num_model_rollouts
             with torch.no_grad():
