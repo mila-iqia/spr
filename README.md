@@ -15,6 +15,9 @@ pip install -r requirements.txt
 ```
 
 ## Usage:
+* Add the project directory to your `$PYTHONPATH`
+
+* Run the training script
 ```bash
 python -m scripts.train_all
 ```
