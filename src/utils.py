@@ -40,7 +40,7 @@ def get_argparser():
     parser.add_argument("--num_rew_evals", type=int, default=10)
     parser.add_argument("--collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
                         default="random_agent")
-    parser.add_argument('--forward-hidden-size', type=int, default=256,
+    parser.add_argument('--forward-hidden-size', type=int, default=512,
                         help='Hidden Size for the Forward Model MLP')
 
     # MBPO Args
