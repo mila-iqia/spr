@@ -84,13 +84,12 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                 self.optimizer.step()
 
             epoch_loss += loss.detach().item()
-            epoch_loss1 += loss1.detach().item()
             #preds1 = torch.sigmoid(self.classifier1(x1, x2).squeeze())
             #accuracy1 += calculate_accuracy(preds1, target)
             #preds2 = torch.sigmoid(self.classifier2(x1_p, x2_p).squeeze())
             #accuracy2 += calculate_accuracy(preds2, target)
             steps += 1
-        self.log_results(epoch, epoch_loss1 / steps, epoch_loss2 / steps, epoch_loss / steps, prefix=mode)
+        self.log_results(epoch, epoch_loss / steps, prefix=mode)
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
@@ -108,9 +107,7 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                     break
         torch.save(self.encoder.state_dict(), os.path.join(self.wandb.run.dir, self.config['game'] + '.pt'))
 
-    def log_results(self, epoch_idx, epoch_loss1, epoch_loss2, epoch_loss, prefix=""):
+    def log_results(self, epoch_idx, epoch_loss, prefix=""):
         print("{} Epoch: {}, Epoch Loss: {}, {}".format(prefix.capitalize(), epoch_idx, epoch_loss,
                                                                      prefix.capitalize()))
-        self.wandb.log({prefix + '_loss': epoch_loss,
-                        prefix + '_loss1': epoch_loss1,
-                        prefix + '_loss2': epoch_loss2})
+        self.wandb.log({prefix + '_loss': epoch_loss})
