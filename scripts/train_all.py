@@ -3,6 +3,7 @@ from itertools import chain
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import os
 import wandb
@@ -26,7 +27,7 @@ def train_policy(args):
     real_transitions = get_random_agent_episodes(args)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
     encoder, encoder_trainer = train_encoder(args, real_transitions)
-    forward_model = train_model(args, encoder, real_transitions)
+    forward_model = train_model(args, encoder, real_transitions, env.action_space())
 
     j = 0
     dqn = Agent(args, env)
@@ -76,8 +77,9 @@ def train_policy(args):
                 z = torch.stack(list(state_deque))
                 z = z.view(N, H, -1).view(N, -1)  # take a second look at this later
                 actions = dqn.act(z, batch=True)
+                actions_one_hot = F.one_hot(actions, num_classes=env.action_space())
                 with torch.no_grad():
-                    next_z, rewards = forward_model.predict(z, actions.float())
+                    next_z, rewards = forward_model.predict(z, actions_one_hot.float())
                 z = z.view(N, H, -1)
 
                 # Add imagined data to model_transitions
@@ -118,8 +120,8 @@ def train_encoder(args, transitions, val_eps=None):
     return encoder, trainer
 
 
-def train_model(args, encoder, real_transitions, val_eps=None):
-    forward_model = ForwardModel(args, encoder)
+def train_model(args, encoder, real_transitions, num_actions, val_eps=None):
+    forward_model = ForwardModel(args, encoder, num_actions)
     forward_model.train(real_transitions)
     return forward_model
 

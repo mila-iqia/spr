@@ -9,12 +9,13 @@ from src.episodes import get_framestacked_transition
 
 
 class ForwardModel():
-    def __init__(self, args, encoder):
+    def __init__(self, args, encoder, num_actions):
         self.args = args
         self.device = args.device
         self.encoder = encoder
+        self.num_actions = num_actions
         hidden_size = args.forward_hidden_size
-        self.hidden = nn.Linear(args.feature_size * 4, hidden_size).to(self.device)
+        self.hidden = nn.Linear(args.feature_size * 4 * num_actions, hidden_size).to(self.device)
         self.sd_predictor = nn.Linear(hidden_size, args.feature_size).to(self.device)
         self.reward_predictor = nn.Linear(hidden_size, 1).to(self.device)
         self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) + list(self.sd_predictor.parameters()) +
@@ -38,7 +39,8 @@ class ForwardModel():
                 r_t.append(framestacked_transition[-1].reward)
 
             yield torch.stack(s_t).float().to(self.device) / 255., torch.stack(x_t_next).float().to(self.device) / 255., \
-                  torch.tensor(a_t).unsqueeze(-1).float().to(self.device), torch.tensor(r_t).unsqueeze(-1).float().to(self.device)
+                  F.one_hot(torch.tensor(a_t), num_classes=self.num_actions).float().to(self.device), \
+                  torch.tensor(r_t).unsqueeze(-1).float().to(self.device)
 
     def do_one_epoch(self, epoch, episodes):
         data_generator = self.generate_batch(episodes)
@@ -50,7 +52,7 @@ class ForwardModel():
                 f_t = f_t.view(self.args.batch_size, 4, -1)
             f_t_last = f_t[:, -1, :]
             f_t = f_t.view(self.args.batch_size, -1)
-            hiddens = self.hidden(f_t * a_t)
+            hiddens = self.hidden(torch.bmm(f_t.unsqueeze(2), a_t.unsqueeze(1)).view(self.args.batch_size, -1))
             sd_predictions = self.sd_predictor(hiddens)
             reward_predictions = self.reward_predictor(hiddens)
             # predict |s_{t+1} - s_t| instead of s_{t+1} directly
@@ -73,7 +75,9 @@ class ForwardModel():
             self.do_one_epoch(e, real_transitions)
 
     def predict(self, z, a):
-        hidden = self.hidden(z * a)
+        N = z.size(0)
+        hidden = self.hidden(
+            torch.bmm(z.unsqueeze(2), a.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
         return self.sd_predictor(hidden), self.reward_predictor(hidden)
 
     def log_metrics(self, epoch_idx, epoch_loss, sd_loss, reward_loss):
