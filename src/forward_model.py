@@ -52,7 +52,7 @@ class ForwardModel():
                 f_t = f_t.view(self.args.batch_size, 4, -1)
             f_t_last = f_t[:, -1, :]
             f_t = f_t.view(self.args.batch_size, -1)
-            hiddens = self.hidden(torch.bmm(f_t.unsqueeze(2), a_t.unsqueeze(1)).view(self.args.batch_size, -1))
+            hiddens = F.relu(self.hidden(torch.bmm(f_t.unsqueeze(2), a_t.unsqueeze(1)).view(self.args.batch_size, -1)))
             sd_predictions = self.sd_predictor(hiddens)
             reward_predictions = self.reward_predictor(hiddens)
             # predict |s_{t+1} - s_t| instead of s_{t+1} directly
@@ -76,9 +76,10 @@ class ForwardModel():
 
     def predict(self, z, a):
         N = z.size(0)
-        hidden = self.hidden(
-            torch.bmm(z.unsqueeze(2), a.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
-        return z + self.sd_predictor(hidden), self.reward_predictor(hidden)
+        hidden = F.relu(self.hidden(
+            torch.bmm(z.unsqueeze(2), a.unsqueeze(1)).view(N, -1)))  # outer-product / bilinear integration, then flatten
+        z_last = z.view(N, 4, -1)[:, -1, :]  # choose the last latent vector from z
+        return z_last + self.sd_predictor(hidden), self.reward_predictor(hidden)
 
     def log_metrics(self, epoch_idx, epoch_loss, sd_loss, reward_loss):
         print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {}".
