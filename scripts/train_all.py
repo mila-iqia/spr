@@ -45,7 +45,7 @@ def train_policy(args):
         steps = j * args.env_steps_per_epoch
         if steps % args.evaluation_interval == 0:
             dqn.eval()  # Set DQN (online network) to evaluation mode
-            avg_reward = test(args, steps, dqn, encoder, metrics, results_dir)  # Test
+            avg_reward = test(args, steps, dqn, encoder, metrics, results_dir, evaluate=True)  # Test
             log(steps, avg_reward)
             dqn.train()  # Set DQN (online network) back to training mode
 
