@@ -17,7 +17,7 @@ class ForwardModel():
         hidden_size = args.forward_hidden_size
         self.hidden = nn.Linear(args.feature_size * 4 * num_actions, hidden_size).to(self.device)
         self.sd_predictor = nn.Linear(hidden_size, args.feature_size).to(self.device)
-        self.reward_predictor = nn.Linear(hidden_size, 1).to(self.device)
+        self.reward_predictor = nn.Linear(hidden_size, 3).to(self.device)
         self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) + list(self.sd_predictor.parameters()) +
                                           list(self.reward_predictor.parameters()))
 
@@ -40,7 +40,7 @@ class ForwardModel():
 
             yield torch.stack(s_t).float().to(self.device) / 255., torch.stack(x_t_next).float().to(self.device) / 255., \
                   F.one_hot(torch.tensor(a_t), num_classes=self.num_actions).float().to(self.device), \
-                  torch.tensor(r_t).unsqueeze(-1).float().to(self.device)
+                  (torch.tensor(r_t) + 1).to(self.device)
 
     def do_one_epoch(self, epoch, episodes):
         data_generator = self.generate_batch(episodes)
@@ -54,17 +54,17 @@ class ForwardModel():
             f_t = f_t.view(self.args.batch_size, -1)
             hiddens = F.relu(self.hidden(torch.bmm(f_t.unsqueeze(2), a_t.unsqueeze(1)).view(self.args.batch_size, -1)))
             sd_predictions = self.sd_predictor(hiddens)
-            reward_predictions = self.reward_predictor(hiddens)
+            reward_predictions = F.log_softmax(self.reward_predictor(hiddens))
             # predict |s_{t+1} - s_t| instead of s_{t+1} directly
             sd_loss = F.mse_loss(sd_predictions, f_t_next - f_t_last)
-            reward_loss = F.mse_loss(reward_predictions, r_t)
+            reward_loss = F.nll_loss(reward_predictions, r_t)
 
-            loss = sd_loss + reward_loss
+            loss = self.args.sd_loss_coeff * sd_loss + reward_loss
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
 
-            epoch_sd_loss += sd_loss.detach().item()
+            epoch_sd_loss += self.args.sd_loss_coeff * sd_loss.detach().item()
             epoch_reward_loss += reward_loss.detach().item()
             epoch_loss += loss.detach().item()
             steps += 1

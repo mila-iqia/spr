@@ -42,6 +42,8 @@ def get_argparser():
                         default="random_agent")
     parser.add_argument('--forward-hidden-size', type=int, default=512,
                         help='Hidden Size for the Forward Model MLP')
+    parser.add_argument('--sd_loss_coeff', type=int, default=100,
+                        help='Coefficient for the dynamics loss')
 
     # MBPO Args
     parser.add_argument("--total_steps", type=int, default=100000)
