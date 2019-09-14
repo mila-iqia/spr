@@ -34,7 +34,7 @@ class InfoNCESpatioTemporalTrainer(Trainer):
         self.device = device
         self.optimizer = torch.optim.Adam(list(self.classifier1.parameters()) + list(self.encoder.parameters()) +
                                           list(self.classifier2.parameters()),
-                                          lr=config['lr'], eps=1e-5)
+                                          lr=config['encoder_lr'], eps=1e-5)
         self.early_stopper = EarlyStopping(patience=self.patience, verbose=False, wandb=self.wandb, name="encoder")
 
     def generate_batch(self, transitions):
