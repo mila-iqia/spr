@@ -78,7 +78,7 @@ class ForwardModel():
         N = z.size(0)
         hidden = self.hidden(
             torch.bmm(z.unsqueeze(2), a.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
-        return self.sd_predictor(hidden), self.reward_predictor(hidden)
+        return z + self.sd_predictor(hidden), self.reward_predictor(hidden)
 
     def log_metrics(self, epoch_idx, epoch_loss, sd_loss, reward_loss):
         print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {}".
