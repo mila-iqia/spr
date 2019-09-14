@@ -22,7 +22,7 @@ def get_argparser():
     parser.add_argument('--method', type=str, default='infonce-stdim',
                         choices=train_encoder_methods,
                         help='Method to use for training representations (default: infonce-stdim)')
-    parser.add_argument('--lr', type=float, default=3e-4,
+    parser.add_argument('--encoder-lr', type=float, default=3e-4,
                         help='Learning Rate foe learning representations (default: 5e-4)')
     parser.add_argument('--epochs', type=int, default=20,
                         help='Number of epochs for  (default: 100)')
@@ -85,7 +85,7 @@ def get_argparser():
     parser.add_argument('--target-update', type=int, default=int(1e3), metavar='τ',
                         help='Number of steps after which to update target network')
     parser.add_argument('--reward-clip', type=int, default=1, metavar='VALUE', help='Reward clipping (0 to disable)')
-    parser.add_argument('--learning-rate', type=float, default=0.0000625, metavar='η', help='Learning rate')
+    parser.add_argument('--learning-rate', type=float, default=0.0001, metavar='η', help='Learning rate')
     parser.add_argument('--adam-eps', type=float, default=1.5e-4, metavar='ε', help='Adam epsilon')
     parser.add_argument('--batch-size', type=int, default=32, metavar='SIZE', help='Batch size')
     parser.add_argument('--learn-start', type=int, default=int(20e3), metavar='STEPS',
@@ -230,3 +230,9 @@ def log(steps, avg_reward):
     s = 'T = ' + str(steps) + ' | Avg. reward: ' + str(avg_reward)
     print('[' + str(datetime.now().strftime('%Y-%m-%dT%H:%M:%S')) + '] ' + s)
     wandb.log({'avg_reward': avg_reward, 'total_steps': steps})
+
+
+def set_learning_rate(optimizer, lr):
+    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
