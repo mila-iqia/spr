@@ -95,9 +95,10 @@ def train_policy(args):
                     model_transitions.append(z[i], actions[i], rewards[i], True)
                 state_deque.append(next_z)
 
-            # Update policy parameters on model data
-            for g in range(args.updates_per_step):
-                dqn.learn(model_transitions)
+            if j >= 1:
+                # Update policy parameters on model data
+                for g in range(args.updates_per_step):
+                    dqn.learn(model_transitions)
 
         # Update target network
         if steps % args.target_update == 0:

@@ -47,7 +47,7 @@ def get_argparser():
 
     # MBPO Args
     parser.add_argument("--total_steps", type=int, default=100000)
-    parser.add_argument('--fake-buffer-capacity', type=int, default=int(1e7),
+    parser.add_argument('--fake-buffer-capacity', type=int, default=int(1e8),
                         help='Size of the replay buffer for rollout transitions')
     parser.add_argument("--rollout_length", type=int, default=1)
     parser.add_argument("--num_model_rollouts", type=int, default=400)
