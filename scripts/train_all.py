@@ -84,6 +84,7 @@ def train_policy(args):
                     next_z, rewards = forward_model.predict(z, actions_one_hot.float())
                 z = z.view(N, H, -1)
 
+                actions, rewards = actions.tolist(), rewards.tolist()
                 # Add imagined data to model_transitions
                 for i in range(N):
                     model_transitions.append(z[i], actions[i], rewards[i], True)

@@ -95,7 +95,7 @@ def get_argparser():
     parser.add_argument('--evaluate', action='store_true', help='Evaluate only')
     parser.add_argument('--evaluation-interval', type=int, default=5000, metavar='STEPS',
                         help='Number of training steps between evaluations')
-    parser.add_argument('--evaluation-episodes', type=int, default=10, metavar='N',
+    parser.add_argument('--evaluation-episodes', type=int, default=5, metavar='N',
                         help='Number of evaluation episodes to average over')
     parser.add_argument('--evaluation-size', type=int, default=500, metavar='N',
                         help='Number of transitions to use for validating Q')
