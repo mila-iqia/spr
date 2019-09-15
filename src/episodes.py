@@ -22,6 +22,8 @@ def get_random_agent_episodes(args):
                                       device=torch.device('cpu'))  # Only store last frame and discretise to save memory
         action = np.random.randint(0, action_space)
         next_state, reward, done = env.step(action)
+        if args.reward_clip > 0:
+            reward = max(min(reward, args.reward_clip), -args.reward_clip)  # Clip rewards
         transitions.append(Transition(timestep, state, action, reward, not done))
         state = next_state
         timestep = 0 if done else timestep + 1

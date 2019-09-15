@@ -59,6 +59,8 @@ def train_policy(args):
             real_z = encoder(state).view(-1)
             action = dqn.act(real_z)
             next_state, reward, done = env.step(action)
+            if args.reward_clip > 0:
+                reward = max(min(reward, args.reward_clip), -args.reward_clip)  # Clip rewards
             state = state[-1].mul(255).to(dtype=torch.uint8, device=torch.device('cpu'))
             real_transitions.append(Transition(timestep, state, action, reward, not done))
             state = next_state
