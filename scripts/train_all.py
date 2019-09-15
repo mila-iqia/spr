@@ -42,9 +42,9 @@ def train_policy(args):
     while j * args.env_steps_per_epoch < args.total_steps:
         # Train encoder and forward model on real data
         if j != 0:
-            encoder_lr = max(args.encoder_lr / (j*5), 1e-6)
-            set_learning_rate(encoder_trainer.optimizer, encoder_lr)
-            encoder_trainer.train(real_transitions)
+            # encoder_lr = max(args.encoder_lr / (j*5), 1e-6)
+            # set_learning_rate(encoder_trainer.optimizer, encoder_lr)
+            # encoder_trainer.train(real_transitions)
             forward_model.train(real_transitions)
 
         steps = j * args.env_steps_per_epoch
