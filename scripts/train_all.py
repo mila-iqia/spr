@@ -29,8 +29,8 @@ def train_policy(args):
     encoder, encoder_trainer = train_encoder(args, real_transitions)
     forward_model = train_model(args, encoder, real_transitions, env.action_space())
 
-    encoder_trainer.epochs = args.epochs / 2
-    forward_model.args.epochs = args.epochs / 2
+    encoder_trainer.epochs = args.epochs // 2
+    forward_model.args.epochs = args.epochs // 2
 
     j = 0
     dqn = Agent(args, env)
