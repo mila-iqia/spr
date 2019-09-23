@@ -32,11 +32,16 @@ def get_argparser():
                         help='Random seed to use')
     parser.add_argument('--encoder-type', type=str, default="Nature", choices=["Impala", "Nature"],
                         help='Encoder type (Impala or Nature)')
+    parser.add_argument('--integrated-model', action="store_true",
+                        default=False, help='Use an encoder with the model built in.')
+    parser.add_argument('--global-loss', action="store_true", default=False,
+                        help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument('--feature-size', type=int, default=256,
                         help='Size of features')
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
     parser.add_argument("--wandb-proj", type=str, default="awm")
+    parser.add_argument("--name", type=str, default="", help="Name for run in wandb.")
     parser.add_argument("--num_rew_evals", type=int, default=10)
     parser.add_argument("--collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
                         default="random_agent")
@@ -101,6 +106,10 @@ def get_argparser():
                         help='Number of transitions to use for validating Q')
     parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
     parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
+    parser.add_argument("--use-actions", type=bool, default=True,
+                        help="Use actions in the MI.")
+    parser.add_argument("--hard-neg-factor", type=int, default=4,
+                        help="How many hard negative action samples to use.")
 
     return parser
 
