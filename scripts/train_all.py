@@ -15,6 +15,7 @@ from src.envs import Env
 from src.eval import test
 from src.forward_model import ForwardModel
 from src.stdim import InfoNCESpatioTemporalTrainer
+from src.stdim_with_actions import ActionInfoNCESpatioTemporalTrainer
 from src.utils import get_argparser, log, set_learning_rate
 from src.episodes import get_random_agent_episodes, Transition, sample_real_transitions
 
@@ -26,11 +27,14 @@ def train_policy(args):
     # get initial exploration data
     real_transitions = get_random_agent_episodes(args)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
-    encoder, encoder_trainer = train_encoder(args, real_transitions)
-    forward_model = train_model(args, encoder, real_transitions, env.action_space())
+    encoder, encoder_trainer = train_encoder(args, real_transitions, num_actions=env.action_space())
+    if args.integrated_model:
+        forward_model = encoder_trainer
+    else:
+        forward_model = train_model(args, encoder, real_transitions, env.action_space())
+        forward_model.args.epochs = args.epochs // 2
+        encoder_trainer.epochs = args.epochs // 2
 
-    encoder_trainer.epochs = args.epochs // 2
-    forward_model.args.epochs = args.epochs // 2
 
     j = 0
     dqn = Agent(args, env)
@@ -44,8 +48,10 @@ def train_policy(args):
         if j != 0:
             # encoder_lr = max(args.encoder_lr / (j*5), 1e-6)
             # set_learning_rate(encoder_trainer.optimizer, encoder_lr)
-            # encoder_trainer.train(real_transitions)
-            forward_model.train(real_transitions)
+            if args.integrated_model:
+                encoder_trainer.train(real_transitions, init_epoch=j)
+            else:
+                forward_model.train(real_transitions)
 
         steps = j * args.env_steps_per_epoch
         if steps % args.evaluation_interval == 0:
@@ -107,7 +113,11 @@ def train_policy(args):
         j += 1
 
 
-def train_encoder(args, transitions, val_eps=None):
+def train_encoder(args, transitions, num_actions, val_eps=None):
+    if args.integrated_model:
+        trainer = ActionInfoNCESpatioTemporalTrainer
+    else:
+        trainer = InfoNCESpatioTemporalTrainer
 
     observation_shape = transitions[0].state.shape
     if args.encoder_type == "Nature":
@@ -120,8 +130,9 @@ def train_encoder(args, transitions, val_eps=None):
     config = {}
     config.update(vars(args))
     config['obs_space'] = observation_shape  # weird hack
+    config['num_actions'] = num_actions  # weird hack
     if args.method == "infonce-stdim":
-        trainer = InfoNCESpatioTemporalTrainer(encoder, config, device=args.device, wandb=wandb)
+        trainer = trainer(encoder, config, device=args.device, wandb=wandb)
     else:
         assert False, "method {} has no trainer".format(args.method)
 
@@ -138,8 +149,12 @@ def train_model(args, encoder, real_transitions, num_actions, val_eps=None):
 if __name__ == '__main__':
     parser = get_argparser()
     args = parser.parse_args()
+
     tags = []
-    wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags)
+    if len(args.name) > 0:
+        wandb.init(project=args.wandb_proj, tags=tags, name=args.name, entity="abs-world-models")
+    else:
+        wandb.init(project=args.wandb_proj, tags=tags, entity="abs-world-models")
     wandb.config.update(vars(args))
 
     results_dir = os.path.join('results', args.id)
