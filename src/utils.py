@@ -106,7 +106,7 @@ def get_argparser():
                         help='Number of transitions to use for validating Q')
     parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
     parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
-    parser.add_argument("--use-actions", type=bool, default=False, action='store_true',
+    parser.add_argument("--use-actions", type=bool, default=True,
                         help="Use actions in the MI.")
     parser.add_argument("--hard-neg-factor", type=int, default=4,
                         help="How many hard negative action samples to use.")
