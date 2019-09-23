@@ -3,6 +3,7 @@ from __future__ import division
 import os
 import numpy as np
 import torch
+import wandb
 from torch import optim
 
 from src.dqn import DQN
@@ -96,6 +97,7 @@ class Agent():
         loss = -torch.sum(m * log_ps_a, 1)  # Cross-entropy loss (minimises DKL(m||p(s_t, a_t)))
         self.online_net.zero_grad()
         (weights * loss).mean().backward()  # Backpropagate importance-weighted minibatch loss
+        wandb.log({'Loss': loss.detach().item(), 'Weighted Loss': (weights * loss).detach().item()})
         self.optimiser.step()
 
         mem.update_priorities(idxs, loss.detach().cpu().numpy())  # Update priorities of sampled transitions
