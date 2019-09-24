@@ -1,0 +1,43 @@
+description: AWM
+
+target:
+  cluster: eu1
+  vc: intvc
+
+environment:
+  image: microsoft_pytorch:v1.2.0_gpu_cuda10.0_py36_release_gpuenv_hvd0.16.2
+  registry: phillyregistry.azurecr.io
+
+
+# azure storage configuration
+storage:
+  my_storage:
+    # Replace with the name of the Azure Storage Account you created.
+    #   If you followed the tutorial, this should be your_username
+    storage_account_name: ankdefault
+    # Specify a name of the container on your blob (ex. phillytools),
+    #   to store data, results and code. It will be created if it does not exist.
+    container_name: awmcontainer
+
+# data
+#   data upload is not required for this example
+
+search:
+  job_template:
+    name: awm
+    sku: G1
+    command:
+      - pip install --user --upgrade pip
+      - export PATH=$$PATH:~/.local/bin
+      - echo $$PATH
+      - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly
+      - export LC_ALL=C.UTF-8
+      - export LANG=C.UTF-8
+      - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
+      - python -m scripts.train_all --game {game} --updates_per_step 10
+  type: grid
+  max_trials: 10
+  params:
+    - name: game
+      spec: discrete
+      values: ['breakout']
