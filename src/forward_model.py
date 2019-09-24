@@ -21,6 +21,17 @@ class ForwardModel():
         self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) + list(self.sd_predictor.parameters()) +
                                           list(self.reward_predictor.parameters()))
 
+    def generate_reward_class_weights(self, transitions):
+        counts = [0, 0, 0]  # counts for reward=-1,0,1
+        for trans in transitions:
+            counts[trans.reward + 1] += 1
+
+        weights = [0., 0., 0.]
+        for i in range(3):
+            if counts[i] != 0:
+                weights[i] = sum(counts) / counts[i]
+        return torch.tensor(weights, device=self.device)
+
     def generate_batch(self, transitions):
         total_steps = len(transitions)
         print('Total Steps: {}'.format(total_steps))
@@ -57,7 +68,7 @@ class ForwardModel():
             reward_predictions = F.log_softmax(self.reward_predictor(hiddens), dim=-1)
             # predict |s_{t+1} - s_t| instead of s_{t+1} directly
             sd_loss = F.mse_loss(sd_predictions, f_t_next - f_t_last)
-            reward_loss = F.nll_loss(reward_predictions, r_t)
+            reward_loss = F.nll_loss(reward_predictions, r_t, weight=self.class_weights)
 
             loss = self.args.sd_loss_coeff * sd_loss + reward_loss
             self.optimizer.zero_grad()
@@ -71,6 +82,7 @@ class ForwardModel():
         self.log_metrics(epoch, epoch_loss / steps, epoch_sd_loss / steps, epoch_reward_loss / steps)
 
     def train(self, real_transitions):
+        self.class_weights = self.generate_reward_class_weights(real_transitions)
         for e in range(self.args.epochs):
             self.do_one_epoch(e, real_transitions)
 
