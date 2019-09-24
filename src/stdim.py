@@ -94,7 +94,6 @@ class InfoNCESpatioTemporalTrainer(Trainer):
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
     def train(self, tr_eps, val_eps=None):
-        # TODO: Make it work for all modes, right now only it defaults to pcl.
         for e in range(self.epochs):
             self.encoder.train(), self.classifier1.train(), self.classifier2.train()
             self.do_one_epoch(e, tr_eps)
