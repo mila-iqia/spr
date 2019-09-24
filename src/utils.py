@@ -25,7 +25,7 @@ def get_argparser():
     parser.add_argument('--encoder-lr', type=float, default=3e-4,
                         help='Learning Rate foe learning representations (default: 5e-4)')
     parser.add_argument('--epochs', type=int, default=20,
-                        help='Number of epochs for  (default: 100)')
+                        help='Number of epochs for  (default: 20)')
     parser.add_argument('--cuda-id', type=int, default=0,
                         help='CUDA device index')
     parser.add_argument('--seed', type=int, default=42,
@@ -106,8 +106,6 @@ def get_argparser():
                         help='Number of transitions to use for validating Q')
     parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
     parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
-    parser.add_argument("--use-actions", default=False, action='store_true',
-                        help="Use actions in the MI.")
     parser.add_argument("--hard-neg-factor", type=int, default=4,
                         help="How many hard negative action samples to use.")
 
