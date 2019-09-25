@@ -49,15 +49,9 @@ def train_policy(args):
             # encoder_lr = max(args.encoder_lr / (j*5), 1e-6)
             # set_learning_rate(encoder_trainer.optimizer, encoder_lr)
             if args.integrated_model:
-                encoder_trainer.train(real_transitions,
-                                      init_epoch=args.epochs*j,
-                                      epochs=args.epochs,
-                                      log_last_only=True,
-                                      log_epoch=j)
+                encoder_trainer.train(real_transitions)
             else:
-                forward_model.train(real_transitions,
-                                    log_last_only=True,
-                                    log_epoch=j)
+                forward_model.train(real_transitions)
 
         steps = j * args.env_steps_per_epoch
         if steps % args.evaluation_interval == 0:
@@ -113,7 +107,7 @@ def train_policy(args):
                     dqn.learn(model_transitions)
 
         if j > 0:
-            dqn.log(iter=j)
+            dqn.log(env_steps=(j+1) * args.env_steps_per_epoch)
         # Update target network
         if steps % args.target_update == 0:
             dqn.update_target_net()
@@ -150,7 +144,7 @@ def init_encoder(args, transitions, num_actions, val_eps=None):
 
 def train_model(args, encoder, real_transitions, num_actions, val_eps=None):
     forward_model = ForwardModel(args, encoder, num_actions)
-    forward_model.train(real_transitions, log_last_only=True, log_epoch=0)
+    forward_model.train(real_transitions)
     return forward_model
 
 

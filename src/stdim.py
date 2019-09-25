@@ -36,6 +36,7 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                                           list(self.classifier2.parameters()),
                                           lr=config['encoder_lr'], eps=1e-5)
         self.early_stopper = EarlyStopping(patience=self.patience, verbose=False, wandb=self.wandb, name="encoder")
+        self.epochs_till_now = 0
 
     def generate_batch(self, transitions):
         total_steps = len(transitions)
@@ -53,7 +54,7 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                 x_tnext.append(transitions[t+1].state)
             yield torch.stack(x_t).to(self.device).float() / 255., torch.stack(x_tnext).to(self.device).float() / 255.
 
-    def do_one_epoch(self, epoch, episodes, log=True, log_epoch=None):
+    def do_one_epoch(self, episodes):
         mode = "train" if self.encoder.training and self.classifier1.training else "val"
         epoch_loss, accuracy, steps = 0., 0., 0
         accuracy1, accuracy2 = 0., 0.
@@ -85,28 +86,24 @@ class InfoNCESpatioTemporalTrainer(Trainer):
 
             epoch_loss += loss.detach().item()
             steps += 1
-        if log_epoch is None:
-            log_epoch = epoch
-        self.log_results(log_epoch, epoch_loss / steps, prefix=mode, log=log)
+        self.log_results(epoch_loss / steps, prefix=mode)
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
     def train(self, tr_eps, val_eps=None, log_last_only=False, log_epoch=None):
         for e in range(self.epochs):
             self.encoder.train(), self.classifier1.train(), self.classifier2.train()
-            log = not log_last_only or e == self.epochs - 1
-            self.do_one_epoch(e, tr_eps, log=log, log_epoch=log_epoch)
+            self.do_one_epoch(tr_eps)
 
             if val_eps:
                 self.encoder.eval(), self.classifier1.eval(), self.classifier2.eval()
-                self.do_one_epoch(e, val_eps, log=log, log_epoch=log_epoch)
+                self.do_one_epoch(val_eps)
 
                 if self.early_stopper.early_stop:
                     break
         torch.save(self.encoder.state_dict(), os.path.join(self.wandb.run.dir, self.config['game'] + '.pt'))
 
-    def log_results(self, epoch_idx, epoch_loss, prefix="", log=True):
-        print("{} Epoch: {}, Epoch Loss: {}, {}".format(prefix.capitalize(), epoch_idx, epoch_loss,
+    def log_results(self, epoch_loss, prefix=""):
+        print("{} Epoch: {}, Epoch Loss: {}, {}".format(prefix.capitalize(), self.epochs_till_now, epoch_loss,
                                                                      prefix.capitalize()))
-        if log:
-            self.wandb.log({prefix + '_loss': epoch_loss})
+        self.wandb.log({prefix + '_loss': epoch_loss, 'STDIM-epoch': self.epochs_till_now})

@@ -43,13 +43,13 @@ class Agent():
         self.q_losses = []
         self.weighted_q_losses = []
 
-    def log(self, iter):
+    def log(self, env_steps):
         q_loss = np.mean(self.q_losses)
         weighted_q_loss = np.mean(self.weighted_q_losses)
 
         wandb.log({'Q-Loss': q_loss,
-                   'Weighted Q-Loss': weighted_q_loss},
-                  step=iter)
+                   'Weighted Q-Loss': weighted_q_loss,
+                   'Env-steps': env_steps})
 
         self.q_losses = []
         self.weighted_q_losses = []
