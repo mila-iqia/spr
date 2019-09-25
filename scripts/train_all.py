@@ -31,7 +31,7 @@ def train_policy(args):
     if args.integrated_model:
         forward_model = encoder_trainer
     else:
-        encoder_trainer.train(real_transitions)
+        encoder_trainer.train(real_transitions, log_last_only=True, log_epoch=0)
         forward_model = train_model(args, encoder, real_transitions, env.action_space())
         forward_model.args.epochs = args.epochs // 2
         encoder_trainer.epochs = args.epochs // 2
@@ -52,10 +52,12 @@ def train_policy(args):
                 encoder_trainer.train(real_transitions,
                                       init_epoch=args.epochs*j,
                                       epochs=args.epochs,
-                                      log_last_only=True)
+                                      log_last_only=True,
+                                      log_epoch=j)
             else:
                 forward_model.train(real_transitions,
-                                    log_last_only=True)
+                                    log_last_only=True,
+                                    log_epoch=j)
 
         steps = j * args.env_steps_per_epoch
         if steps % args.evaluation_interval == 0:
@@ -148,7 +150,7 @@ def init_encoder(args, transitions, num_actions, val_eps=None):
 
 def train_model(args, encoder, real_transitions, num_actions, val_eps=None):
     forward_model = ForwardModel(args, encoder, num_actions)
-    forward_model.train(real_transitions)
+    forward_model.train(real_transitions, log_last_only=True, log_epoch=0)
     return forward_model
 
 
