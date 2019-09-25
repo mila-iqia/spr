@@ -72,7 +72,12 @@ class ForwardModel:
             reward_predictions = F.log_softmax(self.reward_predictor(hiddens), dim=-1)
             # predict |s_{t+1} - s_t| instead of s_{t+1} directly
             sd_loss = F.mse_loss(sd_predictions, f_t_next - f_t_last)
-            reward_loss = F.nll_loss(reward_predictions, r_t, weight=self.class_weights)
+            if r_t.max() == 2:
+                reward_loss = F.nll_loss(reward_predictions, r_t, weight=self.class_weights)
+            else:
+                # If the batch contains no pos. reward, normalize manually
+                reward_loss = F.nll_loss(reward_predictions, r_t, weight=self.class_weights, reduction='none')
+                reward_loss = reward_loss.sum() / (self.class_weights[r_t].sum() + self.class_weights[2])
 
             loss = self.args.sd_loss_coeff * sd_loss + reward_loss
             self.optimizer.zero_grad()
