@@ -45,10 +45,6 @@ def get_argparser():
     parser.add_argument("--num_rew_evals", type=int, default=10)
     parser.add_argument("--collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
                         default="random_agent")
-    parser.add_argument('--forward-hidden-size', type=int, default=512,
-                        help='Hidden Size for the Forward Model MLP')
-    parser.add_argument('--sd_loss_coeff', type=int, default=10,
-                        help='Coefficient for the dynamics loss')
 
     # MBPO Args
     parser.add_argument("--total_steps", type=int, default=100000)
@@ -59,6 +55,9 @@ def get_argparser():
     parser.add_argument("--env_steps_per_epoch", type=int, default=1000)
     parser.add_argument("--updates_per_step", type=int, default=20)
     parser.add_argument("--initial_exp_steps", type=int, default=5000)
+    parser.add_argument('--forward-hidden-size', type=int, default=512, help='Hidden Size for the Forward Model MLP')
+    parser.add_argument('--sd_loss_coeff', type=int, default=10, help='Coefficient for the dynamics loss')
+
 
     # Rainbow Args
     parser.add_argument('--id', type=str, default='default', help='Experiment ID')
