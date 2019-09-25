@@ -119,8 +119,9 @@ class ForwardModel:
 
     def train(self,real_transitions):
         self.class_weights = self.generate_reward_class_weights(real_transitions)
-        self.do_one_epoch(real_transitions)
-        self.epochs_till_now += 1
+        for e in range(self.args.epochs):
+            self.do_one_epoch(real_transitions)
+            self.epochs_till_now += 1
 
     def predict(self, z, a):
         N = z.size(0)
