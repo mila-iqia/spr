@@ -139,7 +139,7 @@ class ForwardModel:
                     zero_recall,
                     zero_prec):
         print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {}, Reward Accuracy: {}".
-              format(self.total_epochs, epoch_loss, sd_loss, reward_loss, rew_acc))
+              format(self.epochs_till_now, epoch_loss, sd_loss, reward_loss, rew_acc))
         print(
             "Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}".format(
                 pos_recall,
