@@ -53,7 +53,7 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                 x_tnext.append(transitions[t+1].state)
             yield torch.stack(x_t).to(self.device).float() / 255., torch.stack(x_tnext).to(self.device).float() / 255.
 
-    def do_one_epoch(self, epoch, episodes):
+    def do_one_epoch(self, epoch, episodes, log=True):
         mode = "train" if self.encoder.training and self.classifier1.training else "val"
         epoch_loss, accuracy, steps = 0., 0., 0
         accuracy1, accuracy2 = 0., 0.
@@ -84,23 +84,21 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                 self.optimizer.step()
 
             epoch_loss += loss.detach().item()
-            #preds1 = torch.sigmoid(self.classifier1(x1, x2).squeeze())
-            #accuracy1 += calculate_accuracy(preds1, target)
-            #preds2 = torch.sigmoid(self.classifier2(x1_p, x2_p).squeeze())
-            #accuracy2 += calculate_accuracy(preds2, target)
             steps += 1
-        self.log_results(epoch, epoch_loss / steps, prefix=mode)
+        if log:
+            self.log_results(epoch, epoch_loss / steps, prefix=mode)
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
-    def train(self, tr_eps, val_eps=None):
+    def train(self, tr_eps, val_eps=None, log_last_only=False):
         for e in range(self.epochs):
             self.encoder.train(), self.classifier1.train(), self.classifier2.train()
-            self.do_one_epoch(e, tr_eps)
+            log = not log_last_only or e == self.epochs - 1
+            self.do_one_epoch(e, tr_eps, log=log)
 
             if val_eps:
                 self.encoder.eval(), self.classifier1.eval(), self.classifier2.eval()
-                self.do_one_epoch(e, val_eps)
+                self.do_one_epoch(e, val_eps, log=log)
 
                 if self.early_stopper.early_stop:
                     break

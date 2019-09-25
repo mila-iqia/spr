@@ -27,10 +27,11 @@ def train_policy(args):
     # get initial exploration data
     real_transitions = get_random_agent_episodes(args)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
-    encoder, encoder_trainer = train_encoder(args, real_transitions, num_actions=env.action_space())
+    encoder, encoder_trainer = init_encoder(args, real_transitions, num_actions=env.action_space())
     if args.integrated_model:
         forward_model = encoder_trainer
     else:
+        encoder_trainer.train(real_transitions)
         forward_model = train_model(args, encoder, real_transitions, env.action_space())
         forward_model.args.epochs = args.epochs // 2
         encoder_trainer.epochs = args.epochs // 2
@@ -49,10 +50,13 @@ def train_policy(args):
             # set_learning_rate(encoder_trainer.optimizer, encoder_lr)
             if args.integrated_model:
                 encoder_trainer.train(real_transitions,
-                                      init_epoch=args.epochs + 5*j,
-                                      epochs=5,)
+                                      init_epoch=args.epochs*j,
+                                      epochs=args.epochs,
+                                      log_last_only=True)
             else:
-                forward_model.train(real_transitions)
+                forward_model.train(real_transitions,
+                                    init_epoch=j,
+                                    log_last_only=True)
 
         steps = j * args.env_steps_per_epoch
         if steps % args.evaluation_interval == 0:
@@ -114,6 +118,8 @@ def train_policy(args):
                 avg_weighted_loss /= args.updates_per_step
                 wandb.log({'Q-Loss': avg_loss, 'Weighted Q-Loss': avg_weighted_loss})
 
+        if j > 0:
+            dqn.log(iter=j)
         # Update target network
         if steps % args.target_update == 0:
             dqn.update_target_net()
@@ -121,7 +127,7 @@ def train_policy(args):
         j += 1
 
 
-def train_encoder(args, transitions, num_actions, val_eps=None):
+def init_encoder(args, transitions, num_actions, val_eps=None):
     if args.integrated_model:
         trainer = ActionInfoNCESpatioTemporalTrainer
     else:
@@ -144,7 +150,7 @@ def train_encoder(args, transitions, num_actions, val_eps=None):
     else:
         assert False, "method {} has no trainer".format(args.method)
 
-    trainer.train(transitions, val_eps)
+    # trainer.train(transitions, val_eps)
     return encoder, trainer
 
 
