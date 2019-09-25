@@ -142,7 +142,7 @@ class ForwardModel:
         print("Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}".format(pos_recall,
                                                                                                                             pos_prec,
                                                                                                                             zero_recall,
-                                                                                                                            zero_prec))
+                               
         if log:
             wandb.log({'Dynamics loss': epoch_loss,
                        'SD Loss': sd_loss,
