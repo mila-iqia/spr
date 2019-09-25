@@ -97,10 +97,10 @@ class Agent():
         loss = -torch.sum(m * log_ps_a, 1)  # Cross-entropy loss (minimises DKL(m||p(s_t, a_t)))
         self.online_net.zero_grad()
         (weights * loss).mean().backward()  # Backpropagate importance-weighted minibatch loss
-        wandb.log({'Q-Loss': loss.mean().detach().item(), 'Weighted Q-Loss': (weights * loss).mean().detach().item()})
         self.optimiser.step()
 
         mem.update_priorities(idxs, loss.detach().cpu().numpy())  # Update priorities of sampled transitions
+        return loss.mean().detach().item(), (weights * loss).mean().detach().item()
 
     def update_target_net(self):
         self.target_net.load_state_dict(self.online_net.state_dict())
