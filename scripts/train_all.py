@@ -109,8 +109,15 @@ def train_policy(args):
 
             if j >= 1:
                 # Update policy parameters on model data
+                avg_loss, avg_weighted_loss = 0., 0.
                 for g in range(args.updates_per_step):
-                    dqn.learn(model_transitions)
+                    loss, weighted_loss = dqn.learn(model_transitions)
+                    avg_loss += loss
+                    avg_weighted_loss += weighted_loss
+
+                avg_loss /= args.updates_per_step
+                avg_weighted_loss /= args.updates_per_step
+                wandb.log({'Q-Loss': avg_loss, 'Weighted Q-Loss': avg_weighted_loss})
 
         if j > 0:
             dqn.log(iter=j)
