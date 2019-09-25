@@ -155,7 +155,7 @@ class ForwardModel:
                                                                                                                             pos_prec,
                                                                                                                             zero_recall,
                                                                                                                             zero_prec))
-        
+
         if log:
             wandb.log({'Dynamics loss': epoch_loss,
                        'SD Loss': sd_loss,
