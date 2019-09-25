@@ -132,7 +132,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         predictions = self.prediction_module(encoded_obs, shuffled_actions)
         return predictions
 
-    def do_one_epoch(self, epoch, episodes, log=True):
+    def do_one_epoch(self, epoch, episodes, log=True, log_epoch=None):
         mode = "train" if self.encoder.training else "val"
         epoch_loss, steps = 0., 0.
         epoch_local_loss, epoch_rew_loss, epoch_global_loss, rew_acc, = 0., 0., 0., 0.
@@ -212,7 +212,10 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         zero_recall = zero_rew_tp/(zero_rew_fn + zero_rew_tp)
         zero_precision = zero_rew_tp/(zero_rew_tp + zero_rew_fp)
 
-        self.log_results(epoch,
+        if log_epoch is None:
+            log_epoch = epoch
+
+        self.log_results(log_epoch,
                          epoch_local_loss / steps,
                          epoch_rew_loss / steps,
                          epoch_global_loss / steps,
@@ -232,7 +235,8 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
               val_eps=None,
               epochs=-1,
               init_epoch=0,
-              log_last_only=False):
+              log_last_only=False,
+              log_epoch=None):
         # TODO: Make it work for all modes, right now only it defaults to pcl.
         self.class_weights = self.generate_reward_class_weights(tr_eps)
         if epochs < 1:
@@ -243,15 +247,17 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         for e in epochs:
             log = not log_last_only or e == end_epoch - 1
             self.encoder.train(), self.classifier.train()
-            self.do_one_epoch(e, tr_eps, log)
+            self.do_one_epoch(e, tr_eps, log, log_epoch)
 
             if val_eps:
                 self.encoder.eval(), self.classifier.eval()
-                self.do_one_epoch(e, val_eps, log)
+                self.do_one_epoch(e, val_eps, log, log_epoch)
 
                 if self.early_stopper.early_stop:
                     break
-        torch.save(self.encoder.state_dict(), os.path.join(self.wandb.run.dir, self.config['game'] + '.pt'))
+        torch.save(self.encoder.state_dict(),
+                   os.path.join(self.wandb.run.dir,
+                                self.config['game'] + '.pt'))
 
     def predict(self, z, a):
         N = z.size(0)
