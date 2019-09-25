@@ -170,7 +170,13 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
             loss1 = loss1 / (sx * sy)
 
             reward_preds = self.reward_module(f_t_prev, actions)
-            reward_loss = F.cross_entropy(reward_preds, rewards, weight=self.class_weights)
+            # reward_loss = F.cross_entropy(reward_preds, rewards, weight=self.class_weights)
+            if rewards.max() == 2:
+                reward_loss = F.cross_entropy(reward_preds, rewards, weight=self.class_weights)
+            else:
+                # If the batch contains no pos. reward, normalize manually
+                reward_loss = F.cross_entropy(reward_preds, rewards, weight=self.class_weights, reduction='none')
+                reward_loss = reward_loss.sum() / (self.class_weights[rewards].sum() + self.class_weights[2])
 
             # Get TF/TP/TN/FP for rewards to calculate precision, recall later
             reward_preds = reward_preds.argmax(axis=-1)
