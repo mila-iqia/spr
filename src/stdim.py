@@ -53,7 +53,7 @@ class InfoNCESpatioTemporalTrainer(Trainer):
                 x_tnext.append(transitions[t+1].state)
             yield torch.stack(x_t).to(self.device).float() / 255., torch.stack(x_tnext).to(self.device).float() / 255.
 
-    def do_one_epoch(self, epoch, episodes, log=True):
+    def do_one_epoch(self, epoch, episodes, log=True, log_epoch=None):
         mode = "train" if self.encoder.training and self.classifier1.training else "val"
         epoch_loss, accuracy, steps = 0., 0., 0
         accuracy1, accuracy2 = 0., 0.
@@ -85,26 +85,28 @@ class InfoNCESpatioTemporalTrainer(Trainer):
 
             epoch_loss += loss.detach().item()
             steps += 1
-        if log:
-            self.log_results(epoch, epoch_loss / steps, prefix=mode)
+        if log_epoch is None:
+            log_epoch = epoch
+        self.log_results(log_epoch, epoch_loss / steps, prefix=mode, log=log)
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
-    def train(self, tr_eps, val_eps=None, log_last_only=False):
+    def train(self, tr_eps, val_eps=None, log_last_only=False, log_epoch=None):
         for e in range(self.epochs):
             self.encoder.train(), self.classifier1.train(), self.classifier2.train()
             log = not log_last_only or e == self.epochs - 1
-            self.do_one_epoch(e, tr_eps, log=log)
+            self.do_one_epoch(e, tr_eps, log=log, log_epoch=log_epoch)
 
             if val_eps:
                 self.encoder.eval(), self.classifier1.eval(), self.classifier2.eval()
-                self.do_one_epoch(e, val_eps, log=log)
+                self.do_one_epoch(e, val_eps, log=log, log_epoch=log_epoch)
 
                 if self.early_stopper.early_stop:
                     break
         torch.save(self.encoder.state_dict(), os.path.join(self.wandb.run.dir, self.config['game'] + '.pt'))
 
-    def log_results(self, epoch_idx, epoch_loss, prefix=""):
+    def log_results(self, epoch_idx, epoch_loss, prefix="", log=True):
         print("{} Epoch: {}, Epoch Loss: {}, {}".format(prefix.capitalize(), epoch_idx, epoch_loss,
                                                                      prefix.capitalize()))
-        self.wandb.log({prefix + '_loss': epoch_loss})
+        if log:
+            self.wandb.log({prefix + '_loss': epoch_loss})
