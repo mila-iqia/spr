@@ -18,7 +18,8 @@ class ForwardModel():
         self.hidden = nn.Linear(args.feature_size * 4 * num_actions, hidden_size).to(self.device)
         self.sd_predictor = nn.Linear(hidden_size, args.feature_size).to(self.device)
         self.reward_predictor = nn.Linear(hidden_size, 3).to(self.device)
-        self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) + list(self.sd_predictor.parameters()) +
+        self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) +
+                                          list(self.sd_predictor.parameters()) +
                                           list(self.reward_predictor.parameters()))
 
     def generate_batch(self, transitions):
@@ -44,7 +45,10 @@ class ForwardModel():
 
     def do_one_epoch(self, epoch, episodes):
         data_generator = self.generate_batch(episodes)
-        epoch_loss, epoch_sd_loss, epoch_reward_loss, steps = 0., 0., 0., 0
+        epoch_loss, epoch_sd_loss, epoch_reward_loss, steps = 0., 0., 0., 0,
+        rew_acc = 0.
+        pos_rew_tp, pos_rew_tn, pos_rew_fp, pos_rew_fn = 0, 0, 0, 0
+        zero_rew_tp, zero_rew_tn, zero_rew_fp, zero_rew_fn = 0, 0, 0, 0
         for s_t, x_t_next, a_t, r_t in data_generator:
             s_t = s_t.view(self.args.batch_size * 4, 1, s_t.shape[-2], s_t.shape[-1])
             with torch.no_grad():
@@ -68,7 +72,34 @@ class ForwardModel():
             epoch_reward_loss += reward_loss.detach().item()
             epoch_loss += loss.detach().item()
             steps += 1
-        self.log_metrics(epoch, epoch_loss / steps, epoch_sd_loss / steps, epoch_reward_loss / steps)
+
+            reward_predictions = reward_predictions.argmax(axis=-1)
+            rew_acc += (reward_predictions == r_t).float().mean()
+            pos_rew_tp += ((reward_predictions == 2)*(r_t == 2)).float().sum()
+            pos_rew_fp += ((reward_predictions == 2)*(r_t != 2)).float().sum()
+            pos_rew_tn += ((reward_predictions != 2)*(r_t != 2)).float().sum()
+            pos_rew_fn += ((reward_predictions != 2)*(r_t == 2)).float().sum()
+
+            zero_rew_tp += ((reward_predictions == 1)*(r_t == 1)).float().sum()
+            zero_rew_fp += ((reward_predictions == 1)*(r_t != 1)).float().sum()
+            zero_rew_tn += ((reward_predictions != 1)*(r_t != 1)).float().sum()
+            zero_rew_fn += ((reward_predictions != 1)*(r_t == 1)).float().sum()
+
+        pos_recall = pos_rew_tp/(pos_rew_fn + pos_rew_tp)
+        pos_precision = pos_rew_tp/(pos_rew_tp + pos_rew_fp)
+
+        zero_recall = zero_rew_tp/(zero_rew_fn + zero_rew_tp)
+        zero_precision = zero_rew_tp/(zero_rew_tp + zero_rew_fp)
+
+        self.log_metrics(epoch,
+                         epoch_loss / steps,
+                         epoch_sd_loss / steps,
+                         epoch_reward_loss / steps,
+                         rew_acc / steps,
+                         pos_recall,
+                         pos_precision,
+                         zero_recall,
+                         zero_precision)
 
     def train(self, real_transitions):
         for e in range(self.args.epochs):
@@ -81,9 +112,28 @@ class ForwardModel():
         z_last = z.view(N, 4, -1)[:, -1, :]  # choose the last latent vector from z
         return z_last + self.sd_predictor(hidden), self.reward_predictor(hidden).argmax(-1) - 1
 
-    def log_metrics(self, epoch_idx, epoch_loss, sd_loss, reward_loss):
-        print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {}".
-              format(epoch_idx, epoch_loss, sd_loss, reward_loss))
+    def log_metrics(self,
+                    epoch_idx,
+                    epoch_loss,
+                    sd_loss,
+                    reward_loss,
+                    rew_acc,
+                    pos_recall,
+                    pos_prec,
+                    zero_recall,
+                    zero_prec):
+        print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {}, Reward Accuracy: {}".
+              format(epoch_idx, epoch_loss, sd_loss, reward_loss, rew_acc))
+        print("Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}".format(pos_recall,
+                                                                                                                            pos_prec,
+                                                                                                                            zero_recall,
+                                                                                                                            zero_prec))
         wandb.log({'Dynamics loss': epoch_loss,
                    'SD Loss': sd_loss,
-                   'Reward Loss': reward_loss})
+                   'Reward Loss': reward_loss,
+                   "Reward Accuracy": rew_acc,
+                   "Pos. Reward Recall": pos_recall,
+                   "Zero Reward Recall": zero_recall,
+                   "Pos. Reward Precision": pos_prec,
+                   "Zero Reward Precision": zero_prec},
+                   step=epoch_idx)

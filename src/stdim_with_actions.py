@@ -95,7 +95,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                 x_t.append(transitions[t].state)
                 x_tnext.append(transitions[t+1].state)
                 a_t.append(transitions[t].action)
-                r_tnext.append(transitions[t+1].reward)
+                r_tnext.append(transitions[t+1].reward + 1)
 
             yield torch.stack(x_t).to(self.device).float() / 255., \
                   torch.stack(x_tnext).to(self.device).float() / 255., \
@@ -121,8 +121,11 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
 
     def do_one_epoch(self, epoch, episodes):
         mode = "train" if self.encoder.training else "val"
-        epoch_loss, accuracy, steps = 0., 0., 0
-        epoch_loss1, epoch_loss2 = 0., 0.
+        epoch_loss, steps = 0., 0.
+        epoch_local_loss, epoch_rew_loss, epoch_global_loss, rew_acc, = 0., 0., 0., 0.
+        pos_rew_tp, pos_rew_tn, pos_rew_fp, pos_rew_fn = 0, 0, 0, 0
+        zero_rew_tp, zero_rew_tn, zero_rew_fp, zero_rew_fn = 0, 0, 0, 0
+
         data_generator = self.generate_batch(episodes)
         for x_t, x_tprev, actions, rewards in data_generator:
             f_t_maps, f_t_prev_maps = self.encoder(x_t, fmaps=True),\
@@ -156,11 +159,25 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
             reward_preds = self.reward_module(f_t_prev, actions)
             reward_loss = F.cross_entropy(reward_preds, rewards)
 
+            # Get TF/TP/TN/FP for rewards to calculate precision, recall later
+            reward_preds = reward_preds.argmax(axis=-1)
+            rew_acc += (reward_preds == rewards).float().mean()
+            pos_rew_tp += ((reward_preds == 2)*(rewards == 2)).float().sum()
+            pos_rew_fp += ((reward_preds == 2)*(rewards != 2)).float().sum()
+            pos_rew_tn += ((reward_preds != 2)*(rewards != 2)).float().sum()
+            pos_rew_fn += ((reward_preds != 2)*(rewards == 2)).float().sum()
+
+            zero_rew_tp += ((reward_preds == 1)*(rewards == 1)).float().sum()
+            zero_rew_fp += ((reward_preds == 1)*(rewards != 1)).float().sum()
+            zero_rew_tn += ((reward_preds != 1)*(rewards != 1)).float().sum()
+            zero_rew_fn += ((reward_preds != 1)*(rewards == 1)).float().sum()
+
             if self.global_loss:
                 f_t_global = f_t_maps["out"]
                 diff = f_t_pred.unsqueeze(0) - f_t_global.unsqueeze(1)
                 logits = -torch.norm(diff, p=2, dim=-1)
                 loss2 = F.cross_entropy(logits, torch.arange(N).to(self.device))
+                epoch_global_loss += loss2.detach().item()
             else:
                 loss2 = 0
 
@@ -171,9 +188,28 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                 self.optimizer.step()
 
             epoch_loss += loss.detach().item()
-            epoch_loss1 += loss1.detach().item()
+            epoch_local_loss += loss1.detach().item()
+            epoch_rew_loss += reward_loss.detach().item()
+
             steps += 1
-        self.log_results(epoch, epoch_loss1 / steps, epoch_loss / steps, prefix=mode)
+
+        pos_recall = pos_rew_tp/(pos_rew_fn + pos_rew_tp)
+        pos_precision = pos_rew_tp/(pos_rew_tp + pos_rew_fp)
+
+        zero_recall = zero_rew_tp/(zero_rew_fn + zero_rew_tp)
+        zero_precision = zero_rew_tp/(zero_rew_tp + zero_rew_fp)
+
+        self.log_results(epoch,
+                         epoch_local_loss / steps,
+                         epoch_rew_loss / steps,
+                         epoch_global_loss / steps,
+                         epoch_loss / steps,
+                         rew_acc / steps,
+                         pos_recall,
+                         pos_precision,
+                         zero_recall,
+                         zero_precision,
+                         prefix=mode)
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
@@ -201,8 +237,38 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         new_states = self.prediction_module(z, a)
         return new_states, self.reward_module(z, a).argmax(-1) - 1
 
-    def log_results(self, epoch_idx, epoch_loss1, epoch_loss, prefix=""):
-        print("{} Epoch: {}, Epoch Loss: {}, {}".format(prefix.capitalize(), epoch_idx, epoch_loss,
-                                                                     prefix.capitalize()))
+    def log_results(self,
+                    epoch_idx,
+                    local_loss,
+                    reward_loss,
+                    global_loss,
+                    epoch_loss,
+                    rew_acc,
+                    pos_recall,
+                    pos_precision,
+                    zero_recall,
+                    zero_precision,
+                    prefix=""):
+        print("{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Reward Accuracy: {:.3f} {}".format(prefix.capitalize(),
+                                                                                                                                             epoch_idx,
+                                                                                                                                             epoch_loss,
+                                                                                                                                             local_loss,
+                                                                                                                                             reward_loss,
+                                                                                                                                             global_loss,
+                                                                                                                                             rew_acc,
+                                                                                                                                             prefix.capitalize()))
+        print("{} Positive Reward Recall: {:.3f}, Positive Reward Precision: {:.3f}, Zero Reward Recall: {:.3f}, Zero Reward Precision: {:.3f}".format(prefix.capitalize(),
+                                                                                                                                                   pos_recall,
+                                                                                                                                                   pos_precision,
+                                                                                                                                                   zero_recall,
+                                                                                                                                                   zero_precision))
         self.wandb.log({prefix + '_loss': epoch_loss,
-                        prefix + '_loss1': epoch_loss1}, step=epoch_idx)
+                        prefix + '_local_loss': local_loss,
+                        "Reward Loss": reward_loss,
+                        prefix + '_global_loss': global_loss,
+                        "Reward Accuracy": rew_acc,
+                        "Pos. Reward Recall": pos_recall,
+                        "Zero Reward Recall": zero_recall,
+                        "Pos. Reward Precision": pos_precision,
+                        "Zero Reward Precision": zero_precision},
+                        step=epoch_idx)
