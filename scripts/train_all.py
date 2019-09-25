@@ -35,7 +35,6 @@ def train_policy(args):
         forward_model.args.epochs = args.epochs // 2
         encoder_trainer.epochs = args.epochs // 2
 
-
     j = 0
     dqn = Agent(args, env)
     dqn.train()
@@ -49,7 +48,9 @@ def train_policy(args):
             # encoder_lr = max(args.encoder_lr / (j*5), 1e-6)
             # set_learning_rate(encoder_trainer.optimizer, encoder_lr)
             if args.integrated_model:
-                encoder_trainer.train(real_transitions, init_epoch=j)
+                encoder_trainer.train(real_transitions,
+                                      init_epoch=args.epochs + 5*j,
+                                      epochs=5,)
             else:
                 forward_model.train(real_transitions)
 
