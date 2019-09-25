@@ -102,6 +102,19 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                   torch.tensor(a_t, device=self.device).long(), \
                   torch.tensor(r_tnext, device=self.device).long(),
 
+
+    def generate_reward_class_weights(self, transitions):
+        counts = [0, 0, 0]  # counts for reward=-1,0,1
+        for trans in transitions:
+            counts[trans.reward + 1] += 1
+
+        weights = [0., 0., 0.]
+        for i in range(3):
+            if counts[i] != 0:
+                weights[i] = sum(counts) / counts[i]
+        return torch.tensor(weights, device=self.device)
+
+
     def hard_neg_sampling(self, encoded_obs, actions):
         """
         :param encoded_obs: Output of the encoder.
@@ -157,7 +170,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
             loss1 = loss1 / (sx * sy)
 
             reward_preds = self.reward_module(f_t_prev, actions)
-            reward_loss = F.cross_entropy(reward_preds, rewards)
+            reward_loss = F.cross_entropy(reward_preds, rewards, weight=self.class_weights)
 
             # Get TF/TP/TN/FP for rewards to calculate precision, recall later
             reward_preds = reward_preds.argmax(axis=-1)
@@ -215,6 +228,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
 
     def train(self, tr_eps, val_eps=None, epochs=-1, init_epoch=0):
         # TODO: Make it work for all modes, right now only it defaults to pcl.
+        self.class_weights = self.generate_reward_class_weights(tr_eps)
         if epochs < 1:
             epochs = range(init_epoch, self.epochs + init_epoch)
         else:

@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from src.episodes import get_framestacked_transition
 
 
-class ForwardModel():
+class ForwardModel:
     def __init__(self, args, encoder, num_actions):
         self.args = args
         self.device = args.device
