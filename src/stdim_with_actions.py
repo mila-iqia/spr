@@ -132,7 +132,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         predictions = self.prediction_module(encoded_obs, shuffled_actions)
         return predictions
 
-    def do_one_epoch(self, epoch, episodes):
+    def do_one_epoch(self, epoch, episodes, log=True):
         mode = "train" if self.encoder.training else "val"
         epoch_loss, steps = 0., 0.
         epoch_local_loss, epoch_rew_loss, epoch_global_loss, rew_acc, = 0., 0., 0., 0.
@@ -222,24 +222,32 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                          pos_precision,
                          zero_recall,
                          zero_precision,
-                         prefix=mode)
+                         prefix=mode,
+                         log=log)
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
-    def train(self, tr_eps, val_eps=None, epochs=-1, init_epoch=0):
+    def train(self,
+              tr_eps,
+              val_eps=None,
+              epochs=-1,
+              init_epoch=0,
+              log_last_only=False):
         # TODO: Make it work for all modes, right now only it defaults to pcl.
         self.class_weights = self.generate_reward_class_weights(tr_eps)
         if epochs < 1:
-            epochs = range(init_epoch, self.epochs + init_epoch)
+            end_epoch = self.epochs + init_epoch
         else:
-            epochs = range(init_epoch, epochs + init_epoch)
+            end_epoch = epochs + init_epoch
+        epochs = range(init_epoch, end_epoch)
         for e in epochs:
+            log = not log_last_only or e == end_epoch - 1
             self.encoder.train(), self.classifier.train()
-            self.do_one_epoch(e, tr_eps)
+            self.do_one_epoch(e, tr_eps, log)
 
             if val_eps:
                 self.encoder.eval(), self.classifier.eval()
-                self.do_one_epoch(e, val_eps)
+                self.do_one_epoch(e, val_eps, log)
 
                 if self.early_stopper.early_stop:
                     break
@@ -262,7 +270,8 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                     pos_precision,
                     zero_recall,
                     zero_precision,
-                    prefix=""):
+                    prefix="",
+                    log=True):
         print("{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Reward Accuracy: {:.3f} {}".format(prefix.capitalize(),
                                                                                                                                              epoch_idx,
                                                                                                                                              epoch_loss,
@@ -276,13 +285,14 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                                                                                                                                                    pos_precision,
                                                                                                                                                    zero_recall,
                                                                                                                                                    zero_precision))
-        self.wandb.log({prefix + '_loss': epoch_loss,
-                        prefix + '_local_loss': local_loss,
-                        "Reward Loss": reward_loss,
-                        prefix + '_global_loss': global_loss,
-                        "Reward Accuracy": rew_acc,
-                        "Pos. Reward Recall": pos_recall,
-                        "Zero Reward Recall": zero_recall,
-                        "Pos. Reward Precision": pos_precision,
-                        "Zero Reward Precision": zero_precision},
-                        step=epoch_idx)
+        if log:
+            self.wandb.log({prefix + '_loss': epoch_loss,
+                            prefix + '_local_loss': local_loss,
+                            "Reward Loss": reward_loss,
+                            prefix + '_global_loss': global_loss,
+                            "Reward Accuracy": rew_acc,
+                            "Pos. Reward Recall": pos_recall,
+                            "Zero Reward Recall": zero_recall,
+                            "Pos. Reward Precision": pos_precision,
+                            "Zero Reward Precision": zero_precision},
+                            step=epoch_idx)

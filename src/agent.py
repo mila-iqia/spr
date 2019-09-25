@@ -40,6 +40,20 @@ class Agent():
 
         self.optimiser = optim.Adam(self.online_net.parameters(), lr=args.learning_rate, eps=args.adam_eps)
 
+        self.q_losses = []
+        self.weighted_q_losses = []
+
+    def log(self, iter):
+        q_loss = np.mean(self.q_losses)
+        weighted_q_loss = np.mean(self.weighted_q_losses)
+
+        wandb.log({'Q-Loss': q_loss,
+                   'Weighted Q-Loss': weighted_q_loss},
+                  step=iter)
+
+        self.q_losses = []
+        self.weighted_q_losses = []
+
     # Resets noisy weights in all linear layers (of online net only)
     def reset_noise(self):
         self.online_net.reset_noise()
@@ -97,7 +111,9 @@ class Agent():
         loss = -torch.sum(m * log_ps_a, 1)  # Cross-entropy loss (minimises DKL(m||p(s_t, a_t)))
         self.online_net.zero_grad()
         (weights * loss).mean().backward()  # Backpropagate importance-weighted minibatch loss
-        wandb.log({'Q-Loss': loss.mean().detach().item(), 'Weighted Q-Loss': (weights * loss).mean().detach().item()})
+        self.q_losses.append(loss.mean().detach().item())
+        self.weighted_q_losses.append((weights * loss).mean().detach().item())
+        # wandb.log({'Q-Loss': loss.mean().detach().item(), 'Weighted Q-Loss': (weights * loss).mean().detach().item()})
         self.optimiser.step()
 
         mem.update_priorities(idxs, loss.detach().cpu().numpy())  # Update priorities of sampled transitions

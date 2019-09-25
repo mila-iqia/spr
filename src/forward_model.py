@@ -54,7 +54,7 @@ class ForwardModel:
                   F.one_hot(torch.tensor(a_t), num_classes=self.num_actions).float().to(self.device), \
                   (torch.tensor(r_t) + 1).to(self.device)
 
-    def do_one_epoch(self, epoch, episodes):
+    def do_one_epoch(self, epoch, episodes, log=True):
         data_generator = self.generate_batch(episodes)
         epoch_loss, epoch_sd_loss, epoch_reward_loss, steps = 0., 0., 0., 0,
         rew_acc = 0.
@@ -110,12 +110,14 @@ class ForwardModel:
                          pos_recall,
                          pos_precision,
                          zero_recall,
-                         zero_precision)
+                         zero_precision,
+                         log)
 
-    def train(self, real_transitions):
+    def train(self, real_transitions, log_last_only=False):
         self.class_weights = self.generate_reward_class_weights(real_transitions)
         for e in range(self.args.epochs):
-            self.do_one_epoch(e, real_transitions)
+            log = e == self.args.epochs - 1 or log_last_only
+            self.do_one_epoch(e, real_transitions, log)
 
     def predict(self, z, a):
         N = z.size(0)
@@ -133,19 +135,21 @@ class ForwardModel:
                     pos_recall,
                     pos_prec,
                     zero_recall,
-                    zero_prec):
+                    zero_prec,
+                    log):
         print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {}, Reward Accuracy: {}".
               format(epoch_idx, epoch_loss, sd_loss, reward_loss, rew_acc))
         print("Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}".format(pos_recall,
                                                                                                                             pos_prec,
                                                                                                                             zero_recall,
                                                                                                                             zero_prec))
-        wandb.log({'Dynamics loss': epoch_loss,
-                   'SD Loss': sd_loss,
-                   'Reward Loss': reward_loss,
-                   "Reward Accuracy": rew_acc,
-                   "Pos. Reward Recall": pos_recall,
-                   "Zero Reward Recall": zero_recall,
-                   "Pos. Reward Precision": pos_prec,
-                   "Zero Reward Precision": zero_prec},
-                   step=epoch_idx)
+        if log:
+            wandb.log({'Dynamics loss': epoch_loss,
+                       'SD Loss': sd_loss,
+                       'Reward Loss': reward_loss,
+                       "Reward Accuracy": rew_acc,
+                       "Pos. Reward Recall": pos_recall,
+                       "Zero Reward Recall": zero_recall,
+                       "Pos. Reward Precision": pos_prec,
+                       "Zero Reward Precision": zero_prec},
+                       step=epoch_idx)
