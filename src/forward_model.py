@@ -147,5 +147,4 @@ class ForwardModel:
                    "Pos. Reward Recall": pos_recall,
                    "Zero Reward Recall": zero_recall,
                    "Pos. Reward Precision": pos_prec,
-                   "Zero Reward Precision": zero_prec},
-                   step=epoch_idx)
+                   "Zero Reward Precision": zero_prec})
