@@ -22,6 +22,7 @@ class ForwardModel:
                                           list(self.sd_predictor.parameters()) +
                                           list(self.reward_predictor.parameters()))
         self.epochs_till_now = 0
+        self.reward_loss_weight = args.reward_loss_weight
 
     def generate_reward_class_weights(self, transitions):
         counts = [0, 0, 0]  # counts for reward=-1,0,1
@@ -80,7 +81,7 @@ class ForwardModel:
                 reward_loss = F.nll_loss(reward_predictions, r_t, weight=self.class_weights, reduction='none')
                 reward_loss = reward_loss.sum() / (self.class_weights[r_t].sum() + self.class_weights[2])
 
-            loss = self.args.sd_loss_coeff * sd_loss + reward_loss
+            loss = self.args.sd_loss_coeff * sd_loss + reward_loss*self.reward_weight
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
@@ -90,7 +91,7 @@ class ForwardModel:
             epoch_loss += loss.detach().item()
             steps += 1
 
-            reward_predictions = reward_predictions.argmax(axis=-1)
+            reward_predictions = reward_predictions.argmax(dim=-1)
             rew_acc += (reward_predictions == r_t).float().mean()
             pos_rew_tp += ((reward_predictions == 2)*(r_t == 2)).float().sum()
             pos_rew_fp += ((reward_predictions == 2)*(r_t != 2)).float().sum()
@@ -117,9 +118,11 @@ class ForwardModel:
                          zero_recall,
                          zero_precision)
 
-    def train(self,real_transitions):
-        self.class_weights = self.generate_reward_class_weights(real_transitions)
-        for e in range(self.args.epochs):
+    def train(self, real_transitions, epochs=-1):
+        if epochs < 1:
+            epochs = self.args.epochs
+        for _ in range(epochs):
+            self.class_weights = self.generate_reward_class_weights(real_transitions)
             self.do_one_epoch(real_transitions)
             self.epochs_till_now += 1
 
