@@ -27,12 +27,18 @@ def train_policy(args):
     # get initial exploration data
     real_transitions = get_random_agent_episodes(args)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
-    encoder, encoder_trainer = init_encoder(args, real_transitions, num_actions=env.action_space())
+    encoder, encoder_trainer = train_encoder(args,
+                                             real_transitions,
+                                             num_actions=env.action_space(),
+                                             init_epochs=args.pretrain_epochs)
     if args.integrated_model:
         forward_model = encoder_trainer
     else:
-        encoder_trainer.train(real_transitions, log_last_only=True, log_epoch=0)
-        forward_model = train_model(args, encoder, real_transitions, env.action_space())
+        forward_model = train_model(args,
+                                    encoder,
+                                    real_transitions,
+                                    env.action_space(),
+                                    init_epochs=args.pretrain_epochs)
         forward_model.args.epochs = args.epochs // 2
         encoder_trainer.epochs = args.epochs // 2
 
@@ -115,7 +121,7 @@ def train_policy(args):
         j += 1
 
 
-def init_encoder(args, transitions, num_actions, val_eps=None):
+def train_encoder(args, transitions, num_actions, val_eps=None, init_epochs=None):
     if args.integrated_model:
         trainer = ActionInfoNCESpatioTemporalTrainer
     else:
@@ -138,13 +144,13 @@ def init_encoder(args, transitions, num_actions, val_eps=None):
     else:
         assert False, "method {} has no trainer".format(args.method)
 
-    # trainer.train(transitions, val_eps)
+    trainer.train(transitions, val_eps, epochs=init_epochs)
     return encoder, trainer
 
 
-def train_model(args, encoder, real_transitions, num_actions, val_eps=None):
+def train_model(args, encoder, real_transitions, num_actions, val_eps=None, init_epochs=-1):
     forward_model = ForwardModel(args, encoder, num_actions)
-    forward_model.train(real_transitions)
+    forward_model.train(real_transitions, init_epochs)
     return forward_model
 
 

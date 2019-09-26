@@ -70,6 +70,8 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         self.reward_module = RewardPredictionModule(self.encoder.hidden_size,
                                                     config["num_actions"])
 
+        self.reward_loss_weight = config["reward_loss_weight"]
+
         self.prediction_module.to(device)
         self.convert_actions = lambda a: F.one_hot(a, num_classes=config["num_actions"])
         self.reward_module.to(device)
@@ -137,6 +139,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         epoch_local_loss, epoch_rew_loss, epoch_global_loss, rew_acc, = 0., 0., 0., 0.
         pos_rew_tp, pos_rew_tn, pos_rew_fp, pos_rew_fn = 0, 0, 0, 0
         zero_rew_tp, zero_rew_tn, zero_rew_fp, zero_rew_fn = 0, 0, 0, 0
+        sd_loss = 0
 
         data_generator = self.generate_batch(episodes)
         for x_t, x_tprev, actions, rewards in data_generator:
@@ -145,6 +148,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
 
             # Loss 1: Global at time t, f5 patches at time t-1
             f_t, f_t_prev = f_t_maps['f5'], f_t_prev_maps['out']
+            f_t_global = f_t_maps["out"]
             sy = f_t.size(1)
             sx = f_t.size(2)
             actions = self.convert_actions(actions).float()
@@ -168,6 +172,8 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                     loss1 += step_loss
             loss1 = loss1 / (sx * sy)
 
+            sd_loss += F.mse_loss(f_t_global, f_t_pred[:f_t_global.shape[0]], reduction="mean")
+
             reward_preds = self.reward_module(f_t_prev, actions)
             # reward_loss = F.cross_entropy(reward_preds, rewards, weight=self.class_weights)
             if rewards.max() == 2:
@@ -178,20 +184,19 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                 reward_loss = reward_loss.sum() / (self.class_weights[rewards].sum() + self.class_weights[2])
 
             # Get TF/TP/TN/FP for rewards to calculate precision, recall later
-            reward_preds = reward_preds.argmax(axis=-1)
+            reward_preds = reward_preds.argmax(dim=-1)
             rew_acc += (reward_preds == rewards).float().mean()
             pos_rew_tp += ((reward_preds == 2)*(rewards == 2)).float().sum()
             pos_rew_fp += ((reward_preds == 2)*(rewards != 2)).float().sum()
-            pos_rew_tn += ((reward_preds != 2)*(rewards != 2)).float().sum()
             pos_rew_fn += ((reward_preds != 2)*(rewards == 2)).float().sum()
+            pos_rew_tn += ((reward_preds != 2)*(rewards != 2)).float().sum()
 
             zero_rew_tp += ((reward_preds == 1)*(rewards == 1)).float().sum()
             zero_rew_fp += ((reward_preds == 1)*(rewards != 1)).float().sum()
-            zero_rew_tn += ((reward_preds != 1)*(rewards != 1)).float().sum()
             zero_rew_fn += ((reward_preds != 1)*(rewards == 1)).float().sum()
+            zero_rew_tn += ((reward_preds != 1)*(rewards != 1)).float().sum()
 
             if self.global_loss:
-                f_t_global = f_t_maps["out"]
                 diff = f_t_pred.unsqueeze(0) - f_t_global.unsqueeze(1)
                 logits = -torch.norm(diff, p=2, dim=-1)
                 loss2 = F.cross_entropy(logits, torch.arange(N).to(self.device))
@@ -200,7 +205,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                 loss2 = 0
 
             self.optimizer.zero_grad()
-            loss = loss1 + loss2 + reward_loss
+            loss = loss1 + loss2 + reward_loss*self.reward_loss_weight
             if mode == "train":
                 loss.backward()
                 self.optimizer.step()
@@ -221,6 +226,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                          epoch_rew_loss / steps,
                          epoch_global_loss / steps,
                          epoch_loss / steps,
+                         sd_loss / steps,
                          rew_acc / steps,
                          pos_recall,
                          pos_precision,
@@ -230,10 +236,12 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
-    def train(self, tr_eps, val_eps=None):
+    def train(self, tr_eps, val_eps=None, epochs=-1):
         self.class_weights = self.generate_reward_class_weights(tr_eps)
-        epochs = range(self.epochs)
-        for e in epochs:
+        if epochs <= 0:
+            epochs = self.epochs
+        epochs = range(epochs)
+        for _ in epochs:
             self.encoder.train(), self.classifier.train()
             self.do_one_epoch(tr_eps)
 
@@ -259,6 +267,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                     reward_loss,
                     global_loss,
                     epoch_loss,
+                    sd_loss,
                     rew_acc,
                     pos_recall,
                     pos_precision,
@@ -266,13 +275,14 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                     zero_precision,
                     prefix=""):
         print(
-            "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Reward Accuracy: {:.3f} {}".format(
+            "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Reward Accuracy: {:.3f} {}".format(
                 prefix.capitalize(),
                 self.epochs_till_now,
                 epoch_loss,
                 local_loss,
                 reward_loss,
                 global_loss,
+                sd_loss,
                 rew_acc,
                 prefix.capitalize()))
         print(
@@ -286,6 +296,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                         prefix + '_local_loss': local_loss,
                         "Reward Loss": reward_loss,
                         prefix + '_global_loss': global_loss,
+                        'SD Loss': sd_loss,
                         "Reward Accuracy": rew_acc,
                         "Pos. Reward Recall": pos_recall,
                         "Zero Reward Recall": zero_recall,
