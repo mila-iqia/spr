@@ -26,8 +26,8 @@ def get_argparser():
                         help='Learning Rate foe learning representations (default: 5e-4)')
     parser.add_argument('--epochs', type=int, default=20,
                         help='Number of epochs for  (default: 20)')
-    parser.add_argument('--pretrain-epochs', type=int, default=-1,
-                        help='Number of epochs to pretrain model and encoder for (-1 to use epochs argument).')
+    parser.add_argument('--pretrain-epochs', type=int, default=20,
+                        help='Number of epochs to pretrain model and encoder for (default: 20 (same as --epochs)).')
     parser.add_argument('--cuda-id', type=int, default=0,
                         help='CUDA device index')
     parser.add_argument('--seed', type=int, default=42,

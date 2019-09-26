@@ -148,7 +148,7 @@ def train_encoder(args, transitions, num_actions, val_eps=None, init_epochs=None
     return encoder, trainer
 
 
-def train_model(args, encoder, real_transitions, num_actions, val_eps=None, init_epochs=-1):
+def train_model(args, encoder, real_transitions, num_actions, val_eps=None, init_epochs=None):
     forward_model = ForwardModel(args, encoder, num_actions)
     forward_model.train(real_transitions, init_epochs)
     return forward_model
