@@ -31,7 +31,7 @@ class ForwardModel:
         weights = [0., 0., 0.]
         for i in range(3):
             if counts[i] != 0:
-                weights[i] = sum(counts) / counts[i]
+                weights[i] = min(1. * self.args.batch_size, sum(counts) / counts[i])
         return torch.tensor(weights, device=self.device)
 
     def generate_batch(self, transitions):
