@@ -81,7 +81,7 @@ class ForwardModel:
                 reward_loss = F.nll_loss(reward_predictions, r_t, weight=self.class_weights, reduction='none')
                 reward_loss = reward_loss.sum() / (self.class_weights[r_t].sum() + self.class_weights[2])
 
-            loss = self.args.sd_loss_coeff * sd_loss + reward_loss*self.reward_weight
+            loss = self.args.sd_loss_coeff * sd_loss + reward_loss * self.reward_loss_weight
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
