@@ -26,6 +26,8 @@ def get_argparser():
                         help='Learning Rate foe learning representations (default: 5e-4)')
     parser.add_argument('--epochs', type=int, default=20,
                         help='Number of epochs for  (default: 20)')
+    parser.add_argument('--pretrain-epochs', type=int, default=-1,
+                        help='Number of epochs to pretrain model and encoder for (-1 to use epochs argument).')
     parser.add_argument('--cuda-id', type=int, default=0,
                         help='CUDA device index')
     parser.add_argument('--seed', type=int, default=42,
@@ -57,7 +59,8 @@ def get_argparser():
     parser.add_argument("--initial_exp_steps", type=int, default=5000)
     parser.add_argument('--forward-hidden-size', type=int, default=512, help='Hidden Size for the Forward Model MLP')
     parser.add_argument('--sd_loss_coeff', type=int, default=10, help='Coefficient for the dynamics loss')
-
+    parser.add_argument("--reward-loss-weight", default=1.0, type=float,
+                        help="Weight for reward in shared loss.")
 
     # Rainbow Args
     parser.add_argument('--id', type=str, default='default', help='Experiment ID')
