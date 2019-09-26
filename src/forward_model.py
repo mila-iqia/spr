@@ -118,8 +118,8 @@ class ForwardModel:
                          zero_recall,
                          zero_precision)
 
-    def train(self, real_transitions, epochs=-1):
-        if epochs < 1:
+    def train(self, real_transitions, epochs=None):
+        if not epochs:
             epochs = self.args.epochs
         for _ in range(epochs):
             self.class_weights = self.generate_reward_class_weights(real_transitions)

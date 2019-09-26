@@ -90,8 +90,10 @@ class InfoNCESpatioTemporalTrainer(Trainer):
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
-    def train(self, tr_eps, val_eps=None, log_last_only=False, log_epoch=None):
-        for e in range(self.epochs):
+    def train(self, tr_eps, val_eps=None, epochs=None):
+        if not epochs:
+            epochs = self.epochs
+        for e in range(epochs):
             self.encoder.train(), self.classifier1.train(), self.classifier2.train()
             self.do_one_epoch(tr_eps)
 

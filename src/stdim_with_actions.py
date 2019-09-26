@@ -236,9 +236,9 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
-    def train(self, tr_eps, val_eps=None, epochs=-1):
+    def train(self, tr_eps, val_eps=None, epochs=None):
         self.class_weights = self.generate_reward_class_weights(tr_eps)
-        if epochs <= 0:
+        if not epochs:
             epochs = self.epochs
         epochs = range(epochs)
         for _ in epochs:
