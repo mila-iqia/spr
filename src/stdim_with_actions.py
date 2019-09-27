@@ -24,29 +24,33 @@ class Classifier(nn.Module):
 
 
 class PredictionModule(nn.Module):
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, state_dim, num_actions):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(state_dim + action_dim, state_dim+action_dim),
+            nn.Linear(state_dim*num_actions, state_dim*4),
             nn.ReLU(),
-            nn.Linear(state_dim+action_dim, state_dim))
+            nn.Linear(state_dim*4, state_dim))
 
     def forward(self, states, actions):
-        inp = torch.cat([states, actions], -1)
-        return states + self.network(inp)
+        N = states.size(0)
+        output = self.network(
+            torch.bmm(states.unsqueeze(2), actions.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
+        return states + output
 
 
 class RewardPredictionModule(nn.Module):
-    def __init__(self, state_dim, action_dim, reward_dim=3):
+    def __init__(self, state_dim, num_actions, reward_dim=3):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(state_dim + action_dim, state_dim+action_dim),
+            nn.Linear(state_dim*num_actions, state_dim*4),
             nn.ReLU(),
-            nn.Linear(state_dim+action_dim, reward_dim))
+            nn.Linear(state_dim*4, reward_dim))
 
     def forward(self, states, actions):
-        inp = torch.cat([states, actions], -1)
-        return self.network(inp)
+        N = states.size(0)
+        output = self.network(
+            torch.bmm(states.unsqueeze(2), actions.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
+        return output
 
 
 class ActionInfoNCESpatioTemporalTrainer(Trainer):
@@ -59,6 +63,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         self.epochs = config['epochs']
         self.batch_size = config['batch_size']
         self.global_loss = config['global_loss']
+        self.noncontrastive_global_loss = config['noncontrastive_global_loss']
 
         self.device = device
         self.classifier = nn.Linear(self.encoder.hidden_size, 64).to(device)
@@ -140,6 +145,9 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         pos_rew_tp, pos_rew_tn, pos_rew_fp, pos_rew_fn = 0, 0, 0, 0
         zero_rew_tp, zero_rew_tn, zero_rew_fp, zero_rew_fn = 0, 0, 0, 0
         sd_loss = 0
+        sd_cosine_sim = 0
+        representation_norm = 0
+
 
         data_generator = self.generate_batch(episodes)
         for x_t, x_tprev, actions, rewards in data_generator:
@@ -172,8 +180,6 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                     loss1 += step_loss
             loss1 = loss1 / (sx * sy)
 
-            sd_loss += F.mse_loss(f_t_global, f_t_pred[:f_t_global.shape[0]], reduction="mean")
-
             reward_preds = self.reward_module(f_t_prev, actions)
             # reward_loss = F.cross_entropy(reward_preds, rewards, weight=self.class_weights)
             if rewards.max() == 2:
@@ -204,8 +210,16 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
             else:
                 loss2 = 0
 
+            # log information about the quality of the predictions/latents
+            local_sd_loss = F.mse_loss(f_t_global, f_t_pred[:f_t_global.shape[0]], reduction="mean")
+            sd_loss += local_sd_loss
+            sd_cosine_sim += F.cosine_similarity(f_t_global, f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
+            representation_norm += torch.norm(f_t_global, dim=-1).mean()
+
             self.optimizer.zero_grad()
             loss = loss1 + loss2 + reward_loss*self.reward_loss_weight
+            if self.noncontrastive_global_loss:
+                loss = loss + local_sd_loss
             if mode == "train":
                 loss.backward()
                 self.optimizer.step()
@@ -227,6 +241,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                          epoch_global_loss / steps,
                          epoch_loss / steps,
                          sd_loss / steps,
+                         sd_cosine_sim / steps,
                          rew_acc / steps,
                          pos_recall,
                          pos_precision,
@@ -268,6 +283,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                     global_loss,
                     epoch_loss,
                     sd_loss,
+                    sd_cosine_sim,
                     rew_acc,
                     pos_recall,
                     pos_precision,
@@ -275,7 +291,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                     zero_precision,
                     prefix=""):
         print(
-            "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Reward Accuracy: {:.3f} {}".format(
+            "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Prediction Cosine Similarity: {:.3f}, Reward Accuracy: {:.3f} {}".format(
                 prefix.capitalize(),
                 self.epochs_till_now,
                 epoch_loss,
@@ -283,6 +299,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                 reward_loss,
                 global_loss,
                 sd_loss,
+                sd_cosine_sim,
                 rew_acc,
                 prefix.capitalize()))
         print(
@@ -296,8 +313,9 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                         prefix + '_local_loss': local_loss,
                         "Reward Loss": reward_loss,
                         prefix + '_global_loss': global_loss,
-                        'SD Loss': sd_loss,
                         "Reward Accuracy": rew_acc,
+                        'SD Loss': sd_loss,
+                        'SD Cosine Similarity': sd_cosine_sim,
                         "Pos. Reward Recall": pos_recall,
                         "Zero Reward Recall": zero_recall,
                         "Pos. Reward Precision": pos_precision,

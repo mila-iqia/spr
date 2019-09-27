@@ -38,6 +38,8 @@ def get_argparser():
                         default=False, help='Use an encoder with the model built in.')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
+    parser.add_argument('--noncontrastive-global-loss', action="store_true", default=False,
+                        help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument('--feature-size', type=int, default=256,
                         help='Size of features')
     parser.add_argument("--patience", type=int, default=15)
