@@ -32,7 +32,7 @@ class ForwardModel:
         weights = [0., 0., 0.]
         for i in range(3):
             if counts[i] != 0:
-                weights[i] = sum(counts) / counts[i]
+                weights[i] = min(1. * self.args.batch_size, sum(counts) / counts[i])
         return torch.tensor(weights, device=self.device)
 
     def generate_batch(self, transitions):
@@ -81,7 +81,7 @@ class ForwardModel:
                 reward_loss = F.nll_loss(reward_predictions, r_t, weight=self.class_weights, reduction='none')
                 reward_loss = reward_loss.sum() / (self.class_weights[r_t].sum() + self.class_weights[2])
 
-            loss = self.args.sd_loss_coeff * sd_loss + reward_loss*self.reward_weight
+            loss = self.args.sd_loss_coeff * sd_loss + reward_loss * self.reward_loss_weight
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
@@ -118,8 +118,8 @@ class ForwardModel:
                          zero_recall,
                          zero_precision)
 
-    def train(self, real_transitions, epochs=-1):
-        if epochs < 1:
+    def train(self, real_transitions, epochs=None):
+        if not epochs:
             epochs = self.args.epochs
         for _ in range(epochs):
             self.class_weights = self.generate_reward_class_weights(real_transitions)
