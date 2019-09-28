@@ -36,6 +36,8 @@ def get_argparser():
                         help='Encoder type (Impala or Nature)')
     parser.add_argument('--integrated-model', action="store_true",
                         default=False, help='Use an encoder with the model built in.')
+    parser.add_argument('--framestack-infomax', action="store_true",
+                        default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument('--noncontrastive-global-loss', action="store_true", default=False,
