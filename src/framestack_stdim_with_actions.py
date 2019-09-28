@@ -12,6 +12,7 @@ from .trainer import Trainer
 from src.utils import EarlyStopping
 from torchvision import transforms
 import torchvision.transforms.functional as TF
+from src.memory import blank_trans
 
 
 class Classifier(nn.Module):
@@ -27,22 +28,22 @@ class PredictionModule(nn.Module):
     def __init__(self, state_dim, num_actions):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(state_dim*num_actions, state_dim*4),
+            nn.Linear(state_dim*num_actions*4, state_dim*4),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim))
 
-    def forward(self, states, actions):
+    def forward(self, states, actions, initial_states):
         N = states.size(0)
         output = self.network(
             torch.bmm(states.unsqueeze(2), actions.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
-        return states + output
+        return initial_states + output
 
 
 class RewardPredictionModule(nn.Module):
     def __init__(self, state_dim, num_actions, reward_dim=3):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(state_dim*num_actions, state_dim*4),
+            nn.Linear(state_dim*num_actions*4, state_dim*4),
             nn.ReLU(),
             nn.Linear(state_dim*4, reward_dim))
 
@@ -53,7 +54,7 @@ class RewardPredictionModule(nn.Module):
         return output
 
 
-class ActionInfoNCESpatioTemporalTrainer(Trainer):
+class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
     def __init__(self, encoder, config, device=torch.device('cpu'), wandb=None):
         super().__init__(encoder, wandb, device)
         self.config = config
@@ -100,7 +101,17 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                 # Get one sample from this episode
                 while transitions[t].nonterminal is False:
                     t = np.random.randint(0, total_steps-1)
-                x_t.append(transitions[t].state)
+
+                trans = np.array([None] * 4)
+                trans[-1] = transitions[t]
+                for i in range(4 - 2, -1, -1):  # e.g. 2 1 0
+                    if trans[i + 1].timestep == 0:
+                        trans[i] = blank_trans  # If future frame has timestep 0
+                    else:
+                        trans[i] = transitions[t - 4 + 1 + i]
+                states = [t.state for t in trans]
+
+                x_t.append(torch.stack(states, 0))
                 x_tnext.append(transitions[t+1].state)
                 a_t.append(transitions[t].action)
                 r_tnext.append(transitions[t+1].reward + 1)
@@ -121,21 +132,23 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                 weights[i] = sum(counts) / counts[i]
         return torch.tensor(weights, device=self.device)
 
-    def hard_neg_sampling(self, encoded_obs, actions):
+    def hard_neg_sampling(self, encoded_obs, actions, initial_obs):
         """
         :param encoded_obs: Output of the encoder.
         :param actions: Embedded (or continuous/one hot) actions
         :return: A tensor of predicted states for negative pairs.
         """
-
         encoded_obs = encoded_obs.repeat(self.hard_neg_factor, 1)
         actions = actions.repeat(self.hard_neg_factor, 1)
+        initial_obs = initial_obs.repeat(self.hard_neg_factor, 1)
 
         shuffle_indices = torch.randperm(actions.shape[0],
                                          device=actions.device)
         shuffled_actions = actions[shuffle_indices]
 
-        predictions = self.prediction_module(encoded_obs, shuffled_actions)
+        predictions = self.prediction_module(encoded_obs,
+                                             shuffled_actions,
+                                             initial_obs)
         return predictions
 
     def do_one_epoch(self, episodes):
@@ -148,14 +161,17 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         sd_cosine_sim = 0
         representation_norm = 0
 
-
         data_generator = self.generate_batch(episodes)
         for x_tprev, x_t, actions, rewards in data_generator:
+            x_tprev = x_tprev.view(x_t.shape[0]*4, *x_tprev.shape[2:])
             f_t_maps, f_t_prev_maps = self.encoder(x_t, fmaps=True),\
                                       self.encoder(x_tprev, fmaps=True)
 
+            f_t_initial = f_t_prev_maps["out"].view(x_t.shape[0], 4, -1)[:, -1]
+            f_t_prev = f_t_prev_maps["out"].view(x_t.shape[0], -1)
+
             # Loss 1: Global at time t, f5 patches at time t-1
-            f_t, f_t_prev = f_t_maps['f5'], f_t_prev_maps['out']
+            f_t = f_t_maps['f5']
             f_t_global = f_t_maps["out"]
             sy = f_t.size(1)
             sx = f_t.size(2)
@@ -164,10 +180,11 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
             N = f_t_prev.size(0)
             loss1 = 0.
 
-            f_t_pred = self.prediction_module(f_t_prev, actions)
+            f_t_pred = self.prediction_module(f_t_prev, actions, f_t_initial)
             if self.hard_neg_factor > 0:
                 hard_negs = self.hard_neg_sampling(f_t_prev,
-                                                   actions)
+                                                   actions,
+                                                   f_t_initial)
                 f_t_pred = torch.cat([f_t_pred, hard_negs], 0)
 
             for y in range(sy):
@@ -212,14 +229,14 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
 
             # log information about the quality of the predictions/latents
             local_sd_loss = F.mse_loss(f_t_global, f_t_pred[:f_t_global.shape[0]], reduction="mean")
-            sd_loss += local_sd_loss*10
+            sd_loss += local_sd_loss
             sd_cosine_sim += F.cosine_similarity(f_t_global, f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
             representation_norm += torch.norm(f_t_global, dim=-1).mean()
 
             self.optimizer.zero_grad()
             loss = loss1 + loss2 + reward_loss*self.reward_loss_weight
             if self.noncontrastive_global_loss:
-                loss = loss + local_sd_loss
+                loss = loss + local_sd_loss*10
             if mode == "train":
                 loss.backward()
                 self.optimizer.step()
@@ -273,8 +290,9 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
 
     def predict(self, z, a):
         N = z.size(0)
-        z = z.view(N, 4, -1)[:, -1, :]
-        new_states = self.prediction_module(z, a)
+        z_last = z.view(N, 4, -1)[:, -1, :]  # choose the last latent vector from z
+        z = z.view(N, -1)
+        new_states = self.prediction_module(z, a, z_last)
         return new_states, self.reward_module(z, a).argmax(-1) - 1
 
     def log_results(self,
