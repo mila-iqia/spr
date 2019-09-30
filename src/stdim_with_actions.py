@@ -35,7 +35,7 @@ class PredictionModule(nn.Module):
         N = states.size(0)
         output = self.network(
             torch.bmm(states.unsqueeze(2), actions.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
-        return states + output
+        return output
 
 
 class RewardPredictionModule(nn.Module):
@@ -64,6 +64,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         self.batch_size = config['batch_size']
         self.global_loss = config['global_loss']
         self.noncontrastive_global_loss = config['noncontrastive_global_loss']
+        self.noncontrastive_loss_weight = config['noncontrastive_loss_weight']
 
         self.device = device
         self.classifier = nn.Linear(self.encoder.hidden_size, 64).to(device)
@@ -135,7 +136,8 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
                                          device=actions.device)
         shuffled_actions = actions[shuffle_indices]
 
-        predictions = self.prediction_module(encoded_obs, shuffled_actions)
+        predictions = self.prediction_module(encoded_obs, shuffled_actions) + \
+            encoded_obs
         return predictions
 
     def do_one_epoch(self, episodes):
@@ -164,7 +166,8 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
             N = f_t_prev.size(0)
             loss1 = 0.
 
-            f_t_pred = self.prediction_module(f_t_prev, actions)
+            f_t_pred_delta = self.prediction_module(f_t_prev, actions)
+            f_t_pred = f_t_pred_delta + f_t_prev
             if self.hard_neg_factor > 0:
                 hard_negs = self.hard_neg_sampling(f_t_prev,
                                                    actions)
@@ -212,14 +215,14 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
 
             # log information about the quality of the predictions/latents
             local_sd_loss = F.mse_loss(f_t_global, f_t_pred[:f_t_global.shape[0]], reduction="mean")
-            sd_loss += local_sd_loss*10
-            sd_cosine_sim += F.cosine_similarity(f_t_global, f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
+            sd_loss += local_sd_loss*20
+            sd_cosine_sim += F.cosine_similarity(f_t_pred_delta, f_t_global - f_t_prev, dim=-1).mean()
             representation_norm += torch.norm(f_t_global, dim=-1).mean()
 
             self.optimizer.zero_grad()
             loss = loss1 + loss2 + reward_loss*self.reward_loss_weight
             if self.noncontrastive_global_loss:
-                loss = loss + local_sd_loss
+                loss = loss + local_sd_loss*self.noncontrastive_loss_weight
             if mode == "train":
                 loss.backward()
                 self.optimizer.step()
@@ -275,7 +278,7 @@ class ActionInfoNCESpatioTemporalTrainer(Trainer):
         N = z.size(0)
         z = z.view(N, 4, -1)[:, -1, :]
         new_states = self.prediction_module(z, a)
-        return new_states, self.reward_module(z, a).argmax(-1) - 1
+        return new_states + z, self.reward_module(z, a).argmax(-1) - 1
 
     def log_results(self,
                     local_loss,
