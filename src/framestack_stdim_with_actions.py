@@ -32,11 +32,11 @@ class PredictionModule(nn.Module):
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim))
 
-    def forward(self, states, actions, initial_states):
+    def forward(self, states, actions):
         N = states.size(0)
         output = self.network(
             torch.bmm(states.unsqueeze(2), actions.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
-        return initial_states + output
+        return output
 
 
 class RewardPredictionModule(nn.Module):
@@ -65,6 +65,7 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
         self.batch_size = config['batch_size']
         self.global_loss = config['global_loss']
         self.noncontrastive_global_loss = config['noncontrastive_global_loss']
+        self.noncontrastive_loss_weight = config['noncontrastive_loss_weight']
 
         self.device = device
         self.classifier = nn.Linear(self.encoder.hidden_size, 64).to(device)
@@ -147,8 +148,7 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
         shuffled_actions = actions[shuffle_indices]
 
         predictions = self.prediction_module(encoded_obs,
-                                             shuffled_actions,
-                                             initial_obs)
+                                             shuffled_actions) + initial_obs
         return predictions
 
     def do_one_epoch(self, episodes):
@@ -180,7 +180,8 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
             N = f_t_prev.size(0)
             loss1 = 0.
 
-            f_t_pred = self.prediction_module(f_t_prev, actions, f_t_initial)
+            f_t_pred_delta = self.prediction_module(f_t_prev, actions)
+            f_t_pred = f_t_pred_delta + f_t_initial
             if self.hard_neg_factor > 0:
                 hard_negs = self.hard_neg_sampling(f_t_prev,
                                                    actions,
@@ -230,13 +231,13 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
             # log information about the quality of the predictions/latents
             local_sd_loss = F.mse_loss(f_t_global, f_t_pred[:f_t_global.shape[0]], reduction="mean")
             sd_loss += local_sd_loss
-            sd_cosine_sim += F.cosine_similarity(f_t_global, f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
+            sd_cosine_sim += F.cosine_similarity(f_t_pred_delta, f_t_global - f_t_initial, dim=-1).mean()
             representation_norm += torch.norm(f_t_global, dim=-1).mean()
 
             self.optimizer.zero_grad()
             loss = loss1 + loss2 + reward_loss*self.reward_loss_weight
             if self.noncontrastive_global_loss:
-                loss = loss + local_sd_loss*10
+                loss = loss + local_sd_loss*self.noncontrastive_loss_weight
             if mode == "train":
                 loss.backward()
                 self.optimizer.step()
@@ -292,8 +293,8 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
         N = z.size(0)
         z_last = z.view(N, 4, -1)[:, -1, :]  # choose the last latent vector from z
         z = z.view(N, -1)
-        new_states = self.prediction_module(z, a, z_last)
-        return new_states, self.reward_module(z, a).argmax(-1) - 1
+        new_states = self.prediction_module(z, a)
+        return new_states + z_last, self.reward_module(z, a).argmax(-1) - 1
 
     def log_results(self,
                     local_loss,

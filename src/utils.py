@@ -65,6 +65,8 @@ def get_argparser():
     parser.add_argument('--sd_loss_coeff', type=int, default=10, help='Coefficient for the dynamics loss')
     parser.add_argument("--reward-loss-weight", default=1.0, type=float,
                         help="Weight for reward in shared loss.")
+    parser.add_argument("--noncontrastive-loss-weight", default=10.0, type=float,
+                        help="Weight for noncontrastive global loss in shared loss.")
 
     # Rainbow Args
     parser.add_argument('--id', type=str, default='default', help='Experiment ID')

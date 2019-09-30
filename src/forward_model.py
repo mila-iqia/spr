@@ -62,6 +62,7 @@ class ForwardModel:
         rew_acc = 0.
         pos_rew_tp, pos_rew_tn, pos_rew_fp, pos_rew_fn = 0, 0, 0, 0
         zero_rew_tp, zero_rew_tn, zero_rew_fp, zero_rew_fn = 0, 0, 0, 0
+        sd_cosine_sim = 0
         for s_t, x_t_next, a_t, r_t in data_generator:
             s_t = s_t.view(self.args.batch_size * 4, 1, s_t.shape[-2], s_t.shape[-1])
             with torch.no_grad():
@@ -91,6 +92,7 @@ class ForwardModel:
             epoch_loss += loss.detach().item()
             steps += 1
 
+            sd_cosine_sim += F.cosine_similarity(sd_predictions, f_t_next - f_t_last, dim=-1).mean()
             reward_predictions = reward_predictions.argmax(dim=-1)
             rew_acc += (reward_predictions == r_t).float().mean()
             pos_rew_tp += ((reward_predictions == 2)*(r_t == 2)).float().sum()
@@ -108,9 +110,9 @@ class ForwardModel:
 
         zero_recall = zero_rew_tp/(zero_rew_fn + zero_rew_tp)
         zero_precision = zero_rew_tp/(zero_rew_tp + zero_rew_fp)
-
         self.log_metrics(epoch_loss / steps,
                          epoch_sd_loss / steps,
+                         sd_cosine_sim / steps,
                          epoch_reward_loss / steps,
                          rew_acc / steps,
                          pos_recall,
@@ -136,14 +138,15 @@ class ForwardModel:
     def log_metrics(self,
                     epoch_loss,
                     sd_loss,
+                    sd_cosine_sim,
                     reward_loss,
                     rew_acc,
                     pos_recall,
                     pos_prec,
                     zero_recall,
                     zero_prec):
-        print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {}, Reward Accuracy: {}".
-              format(self.epochs_till_now, epoch_loss, sd_loss, reward_loss, rew_acc))
+        print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {},  Reward Accuracy: {},  Prediction Cosine Similarity: {:.3f}".
+              format(self.epochs_till_now, epoch_loss, sd_loss, reward_loss, rew_acc, sd_cosine_sim))
         print(
             "Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}".format(
                 pos_recall,
@@ -153,6 +156,7 @@ class ForwardModel:
 
         wandb.log({'Dynamics loss': epoch_loss,
                    'SD Loss': sd_loss,
+                   'SD Cosine Similarity': sd_cosine_sim,
                    'Reward Loss': reward_loss,
                    "Reward Accuracy": rew_acc,
                    "Pos. Reward Recall": pos_recall,
