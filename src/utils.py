@@ -67,6 +67,8 @@ def get_argparser():
                         help="Weight for reward in shared loss.")
     parser.add_argument("--noncontrastive-loss-weight", default=10.0, type=float,
                         help="Weight for noncontrastive global loss in shared loss.")
+    parser.add_argument("--hard-neg-factor", type=int, default=4,
+                        help="How many hard negative action samples to use.")
 
     # Rainbow Args
     parser.add_argument('--id', type=str, default='default', help='Experiment ID')
@@ -114,8 +116,6 @@ def get_argparser():
                         help='Number of transitions to use for validating Q')
     parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
     parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
-    parser.add_argument("--hard-neg-factor", type=int, default=4,
-                        help="How many hard negative action samples to use.")
 
     return parser
 
