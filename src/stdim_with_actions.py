@@ -29,6 +29,8 @@ class PredictionModule(nn.Module):
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions, state_dim*4),
             nn.ReLU(),
+            nn.Linear(state_dim*4, state_dim*4),
+            nn.ReLU(),
             nn.Linear(state_dim*4, state_dim))
 
     def forward(self, states, actions):
@@ -43,6 +45,8 @@ class RewardPredictionModule(nn.Module):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions, state_dim*4),
+            nn.ReLU(),
+            nn.Linear(state_dim*4, state_dim*4),
             nn.ReLU(),
             nn.Linear(state_dim*4, reward_dim))
 
