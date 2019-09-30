@@ -8,6 +8,31 @@ import torch.nn.functional as F
 from src.episodes import get_framestacked_transition
 
 
+class SDPredictor(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, output_size))
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class RewardPredictor(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, output_size),
+            nn.LogSoftmax(dim=-1))
+
+    def forward(self, x):
+        return self.net(x)
+
+
 class ForwardModel:
     def __init__(self, args, encoder, num_actions):
         self.args = args
@@ -15,11 +40,9 @@ class ForwardModel:
         self.encoder = encoder
         self.num_actions = num_actions
         hidden_size = args.forward_hidden_size
-        self.hidden = nn.Linear(args.feature_size * 4 * num_actions, hidden_size).to(self.device)
-        self.sd_predictor = nn.Linear(hidden_size, args.feature_size).to(self.device)
-        self.reward_predictor = nn.Linear(hidden_size, 3).to(self.device)
-        self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) +
-                                          list(self.sd_predictor.parameters()) +
+        self.sd_predictor = SDPredictor(args.feature_size * 4 * num_actions, hidden_size, args.feature_size).to(self.device)
+        self.reward_predictor = RewardPredictor(args.feature_size * 4 * num_actions, hidden_size, 3).to(self.device)
+        self.optimizer = torch.optim.Adam(list(self.sd_predictor.parameters()) +
                                           list(self.reward_predictor.parameters()))
         self.epochs_till_now = 0
         self.reward_loss_weight = args.reward_loss_weight
@@ -32,7 +55,7 @@ class ForwardModel:
         weights = [0., 0., 0.]
         for i in range(3):
             if counts[i] != 0:
-                weights[i] = min(1. * self.args.batch_size, sum(counts) / counts[i])
+                weights[i] = min(1. * 10, sum(counts) / counts[i])
         return torch.tensor(weights, device=self.device)
 
     def generate_batch(self, transitions):
@@ -69,9 +92,9 @@ class ForwardModel:
                 f_t = f_t.view(self.args.batch_size, 4, -1)
             f_t_last = f_t[:, -1, :]
             f_t = f_t.view(self.args.batch_size, -1)
-            hiddens = F.relu(self.hidden(torch.bmm(f_t.unsqueeze(2), a_t.unsqueeze(1)).view(self.args.batch_size, -1)))
-            sd_predictions = self.sd_predictor(hiddens)
-            reward_predictions = F.log_softmax(self.reward_predictor(hiddens), dim=-1)
+            input = torch.bmm(f_t.unsqueeze(2), a_t.unsqueeze(1)).view(self.args.batch_size, -1)
+            sd_predictions = self.sd_predictor(input)
+            reward_predictions = self.reward_predictor(input)
             # predict |s_{t+1} - s_t| instead of s_{t+1} directly
             sd_loss = F.mse_loss(sd_predictions, f_t_next - f_t_last)
             if r_t.max() == 2:
@@ -128,10 +151,9 @@ class ForwardModel:
 
     def predict(self, z, a):
         N = z.size(0)
-        hidden = F.relu(self.hidden(
-            torch.bmm(z.unsqueeze(2), a.unsqueeze(1)).view(N, -1)))  # outer-product / bilinear integration, then flatten
+        input = torch.bmm(z.unsqueeze(2), a.unsqueeze(1)).view(N, -1)
         z_last = z.view(N, 4, -1)[:, -1, :]  # choose the last latent vector from z
-        return z_last + self.sd_predictor(hidden), self.reward_predictor(hidden).argmax(-1) - 1
+        return z_last + self.sd_predictor(input), self.reward_predictor(input).argmax(-1) - 1
 
     def log_metrics(self,
                     epoch_loss,
