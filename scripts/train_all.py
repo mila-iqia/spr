@@ -113,6 +113,8 @@ def train_policy(args):
                 for g in range(args.updates_per_step):
                     dqn.learn(model_transitions)
 
+            dqn.reset_noise()
+
         if j > 0:
             dqn.log(env_steps=(j+1) * args.env_steps_per_epoch)
         # Update target network
