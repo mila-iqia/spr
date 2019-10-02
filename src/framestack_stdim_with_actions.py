@@ -238,7 +238,6 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
                 epoch_global_loss += loss2.detach().item()
             elif self.bilinear_global_loss:
                 f_t_pred = self.global_classifier(f_t_pred)
-                import ipdb; ipdb.set_trace()
                 f_t_pred_delta = f_t_pred[:f_t_global.shape[0]] - f_t_initial
                 logits = torch.matmul(f_t_pred, f_t_global.t())
                 loss2 = F.cross_entropy(logits, torch.arange(N).to(self.device))
