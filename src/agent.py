@@ -20,6 +20,8 @@ class Agent():
         self.batch_size = args.batch_size
         self.n = args.multi_step
         self.discount = args.discount
+        self.target_update = args.target_update
+        self.steps = 0
 
         self.online_net = DQN(args, self.action_space).to(device=args.device)
         if args.model:  # Load pretrained model if provided
@@ -73,6 +75,18 @@ class Agent():
         # Sample transitions
         idxs, states, actions, returns, next_states, nonterminals, weights = mem.sample(self.batch_size)
 
+        loss = self.update(states, actions, returns, next_states, nonterminals, weights)
+
+        mem.update_priorities(idxs, loss.detach().cpu().numpy())  # Update priorities of sampled transitions
+
+    def update(self,
+               states,
+               actions,
+               returns,
+               next_states,
+               nonterminals,
+               weights,
+               retain_graph=True):
         # Calculate current state probabilities (online network noise already sampled)
         log_ps = self.online_net(states, log=True)  # Log probabilities log p(s_t, ·; θonline)
         log_ps_a = log_ps[range(self.batch_size), actions]  # log p(s_t, a_t; θonline)
@@ -110,13 +124,21 @@ class Agent():
 
         loss = -torch.sum(m * log_ps_a, 1)  # Cross-entropy loss (minimises DKL(m||p(s_t, a_t)))
         self.online_net.zero_grad()
-        (weights * loss).mean().backward()  # Backpropagate importance-weighted minibatch loss
+        (weights * loss).mean().backward(retain_graph=retain_graph)  # Backpropagate importance-weighted minibatch loss
         self.q_losses.append(loss.mean().detach().item())
         self.weighted_q_losses.append((weights * loss).mean().detach().item())
         # wandb.log({'Q-Loss': loss.mean().detach().item(), 'Weighted Q-Loss': (weights * loss).mean().detach().item()})
         self.optimiser.step()
 
-        mem.update_priorities(idxs, loss.detach().cpu().numpy())  # Update priorities of sampled transitions
+        self.steps += 1
+        self.maybe_update_target_net()
+
+        return loss
+
+    def maybe_update_target_net(self):
+        if self.steps > self.target_update:
+            self.steps = 0
+            self.update_target_net()
 
     def update_target_net(self):
         self.target_net.load_state_dict(self.online_net.state_dict())

@@ -24,6 +24,7 @@ from src.episodes import get_random_agent_episodes, Transition, sample_real_tran
 def train_policy(args):
     env = Env(args)
     env.train()
+    dqn = Agent(args, env)
 
     # get initial exploration data
     real_transitions = get_random_agent_episodes(args)
@@ -31,7 +32,9 @@ def train_policy(args):
     encoder, encoder_trainer = train_encoder(args,
                                              real_transitions,
                                              num_actions=env.action_space(),
-                                             init_epochs=args.pretrain_epochs)
+                                             init_epochs=args.pretrain_epochs,
+                                             agent=dqn)
+
     if args.integrated_model:
         forward_model = encoder_trainer
     else:
@@ -44,7 +47,6 @@ def train_policy(args):
         encoder_trainer.epochs = args.epochs // 2
 
     j = 0
-    dqn = Agent(args, env)
     dqn.train()
     results_dir = os.path.join('results', args.id)
     metrics = {'steps': [], 'rewards': [], 'Qs': [], 'best_avg_reward': -float('inf')}
@@ -115,19 +117,21 @@ def train_policy(args):
 
         if j > 0:
             dqn.log(env_steps=(j+1) * args.env_steps_per_epoch)
-        # Update target network
-        if steps % args.target_update == 0:
-            dqn.update_target_net()
+        # # Update target network
+        # if steps % args.target_update == 0:
+        #     dqn.update_target_net()
 
         j += 1
 
 
-def train_encoder(args, transitions, num_actions, val_eps=None, init_epochs=None):
+def train_encoder(args,
+                  transitions,
+                  num_actions,
+                  val_eps=None,
+                  init_epochs=None,
+                  agent=None):
     if args.integrated_model:
-        if args.framestack_infomax:
-            trainer = FramestackActionInfoNCESpatioTemporalTrainer
-        else:
-            trainer = ActionInfoNCESpatioTemporalTrainer
+        trainer = FramestackActionInfoNCESpatioTemporalTrainer
     else:
         trainer = InfoNCESpatioTemporalTrainer
 
@@ -144,7 +148,7 @@ def train_encoder(args, transitions, num_actions, val_eps=None, init_epochs=None
     config['obs_space'] = observation_shape  # weird hack
     config['num_actions'] = num_actions  # weird hack
     if args.method == "infonce-stdim":
-        trainer = trainer(encoder, config, device=args.device, wandb=wandb)
+        trainer = trainer(encoder, config, device=args.device, wandb=wandb, agent=agent)
     else:
         assert False, "method {} has no trainer".format(args.method)
 
