@@ -240,13 +240,13 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
                 f_t_pred = self.global_classifier(f_t_pred)
                 f_t_pred_delta = f_t_pred[:f_t_global.shape[0]] - f_t_initial
                 logits = torch.matmul(f_t_pred, f_t_global.t())
-                loss2 = F.cross_entropy(logits, torch.arange(N).to(self.device))
+                loss2 = F.cross_entropy(logits.t(), torch.arange(N).to(self.device))
                 epoch_global_loss += loss2.detach().item()
             else:
                 loss2 = 0
 
             # log information about the quality of the predictions/latents
-            local_sd_loss = F.mse_loss(f_t_global, f_t_pred, reduction="mean")
+            local_sd_loss = F.mse_loss(f_t_pred_delta, f_t_global - f_t_initial, reduction="mean")
             sd_loss += local_sd_loss
             sd_cosine_sim += F.cosine_similarity(f_t_pred_delta, f_t_global - f_t_initial, dim=-1).mean()
             representation_norm += torch.norm(f_t_global, dim=-1).mean()
