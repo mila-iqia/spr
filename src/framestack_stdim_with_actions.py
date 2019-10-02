@@ -57,6 +57,46 @@ class RewardPredictionModule(nn.Module):
             torch.bmm(states.unsqueeze(2), actions.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
         return output
 
+    def nce_with_negs_from_same_loc(self, f_glb, f_lcl):
+        '''
+        Compute InfoNCE cost with source features in f_glb and target features in
+        f_lcl. We assume one source feature vector per item in batch and n_locs
+        target feature vectors per item in batch. There are n_batch items in the
+        batch and the dimension of source/target feature vectors is n_rkhs.
+        -- defn: we condition on source features and predict target features
+
+        For the positive nce pair (f_glb[i, :], f_lcl[i, :, l]), which comes from
+        batch item i at spatial location l, we will use the target feature vectors
+        f_lcl[j, :, l] as negative samples, for all j != i.
+
+        Input:
+          f_glb : (n_batch, n_rkhs)          -- one source vector per item
+          f_lcl : (n_batch, n_rkhs, n_locs)  -- n_locs target vectors per item
+        Output:
+          loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
+        '''
+        n_batch = f_glb.size(0)
+        n_rkhs = f_glb.size(1)
+        n_locs = f_lcl.size(2)
+        # reshaping for big matrix multiply
+        f_glb = f_glb.permute(1, 0)  # (n_rkhs, n_batch)
+        f_lcl = f_lcl.permute(0, 2, 1)  # (n_batch, n_locs, n_rkhs)
+        f_lcl = f_lcl.reshape(n_batch * n_locs, n_rkhs)  # (n_batch*n_locs, n_rkhs)
+        # compute raw scores dot(f_glb[i, :], f_lcl[j, :, l]) for all i, j, l
+        raw_scores = torch.mm(f_lcl, f_glb)  # (n_batch*n_locs, n_batch)
+        raw_scores = raw_scores.reshape(n_batch, n_locs, n_batch)  # (n_batch, n_locs, n_batch)
+        # now, raw_scores[j, l, i] = dot(f_glb[i, :], f_lcl[j, :, l])
+        # -- we can get NCE log softmax by normalizing over the j dimension...
+        nce_lsmax = -F.log_softmax(raw_scores, dim=0)  # (n_batch, n_locs, n_batch)
+        # make a mask for picking out the log softmax values for positive pairs
+        pos_mask = torch.eye(n_batch, dtype=nce_lsmax.dtype, device=nce_lsmax.device)
+        pos_mask = pos_mask.unsqueeze(dim=1)
+        # use a masked sum over the j dimension to select positive pair NCE scores
+        loss_nce = (nce_lsmax * pos_mask).sum(dim=0)  # (n_locs, n_batch)
+        # permute axes to make return shape consistent with input shape
+        loss_nce = loss_nce.permute(1, 0)  # (n_batch, n_locs)
+        return loss_nce
+
 
 class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
     def __init__(self, encoder, config, device=torch.device('cpu'), wandb=None, agent=None):
@@ -143,6 +183,53 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
                 weights[i] = sum(counts) / counts[i]
         return torch.tensor(weights, device=self.device)
 
+    def nce_with_negs_from_same_loc(self, f_glb, f_lcl):
+        '''
+        Compute InfoNCE cost with source features in f_glb and target features in
+        f_lcl. We assume one source feature vector per item in batch and n_locs
+        target feature vectors per item in batch. There are n_batch items in the
+        batch and the dimension of source/target feature vectors is n_rkhs.
+        -- defn: we condition on source features and predict target features
+
+        For the positive nce pair (f_glb[i, :], f_lcl[i, :, l]), which comes from
+        batch item i at spatial location l, we will use the target feature vectors
+        f_lcl[j, :, l] as negative samples, for all j != i.
+
+        Input:
+          f_glb : (n_batch, n_rkhs)          -- one source vector per item
+          f_lcl : (n_batch, n_rkhs, n_locs)  -- n_locs target vectors per item
+        Output:
+          loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
+        '''
+        n_batch = f_lcl.size(0)
+        n_batch_glb = f_glb.size(0)
+        n_rkhs = f_glb.size(1)
+        n_locs = f_lcl.size(2)
+        # reshaping for big matrix multiply
+        f_glb = f_glb.permute(1, 0)  # (n_rkhs, n_batch)
+        f_lcl = f_lcl.permute(0, 2, 1)  # (n_batch, n_locs, n_rkhs)
+        f_lcl = f_lcl.reshape(n_batch * n_locs, n_rkhs)  # (n_batch*n_locs, n_rkhs)
+        # compute raw scores dot(f_glb[i, :], f_lcl[j, :, l]) for all i, j, l
+        raw_scores = torch.mm(f_lcl, f_glb)  # (n_batch*n_locs, n_batch)
+        raw_scores = raw_scores.reshape(n_batch, n_locs, n_batch_glb)  # (n_batch, n_locs, n_batch)
+        # now, raw_scores[j, l, i] = dot(f_glb[i, :], f_lcl[j, :, l])
+        # -- we can get NCE log softmax by normalizing over the j dimension...
+        nce_lsmax = -F.log_softmax(raw_scores, dim=0)  # (n_batch, n_locs, n_batch)
+        # make a mask for picking out the log softmax values for positive pairs
+        pos_mask = torch.eye(n_batch, dtype=nce_lsmax.dtype, device=nce_lsmax.device)
+        if pos_mask.shape[-1] != raw_scores.shape[-1]:
+            new_zeros = torch.zeros(n_batch,
+                                    raw_scores.shape[-1] - pos_mask.shape[-1],
+                                    device=nce_lsmax.device,
+                                    dtype=nce_lsmax.dtype)
+            pos_mask = torch.cat([pos_mask, new_zeros], -1)
+        pos_mask = pos_mask.unsqueeze(dim=1)
+        # use a masked sum over the j dimension to select positive pair NCE scores
+        loss_nce = (nce_lsmax * pos_mask).sum(dim=0)  # (n_locs, n_batch)
+        # permute axes to make return shape consistent with input shape
+        loss_nce = loss_nce.permute(1, 0)  # (n_batch, n_locs)
+        return loss_nce
+
     def hard_neg_sampling(self, encoded_obs, actions, initial_obs):
         """
         :param encoded_obs: Output of the encoder.
@@ -184,33 +271,19 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
             f_t_global = f_t_maps["out"]
 
             # Loss 1: Global at time t, f5 patches at time t-1
-            sy = f_t.size(1)
-            sx = f_t.size(2)
             actions = self.convert_actions(actions).float()
-
-            N = f_t_prev.size(0)
-            loss1 = 0.
-
             f_t_pred_delta = self.prediction_module(f_t_prev, actions)
             f_t_pred = f_t_pred_delta + f_t_initial
             if self.hard_neg_factor > 0:
                 hard_negs = self.hard_neg_sampling(f_t_prev,
-                                                                actions,
-                                                                f_t_initial)
+                                                   actions,
+                                                   f_t_initial)
                 f_t_pred = torch.cat([f_t_pred, hard_negs], 0)
 
-            for y in range(sy):
-                for x in range(sx):
-                    predictions = self.classifier(f_t_pred)
-                    positive = f_t[:, y, x, :]
-                    logits = torch.matmul(predictions, positive.t())
-                    step_loss = F.cross_entropy(logits.t(),
-                                                torch.arange(N).to(self.device))
-                    loss1 += step_loss
-            loss1 = loss1 / (sx * sy)
-
+            predictions = self.classifier(f_t_pred)
+            f_t = f_t.flatten(1, 2).transpose(-1, -2)
+            loss1 = self.nce_with_negs_from_same_loc(predictions, f_t).mean()
             reward_preds = self.reward_module(f_t_prev, actions)
-            # reward_loss = F.cross_entropy(reward_preds, rewards, weight=self.class_weights)
             if rewards.max() == 2:
                 reward_loss = F.cross_entropy(reward_preds, rewards, weight=self.class_weights)
             else:
