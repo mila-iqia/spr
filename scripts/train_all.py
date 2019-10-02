@@ -126,10 +126,7 @@ def train_policy(args):
 
 def train_encoder(args, transitions, num_actions, val_eps=None, init_epochs=None):
     if args.integrated_model:
-        if args.framestack_infomax:
-            trainer = FramestackActionInfoNCESpatioTemporalTrainer
-        else:
-            trainer = ActionInfoNCESpatioTemporalTrainer
+        trainer = FramestackActionInfoNCESpatioTemporalTrainer
     else:
         trainer = InfoNCESpatioTemporalTrainer
 

@@ -40,6 +40,8 @@ def get_argparser():
                         default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
+    parser.add_argument('--bilinear-global-loss', action="store_true", default=False,
+                        help='Use a global bilinear loss in addition to the standard local-global loss.')
     parser.add_argument('--noncontrastive-global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument('--feature-size', type=int, default=256,
