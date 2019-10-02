@@ -36,10 +36,12 @@ def get_argparser():
                         help='Encoder type (Impala or Nature)')
     parser.add_argument('--integrated-model', action="store_true",
                         default=False, help='Use an encoder with the model built in.')
-    parser.add_argument('--framestack-infomax', action="store_true",
-                        default=False, help='Use a framestack in the infomax (integrated model only).')
+    parser.add_argument('--online-agent-training', action="store_true",
+                        default=False, help='Train agent on real data alongside integrated model.')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
+    parser.add_argument('--bilinear-global-loss', action="store_true", default=False,
+                        help='Use a bilinear global loss in addition to the standard local-global loss.')
     parser.add_argument('--noncontrastive-global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument('--feature-size', type=int, default=256,
@@ -63,9 +65,9 @@ def get_argparser():
     parser.add_argument("--initial_exp_steps", type=int, default=5000)
     parser.add_argument('--forward-hidden-size', type=int, default=512, help='Hidden Size for the Forward Model MLP')
     parser.add_argument('--sd_loss_coeff', type=int, default=10, help='Coefficient for the dynamics loss')
-    parser.add_argument("--reward-loss-weight", default=1.0, type=float,
+    parser.add_argument("--reward-loss-weight", default=10.0, type=float,
                         help="Weight for reward in shared loss.")
-    parser.add_argument("--noncontrastive-loss-weight", default=10.0, type=float,
+    parser.add_argument("--noncontrastive-loss-weight", default=20.0, type=float,
                         help="Weight for noncontrastive global loss in shared loss.")
     parser.add_argument("--hard-neg-factor", type=int, default=4,
                         help="How many hard negative action samples to use.")
