@@ -16,6 +16,7 @@ from src.eval import test
 from src.forward_model import ForwardModel
 from src.stdim import InfoNCESpatioTemporalTrainer
 from src.framestack_stdim_with_actions import FramestackActionInfoNCESpatioTemporalTrainer
+from src.multi_step_stdim_with_actions import MultiStepActionInfoNCESpatioTemporalTrainer
 from src.utils import get_argparser, log, set_learning_rate
 from src.episodes import get_random_agent_episodes, Transition, sample_real_transitions
 
@@ -125,7 +126,10 @@ def train_policy(args):
 
 def train_encoder(args, transitions, num_actions, val_eps=None, init_epochs=None):
     if args.integrated_model:
-        trainer = FramestackActionInfoNCESpatioTemporalTrainer
+        if args.multi_step_training:
+            trainer = MultiStepActionInfoNCESpatioTemporalTrainer
+        else:
+            trainer = FramestackActionInfoNCESpatioTemporalTrainer
     else:
         trainer = InfoNCESpatioTemporalTrainer
 
