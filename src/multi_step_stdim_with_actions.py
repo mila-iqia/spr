@@ -214,7 +214,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         zero_rew_tp, zero_rew_tn, zero_rew_fp, zero_rew_fn = 0, 0, 0, 0
         sd_loss = 0
         sd_cosine_sim = 0
-        representation_norm = 0
+        true_representation_norm = 0
+        pred_representation_norm = 0
         jumps = 0
 
         data_generator = self.generate_batch(episodes)
@@ -296,7 +297,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             local_sd_loss = F.mse_loss(f_t_pred_delta, f_t_global - f_t_initial, reduction="mean")
             sd_loss += local_sd_loss
             sd_cosine_sim += F.cosine_similarity(f_t_pred_delta, f_t_global - f_t_initial, dim=-1).mean()
-            representation_norm += torch.norm(f_t_global, dim=-1).mean()
+            true_representation_norm += torch.norm(f_t_global, dim=-1).mean()
+            pred_representation_norm += torch.norm(f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
 
             self.optimizer.zero_grad()
             loss = loss1 + loss2 + reward_loss*self.reward_loss_weight
@@ -329,6 +331,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                          pos_precision,
                          zero_recall,
                          zero_precision,
+                         true_representation_norm / steps,
+                         pred_representation_norm / steps,
                          prefix=mode)
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
@@ -374,6 +378,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                     pos_precision,
                     zero_recall,
                     zero_precision,
+                    true_norm,
+                    pred_norm,
                     prefix=""):
         print(
             "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Prediction Cosine Similarity: {:.3f}, Reward Accuracy: {:.3f}, {}".format(
@@ -388,21 +394,23 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 rew_acc,
                 prefix.capitalize()))
         print(
-            "{} Positive Reward Recall: {:.3f}, Positive Reward Precision: {:.3f}, Zero Reward Recall: {:.3f}, Zero Reward Precision: {:.3f}".format(
+            "{} Positive Reward Recall: {:.3f}, Positive Reward Precision: {:.3f}, Zero Reward Recall: {:.3f}, Zero Reward Precision: {:.3f}, Pred. Rep. Norm: {:.3f}, True Rep. Norm: {:.3f}".format(
                 prefix.capitalize(),
                 pos_recall,
                 pos_precision,
                 zero_recall,
-                zero_precision))
-        self.wandb.log({prefix + '_loss': epoch_loss,
-                        prefix + '_local_loss': local_loss,
-                        "Reward Loss": reward_loss,
-                        prefix + '_global_loss': global_loss,
-                        "Reward Accuracy": rew_acc,
-                        'SD Loss': sd_loss,
-                        'SD Cosine Similarity': sd_cosine_sim,
-                        "Pos. Reward Recall": pos_recall,
-                        "Zero Reward Recall": zero_recall,
-                        "Pos. Reward Precision": pos_precision,
-                        "Zero Reward Precision": zero_precision,
+                zero_precision,
+                pred_norm,
+                true_norm))
+        self.wandb.log({prefix + ' loss': epoch_loss,
+                        prefix + ' local loss': local_loss,
+                        prefix + " Reward Loss": reward_loss,
+                        prefix + ' global loss': global_loss,
+                        prefix + " Reward Accuracy": rew_acc,
+                        prefix + ' SD Loss': sd_loss,
+                        prefix + ' SD Cosine Similarity': sd_cosine_sim,
+                        prefix + " Pos. Reward Recall": pos_recall,
+                        prefix + " Zero Reward Recall": zero_recall,
+                        prefix + " Pos. Reward Precision": pos_precision,
+                        prefix + " Zero Reward Precision": zero_precision,
                         'FM epoch': self.epochs_till_now})
