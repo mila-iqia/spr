@@ -270,6 +270,8 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
             f_t = f_t_maps['f5']
             f_t_global = f_t_maps["out"]
 
+            N = f_t_prev.size(0)
+
             # Loss 1: Global at time t, f5 patches at time t-1
             actions = self.convert_actions(actions).float()
             f_t_pred_delta = self.prediction_module(f_t_prev, actions)
