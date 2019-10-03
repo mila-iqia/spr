@@ -75,7 +75,8 @@ class RewardPredictionModule(nn.Module):
         Output:
           loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
         '''
-        n_batch = f_glb.size(0)
+        n_batch = f_lcl.size(0)
+        n_batch_glb = f_glb.size(0)
         n_rkhs = f_glb.size(1)
         n_locs = f_lcl.size(2)
         # reshaping for big matrix multiply
@@ -84,12 +85,18 @@ class RewardPredictionModule(nn.Module):
         f_lcl = f_lcl.reshape(n_batch * n_locs, n_rkhs)  # (n_batch*n_locs, n_rkhs)
         # compute raw scores dot(f_glb[i, :], f_lcl[j, :, l]) for all i, j, l
         raw_scores = torch.mm(f_lcl, f_glb)  # (n_batch*n_locs, n_batch)
-        raw_scores = raw_scores.reshape(n_batch, n_locs, n_batch)  # (n_batch, n_locs, n_batch)
+        raw_scores = raw_scores.reshape(n_batch, n_locs, n_batch_glb)  # (n_batch, n_locs, n_batch)
         # now, raw_scores[j, l, i] = dot(f_glb[i, :], f_lcl[j, :, l])
         # -- we can get NCE log softmax by normalizing over the j dimension...
         nce_lsmax = -F.log_softmax(raw_scores, dim=0)  # (n_batch, n_locs, n_batch)
         # make a mask for picking out the log softmax values for positive pairs
         pos_mask = torch.eye(n_batch, dtype=nce_lsmax.dtype, device=nce_lsmax.device)
+        if pos_mask.shape[-1] != raw_scores.shape[-1]:
+            new_zeros = torch.zeros(n_batch,
+                                    raw_scores.shape[-1] - pos_mask.shape[-1],
+                                    device=nce_lsmax.device,
+                                    dtype=nce_lsmax.dtype)
+            pos_mask = torch.cat([pos_mask, new_zeros], -1)
         pos_mask = pos_mask.unsqueeze(dim=1)
         # use a masked sum over the j dimension to select positive pair NCE scores
         loss_nce = (nce_lsmax * pos_mask).sum(dim=0)  # (n_locs, n_batch)
