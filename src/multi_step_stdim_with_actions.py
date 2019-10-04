@@ -25,12 +25,14 @@ class Classifier(nn.Module):
 
 
 class PredictionModule(nn.Module):
-    def __init__(self, state_dim, num_actions):
+    def __init__(self, state_dim, num_actions, dropout=0):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions*4, state_dim*4),
+            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim*4),
+            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim))
 
@@ -42,12 +44,14 @@ class PredictionModule(nn.Module):
 
 
 class RewardPredictionModule(nn.Module):
-    def __init__(self, state_dim, num_actions, reward_dim=3):
+    def __init__(self, state_dim, num_actions, reward_dim=3, dropout=0):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions*4, state_dim*4),
+            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim*4),
+            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, reward_dim))
 
@@ -81,9 +85,11 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.params += list(self.global_classifier.parameters())
 
         self.prediction_module = PredictionModule(self.encoder.hidden_size,
-                                                  config["num_actions"])
+                                                  config["num_actions"],
+                                                  dropout=config["dropout_prob"])
         self.reward_module = RewardPredictionModule(self.encoder.hidden_size,
-                                                    config["num_actions"])
+                                                    config["num_actions"],
+                                                    dropout=config["dropout_prob"])
 
         self.reward_loss_weight = config["reward_loss_weight"]
 
@@ -394,8 +400,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 rew_acc,
                 prefix.capitalize()))
         print(
-            "{} Positive Reward Recall: {:.3f}, Positive Reward Precision: {:.3f}, Zero Reward Recall: {:.3f}, Zero Reward Precision: {:.3f}, Pred. Rep. Norm: {:.3f}, True Rep. Norm: {:.3f}".format(
-                prefix.capitalize(),
+            "Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}, Pred. Norm: {:.3f}, True Norm: {:.3f}".format(
                 pos_recall,
                 pos_precision,
                 zero_recall,
@@ -413,4 +418,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                         prefix + " Zero Reward Recall": zero_recall,
                         prefix + " Pos. Reward Precision": pos_precision,
                         prefix + " Zero Reward Precision": zero_precision,
+                        prefix + " Pred norm": pred_norm,
+                        prefix + " True norm": true_norm,
                         'FM epoch': self.epochs_till_now})

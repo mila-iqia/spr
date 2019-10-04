@@ -25,12 +25,14 @@ class Classifier(nn.Module):
 
 
 class PredictionModule(nn.Module):
-    def __init__(self, state_dim, num_actions):
+    def __init__(self, state_dim, num_actions, dropout=0):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions*4, state_dim*4),
+            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim*4),
+            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim))
 
@@ -42,12 +44,14 @@ class PredictionModule(nn.Module):
 
 
 class RewardPredictionModule(nn.Module):
-    def __init__(self, state_dim, num_actions, reward_dim=3):
+    def __init__(self, state_dim, num_actions, reward_dim=3, dropout=0):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions*4, state_dim*4),
+            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim*4),
+            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, reward_dim))
 
@@ -56,54 +60,6 @@ class RewardPredictionModule(nn.Module):
         output = self.network(
             torch.bmm(states.unsqueeze(2), actions.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
         return output
-
-    def nce_with_negs_from_same_loc(self, f_glb, f_lcl):
-        '''
-        Compute InfoNCE cost with source features in f_glb and target features in
-        f_lcl. We assume one source feature vector per item in batch and n_locs
-        target feature vectors per item in batch. There are n_batch items in the
-        batch and the dimension of source/target feature vectors is n_rkhs.
-        -- defn: we condition on source features and predict target features
-
-        For the positive nce pair (f_glb[i, :], f_lcl[i, :, l]), which comes from
-        batch item i at spatial location l, we will use the target feature vectors
-        f_lcl[j, :, l] as negative samples, for all j != i.
-
-        Input:
-          f_glb : (n_batch, n_rkhs)          -- one source vector per item
-          f_lcl : (n_batch, n_rkhs, n_locs)  -- n_locs target vectors per item
-        Output:
-          loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
-        '''
-        n_batch = f_lcl.size(0)
-        n_batch_glb = f_glb.size(0)
-        n_rkhs = f_glb.size(1)
-        n_locs = f_lcl.size(2)
-        # reshaping for big matrix multiply
-        f_glb = f_glb.permute(1, 0)  # (n_rkhs, n_batch)
-        f_lcl = f_lcl.permute(0, 2, 1)  # (n_batch, n_locs, n_rkhs)
-        f_lcl = f_lcl.reshape(n_batch * n_locs, n_rkhs)  # (n_batch*n_locs, n_rkhs)
-        # compute raw scores dot(f_glb[i, :], f_lcl[j, :, l]) for all i, j, l
-        raw_scores = torch.mm(f_lcl, f_glb)  # (n_batch*n_locs, n_batch)
-        raw_scores = raw_scores.reshape(n_batch, n_locs, n_batch_glb)  # (n_batch, n_locs, n_batch)
-        # now, raw_scores[j, l, i] = dot(f_glb[i, :], f_lcl[j, :, l])
-        # -- we can get NCE log softmax by normalizing over the j dimension...
-        nce_lsmax = -F.log_softmax(raw_scores, dim=0)  # (n_batch, n_locs, n_batch)
-        # make a mask for picking out the log softmax values for positive pairs
-        pos_mask = torch.eye(n_batch, dtype=nce_lsmax.dtype, device=nce_lsmax.device)
-        if pos_mask.shape[-1] != raw_scores.shape[-1]:
-            new_zeros = torch.zeros(n_batch,
-                                    raw_scores.shape[-1] - pos_mask.shape[-1],
-                                    device=nce_lsmax.device,
-                                    dtype=nce_lsmax.dtype)
-            pos_mask = torch.cat([pos_mask, new_zeros], -1)
-        pos_mask = pos_mask.unsqueeze(dim=1)
-        # use a masked sum over the j dimension to select positive pair NCE scores
-        loss_nce = (nce_lsmax * pos_mask).sum(dim=0)  # (n_locs, n_batch)
-        # permute axes to make return shape consistent with input shape
-        loss_nce = loss_nce.permute(1, 0)  # (n_batch, n_locs)
-        return loss_nce
-
 
 class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
     def __init__(self, encoder, config, device=torch.device('cpu'), wandb=None, agent=None):
@@ -128,9 +84,11 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
         self.params += list(self.global_classifier.parameters())
 
         self.prediction_module = PredictionModule(self.encoder.hidden_size,
-                                                  config["num_actions"])
+                                                  config["num_actions"],
+                                                  dropout=config["dropout_prob"])
         self.reward_module = RewardPredictionModule(self.encoder.hidden_size,
-                                                    config["num_actions"])
+                                                    config["num_actions"],
+                                                    dropout=config["dropout_prob"])
 
         self.reward_loss_weight = config["reward_loss_weight"]
 
@@ -429,8 +387,7 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
                 rew_acc,
                 prefix.capitalize()))
         print(
-            "{} Positive Reward Recall: {:.3f}, Positive Reward Precision: {:.3f}, Zero Reward Recall: {:.3f}, Zero Reward Precision: {:.3f}, Pred. Rep. Norm: {:.3f}, True Rep. Norm: {:.3f}".format(
-                prefix.capitalize(),
+            "Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}, Pred. Norm: {:.3f}, True Norm: {:.3f}".format(
                 pos_recall,
                 pos_precision,
                 zero_recall,
@@ -448,4 +405,6 @@ class FramestackActionInfoNCESpatioTemporalTrainer(Trainer):
                         prefix + " Zero Reward Recall": zero_recall,
                         prefix + " Pos. Reward Precision": pos_precision,
                         prefix + " Zero Reward Precision": zero_precision,
+                        prefix + " Pred norm": pred_norm,
+                        prefix + " True norm": true_norm,
                         'FM epoch': self.epochs_till_now})
