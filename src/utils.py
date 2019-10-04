@@ -56,7 +56,7 @@ def get_argparser():
                         help="Weight for noncontrastive global loss in shared loss.")
     parser.add_argument("--hard-neg-factor", type=int, default=0,
                         help="How many hard negative action samples to use.")
-    parser.add_argument("--dropout-prob", type=float, default=0.5,
+    parser.add_argument("--dropout-prob", type=float, default=0.0,
                         help="How much dropout to use in the model and reward predictor.")
 
     parser.add_argument("--patience", type=int, default=15)
