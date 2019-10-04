@@ -97,7 +97,7 @@ class ForwardModel:
             steps += 1
 
             true_representation_norm += torch.norm(f_t_next, dim=-1).mean()
-            pred_representation_norm += torch.norm(sd_predictions, dim=-1).mean()
+            pred_representation_norm += torch.norm(sd_predictions + f_t_last, dim=-1).mean()
             sd_cosine_sim += F.cosine_similarity(sd_predictions, f_t_next - f_t_last, dim=-1).mean()
             reward_predictions = reward_predictions.argmax(dim=-1)
             rew_acc += (reward_predictions == r_t).float().mean()
