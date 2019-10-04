@@ -16,6 +16,7 @@ class ForwardModel:
         self.num_actions = num_actions
         hidden_size = args.forward_hidden_size
         self.hidden = nn.Linear(args.feature_size * 4 * num_actions, hidden_size).to(self.device)
+        self.dropout = nn.Dropout(args.dropout_prob)
         self.sd_predictor = nn.Linear(hidden_size, args.feature_size).to(self.device)
         self.reward_predictor = nn.Linear(hidden_size, 3).to(self.device)
         self.optimizer = torch.optim.Adam(list(self.hidden.parameters()) +
@@ -63,6 +64,8 @@ class ForwardModel:
         pos_rew_tp, pos_rew_tn, pos_rew_fp, pos_rew_fn = 0, 0, 0, 0
         zero_rew_tp, zero_rew_tn, zero_rew_fp, zero_rew_fn = 0, 0, 0, 0
         sd_cosine_sim = 0
+        true_representation_norm = 0
+        pred_representation_norm = 0
         for s_t, x_t_next, a_t, r_t in data_generator:
             s_t = s_t.view(self.args.batch_size * 4, 1, s_t.shape[-2], s_t.shape[-1])
             with torch.no_grad():
@@ -71,6 +74,7 @@ class ForwardModel:
             f_t_last = f_t[:, -1, :]
             f_t = f_t.view(self.args.batch_size, -1)
             hiddens = F.relu(self.hidden(torch.bmm(f_t.unsqueeze(2), a_t.unsqueeze(1)).view(self.args.batch_size, -1)))
+            hiddens = self.dropout(hiddens)
             sd_predictions = self.sd_predictor(hiddens)
             reward_predictions = F.log_softmax(self.reward_predictor(hiddens), dim=-1)
             # predict |s_{t+1} - s_t| instead of s_{t+1} directly
@@ -92,6 +96,8 @@ class ForwardModel:
             epoch_loss += loss.detach().item()
             steps += 1
 
+            true_representation_norm += torch.norm(f_t_next, dim=-1).mean()
+            pred_representation_norm += torch.norm(sd_predictions, dim=-1).mean()
             sd_cosine_sim += F.cosine_similarity(sd_predictions, f_t_next - f_t_last, dim=-1).mean()
             reward_predictions = reward_predictions.argmax(dim=-1)
             rew_acc += (reward_predictions == r_t).float().mean()
@@ -118,7 +124,9 @@ class ForwardModel:
                          pos_recall,
                          pos_precision,
                          zero_recall,
-                         zero_precision)
+                         zero_precision,
+                         true_representation_norm / steps,
+                         pred_representation_norm / steps)
 
     def train(self, real_transitions, epochs=None):
         if not epochs:
@@ -144,15 +152,19 @@ class ForwardModel:
                     pos_recall,
                     pos_prec,
                     zero_recall,
-                    zero_prec):
-        print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {},  Reward Accuracy: {},  Prediction Cosine Similarity: {:.3f}".
+                    zero_prec,
+                    true_norm,
+                    pred_norm):
+        print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {},  Reward Accuracy: {},  Pred. Cos. Sim.: {:.3f}".
               format(self.epochs_till_now, epoch_loss, sd_loss, reward_loss, rew_acc, sd_cosine_sim))
         print(
-            "Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}".format(
+            "Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}, Pred. Norm: {:.3f}, True Norm: {:.3f}".format(
                 pos_recall,
                 pos_prec,
                 zero_recall,
-                zero_prec))
+                zero_prec,
+                pred_norm,
+                true_norm))
 
         wandb.log({'Dynamics loss': epoch_loss,
                    'SD Loss': sd_loss,
@@ -163,4 +175,6 @@ class ForwardModel:
                    "Zero Reward Recall": zero_recall,
                    "Pos. Reward Precision": pos_prec,
                    "Zero Reward Precision": zero_prec,
+                   "Pred norm": pred_norm,
+                   "True norm": true_norm,
                    'FM Epoch': self.epochs_till_now})
