@@ -108,3 +108,8 @@ venv.bak/
 *.pt
 tmp/
 wandb/
+
+# PHYRE directories
+phyre
+runs
+results
