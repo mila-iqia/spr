@@ -86,10 +86,14 @@ class Agent():
                next_states,
                nonterminals,
                weights,
-               retain_graph=True):
+               step=True,
+               n=None):
         # Calculate current state probabilities (online network noise already sampled)
         log_ps = self.online_net(states, log=True)  # Log probabilities log p(s_t, ·; θonline)
         log_ps_a = log_ps[range(self.batch_size), actions]  # log p(s_t, a_t; θonline)
+
+        if n is None:
+            n = self.n
 
         with torch.no_grad():
             # Calculate nth next state probabilities
@@ -103,7 +107,7 @@ class Agent():
                 self.batch_size), argmax_indices_ns]  # Double-Q probabilities p(s_t+n, argmax_a[(z, p(s_t+n, a; θonline))]; θtarget)
 
             # Compute Tz (Bellman operator T applied to z)
-            Tz = returns.unsqueeze(1) + nonterminals * (self.discount ** self.n) * self.support.unsqueeze(
+            Tz = returns.unsqueeze(1) + nonterminals * (self.discount ** n) * self.support.unsqueeze(
                 0)  # Tz = R^n + (γ^n)z (accounting for terminal states)
             Tz = Tz.clamp(min=self.Vmin, max=self.Vmax)  # Clamp between supported values
             # Compute L2 projection of Tz onto fixed support z
@@ -123,12 +127,12 @@ class Agent():
                                   (pns_a * (b - l.float())).view(-1))  # m_u = m_u + p(s_t+n, a*)(b - l)
 
         loss = -torch.sum(m * log_ps_a, 1)  # Cross-entropy loss (minimises DKL(m||p(s_t, a_t)))
-        self.online_net.zero_grad()
-        (weights * loss).mean().backward(retain_graph=retain_graph)  # Backpropagate importance-weighted minibatch loss
+        if step:
+            self.online_net.zero_grad()
+            (weights * loss).mean().backward()  # Backpropagate importance-weighted minibatch loss
+            self.optimiser.step()
         self.q_losses.append(loss.mean().detach().item())
         self.weighted_q_losses.append((weights * loss).mean().detach().item())
-        # wandb.log({'Q-Loss': loss.mean().detach().item(), 'Weighted Q-Loss': (weights * loss).mean().detach().item()})
-        self.optimiser.step()
 
         self.steps += 1
         self.maybe_update_target_net()
