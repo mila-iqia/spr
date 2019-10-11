@@ -34,18 +34,33 @@ def get_argparser():
                         help='Random seed to use')
     parser.add_argument('--encoder-type', type=str, default="Nature", choices=["Impala", "Nature"],
                         help='Encoder type (Impala or Nature)')
+    parser.add_argument('--feature-size', type=int, default=256,
+                        help='Size of features')
+
+    # Integrated Model Args
     parser.add_argument('--integrated-model', action="store_true",
                         default=False, help='Use an encoder with the model built in.')
-    parser.add_argument('--online-agent-training', action="store_true",
-                        default=False, help='Train agent on real data alongside integrated model.')
+    parser.add_argument('--multi-step-training', action="store_true",
+                        default=False, help='Train an integrated model over multiple jumps')
+    parser.add_argument('--max-jump-length', type=int, default=5,
+                        help='Maximum number of steps to use in multi-step training.')
+    parser.add_argument('--framestack-infomax', action="store_true",
+                        default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument('--bilinear-global-loss', action="store_true", default=False,
-                        help='Use a bilinear global loss in addition to the standard local-global loss.')
+                        help='Use a global bilinear loss in addition to the standard local-global loss.')
     parser.add_argument('--noncontrastive-global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
-    parser.add_argument('--feature-size', type=int, default=256,
-                        help='Size of features')
+    parser.add_argument("--noncontrastive-loss-weight", default=10.0, type=float,
+                        help="Weight for noncontrastive global loss in shared loss.")
+    parser.add_argument("--hard-neg-factor", type=int, default=0,
+                        help="How many hard negative action samples to use.")
+    parser.add_argument("--dropout-prob", type=float, default=0.0,
+                        help="How much dropout to use in the model and reward predictor.")
+    parser.add_argument('--online-agent-training', action="store_true",
+                        default=False, help='Train agent on real data alongside integrated model.')
+
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
     parser.add_argument("--wandb-proj", type=str, default="awm")
@@ -65,13 +80,8 @@ def get_argparser():
     parser.add_argument("--initial_exp_steps", type=int, default=5000)
     parser.add_argument('--forward-hidden-size', type=int, default=512, help='Hidden Size for the Forward Model MLP')
     parser.add_argument('--sd_loss_coeff', type=int, default=10, help='Coefficient for the dynamics loss')
-    parser.add_argument("--reward-loss-weight", default=10.0, type=float,
+    parser.add_argument("--reward-loss-weight", default=1.0, type=float,
                         help="Weight for reward in shared loss.")
-    parser.add_argument("--noncontrastive-loss-weight", default=20.0, type=float,
-                        help="Weight for noncontrastive global loss in shared loss.")
-    parser.add_argument("--hard-neg-factor", type=int, default=4,
-                        help="How many hard negative action samples to use.")
-
     # Rainbow Args
     parser.add_argument('--id', type=str, default='default', help='Experiment ID')
     parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
