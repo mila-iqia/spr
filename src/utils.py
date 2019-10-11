@@ -44,6 +44,8 @@ def get_argparser():
                         default=False, help='Train an integrated model over multiple jumps')
     parser.add_argument('--max-jump-length', type=int, default=5,
                         help='Maximum number of steps to use in multi-step training.')
+    parser.add_argument('--min-jump-length', type=int, default=1,
+                        help='Minimum number of steps to use in multi-step training.')
     parser.add_argument('--framestack-infomax', action="store_true",
                         default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
