@@ -103,6 +103,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.maximum_length = config["max_jump_length"]
         self.minimum_length = config["min_jump_length"]
 
+        self.detach_target = config["detach_target"]
+
         self.optimizer = torch.optim.Adam(self.params, lr=config['encoder_lr'], eps=1e-5)
         self.early_stopper = EarlyStopping(patience=self.patience, verbose=False, wandb=self.wandb, name="encoder")
         self.epochs_till_now = 0
@@ -114,7 +116,11 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         # Sample `num_samples` episodes then batchify them with `self.batch_size` episodes per batch
         for idx in range(total_steps // self.batch_size):
             indices = np.random.randint(0, total_steps, size=self.batch_size)
-            gap = np.random.randint(self.minimum_length, self.maximum_length)
+            if self.minimum_length == self.maximum_length:
+                gap = self.maximum_length
+            else:
+                gap = np.random.randint(self.minimum_length,
+                                        self.maximum_length)
             t1 = indices - gap
             underflow = np.clip(t1, a_max=0, a_min=None)
             indices -= underflow
@@ -146,7 +152,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 a_t.append(actions)
                 r_tnext.append(rewards)
                 dones.append(transitions[t2].nonterminal)
-
 
             yield torch.stack(x_t).to(self.device).float() / 255.,\
                   torch.stack(x_tnext).to(self.device).float() / 255.,\
@@ -276,7 +281,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.zero_rew_tns = np.zeros(self.maximum_length-1)
         self.sd_losses = np.zeros(self.maximum_length-1)
 
-
     def do_one_epoch(self, episodes):
         mode = "train" if self.encoder.training else "val"
         epoch_loss, steps = 0., 0.
@@ -298,6 +302,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             f_t_prev = f_t_prev_maps["out"].view(x_t.shape[0], -1)
             f_t = f_t_maps['f5']
             f_t_global = f_t_maps["out"]
+            if self.detach_target:
+                f_t_global = f_t_global.detach()
 
             N = f_t_prev.size(0)
             reward_loss = 0
