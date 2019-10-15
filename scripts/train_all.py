@@ -15,7 +15,7 @@ from src.envs import Env
 from src.eval import test
 from src.forward_model import ForwardModel
 from src.stdim import InfoNCESpatioTemporalTrainer
-from src.dqn_stdim_with_actions import FramestackActionInfoNCESpatioTemporalTrainer
+from src.dqn_multi_step_stdim_with_actions import MultiStepActionInfoNCESpatioTemporalTrainer
 from src.stdim_with_actions import ActionInfoNCESpatioTemporalTrainer
 from src.utils import get_argparser, log, set_learning_rate
 from src.episodes import get_random_agent_episodes, Transition, sample_real_transitions
@@ -46,7 +46,7 @@ def train_policy(args):
         forward_model.args.epochs = args.epochs // 2
         encoder_trainer.epochs = args.epochs // 2
 
-    j = 0
+    j = 1 if args.integrated_model else 0
     dqn.train()
     results_dir = os.path.join('results', args.id)
     metrics = {'steps': [], 'rewards': [], 'Qs': [], 'best_avg_reward': -float('inf')}
@@ -55,9 +55,10 @@ def train_policy(args):
     while j * args.env_steps_per_epoch < args.total_steps:
         # Train encoder and forward model on real data
         if j != 0:
-            # encoder_lr = max(args.encoder_lr / (j*5), 1e-6)
-            # set_learning_rate(encoder_trainer.optimizer, encoder_lr)
             if args.integrated_model:
+                if args.online_agent_training:
+                    dqn.update_target_net()
+                    encoder_trainer.update_target_net()
                 encoder_trainer.train(real_transitions)
             else:
                 forward_model.train(real_transitions)
@@ -70,6 +71,7 @@ def train_policy(args):
             dqn.train()  # Set DQN (online network) back to training mode
 
         timestep, done = 0, True
+        dqn.update_target_net()
         for e in range(args.env_steps_per_epoch):
             if done:
                 state, done = env.reset(), False
@@ -117,10 +119,6 @@ def train_policy(args):
 
         if j > 0:
             dqn.log(env_steps=(j+1) * args.env_steps_per_epoch)
-        # # Update target network
-        # if steps % args.target_update == 0:
-        #     dqn.update_target_net()
-
         j += 1
 
 
@@ -131,7 +129,7 @@ def train_encoder(args,
                   init_epochs=None,
                   agent=None):
     if args.integrated_model:
-        trainer = FramestackActionInfoNCESpatioTemporalTrainer
+        trainer = MultiStepActionInfoNCESpatioTemporalTrainer
     else:
         trainer = InfoNCESpatioTemporalTrainer
 
