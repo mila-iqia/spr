@@ -146,7 +146,14 @@ def train_encoder(args,
     config['obs_space'] = observation_shape  # weird hack
     config['num_actions'] = num_actions  # weird hack
     if args.method == "infonce-stdim":
-        trainer = trainer(encoder, config, device=args.device, wandb=wandb, agent=agent)
+        if args.online_agent_training:
+            trainer = trainer(encoder,
+                              config,
+                              device=args.device,
+                              wandb=wandb,
+                              agent=agent)
+        else:
+            trainer = trainer(encoder, config, device=args.device, wandb=wandb)
     else:
         assert False, "method {} has no trainer".format(args.method)
 

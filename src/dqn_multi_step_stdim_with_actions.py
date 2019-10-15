@@ -31,10 +31,8 @@ class PredictionModule(nn.Module):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions*4, state_dim*4),
-            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim*4),
-            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim))
 
@@ -50,10 +48,8 @@ class RewardPredictionModule(nn.Module):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions*4, state_dim*4),
-            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, state_dim*4),
-            nn.Dropout(dropout),
             nn.ReLU(),
             nn.Linear(state_dim*4, reward_dim))
 
@@ -94,11 +90,9 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.steps = 0
 
         self.prediction_module = PredictionModule(self.encoder.hidden_size,
-                                                  config["num_actions"],
-                                                  dropout=config["dropout_prob"])
+                                                  config["num_actions"])
         self.reward_module = RewardPredictionModule(self.encoder.hidden_size,
-                                                    config["num_actions"],
-                                                    dropout=config["dropout_prob"])
+                                                    config["num_actions"])
 
         self.reward_loss_weight = config["reward_loss_weight"]
 

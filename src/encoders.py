@@ -89,6 +89,7 @@ class NatureCNN(nn.Module):
         self.hidden_size = self.feature_size
         self.input_channels = input_channels
         self.end_with_relu = args.end_with_relu
+        self.dropout = args.dropout_prob
         self.args = args
         init_ = lambda m: init(m,
                                nn.init.orthogonal_,
@@ -101,8 +102,10 @@ class NatureCNN(nn.Module):
 
         self.main = nn.Sequential(
             nn.Conv2d(input_channels, 32, 5, stride=5, padding=0),
+            nn.Dropout2d(self.dropout),
             nn.ReLU(),
             nn.Conv2d(32, 64, 5, stride=5, padding=0),
+            nn.Dropout2d(self.dropout),
             nn.ReLU(),
             Flatten(),
             nn.Linear(self.final_conv_size, args.feature_size)
@@ -111,8 +114,8 @@ class NatureCNN(nn.Module):
         self.train()
 
     def forward(self, inputs, fmaps=False):
-        f5 = self.main[:4](inputs)
-        out = self.main[4:](f5)
+        f5 = self.main[:5](inputs)
+        out = self.main[5:](f5)
         if self.end_with_relu:
             assert self.args.method != "vae", "can't end with relu and use vae!"
             out = F.relu(out)
