@@ -44,12 +44,16 @@ def get_argparser():
                         default=False, help='Train an integrated model over multiple jumps')
     parser.add_argument('--max-jump-length', type=int, default=5,
                         help='Maximum number of steps to use in multi-step training.')
+    parser.add_argument('--min-jump-length', type=int, default=1,
+                        help='Minimum number of steps to use in multi-step training.')
     parser.add_argument('--framestack-infomax', action="store_true",
                         default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument('--bilinear-global-loss', action="store_true", default=False,
                         help='Use a global bilinear loss in addition to the standard local-global loss.')
+    parser.add_argument('--detach-target', action="store_true", default=False,
+                        help='Detach the target representation.')
     parser.add_argument('--noncontrastive-global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument("--noncontrastive-loss-weight", default=10.0, type=float,

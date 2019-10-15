@@ -36,6 +36,7 @@ class Agent():
 
         self.target_net = DQN(args, self.action_space).to(device=args.device)
         self.update_target_net()
+        self.update_target_net()
         self.target_net.train()
         for param in self.target_net.parameters():
             param.requires_grad = False
@@ -87,10 +88,14 @@ class Agent():
                nonterminals,
                weights,
                step=True,
-               n=None):
+               n=None,
+               target_next_states=None):
         # Calculate current state probabilities (online network noise already sampled)
         log_ps = self.online_net(states, log=True)  # Log probabilities log p(s_t, ·; θonline)
         log_ps_a = log_ps[range(self.batch_size), actions]  # log p(s_t, a_t; θonline)
+
+        if target_next_states is None:
+            target_next_states = next_states
 
         if n is None:
             n = self.n
@@ -102,7 +107,7 @@ class Agent():
             argmax_indices_ns = dns.sum(2).argmax(
                 1)  # Perform argmax action selection using online network: argmax_a[(z, p(s_t+n, a; θonline))]
             self.target_net.reset_noise()  # Sample new target net noise
-            pns = self.target_net(next_states)  # Probabilities p(s_t+n, ·; θtarget)
+            pns = self.target_net(target_next_states)  # Probabilities p(s_t+n, ·; θtarget)
             pns_a = pns[range(
                 self.batch_size), argmax_indices_ns]  # Double-Q probabilities p(s_t+n, argmax_a[(z, p(s_t+n, a; θonline))]; θtarget)
 
@@ -127,6 +132,7 @@ class Agent():
                                   (pns_a * (b - l.float())).view(-1))  # m_u = m_u + p(s_t+n, a*)(b - l)
 
         loss = -torch.sum(m * log_ps_a, 1)  # Cross-entropy loss (minimises DKL(m||p(s_t, a_t)))
+        # print(returns[0], m[0].argmax(), m[0].max())
         if step:
             self.online_net.zero_grad()
             (weights * loss).mean().backward()  # Backpropagate importance-weighted minibatch loss
@@ -141,10 +147,10 @@ class Agent():
 
     def maybe_update_target_net(self):
         if self.steps > self.target_update:
-            self.steps = 0
             self.update_target_net()
 
     def update_target_net(self):
+        self.steps = 0
         self.target_net.load_state_dict(self.online_net.state_dict())
 
     # Save model parameters on current device (don't move model between devices)
