@@ -7,14 +7,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import matplotlib.pyplot as plt
 from torch.utils.data import RandomSampler, BatchSampler
 from .utils import calculate_accuracy, Cutout
 from .trainer import Trainer
-from src.utils import EarlyStopping
+from src.utils import EarlyStopping, fig2data
 from torchvision import transforms
 import torchvision.transforms.functional as TF
 from src.memory import blank_trans
 from torch.distributions.categorical import Categorical
+import wandb
 
 
 class Classifier(nn.Module):
@@ -96,6 +98,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
         self.reward_loss_weight = config["reward_loss_weight"]
 
+        self.dense_supervision = config["dense_supervision"]
+
         self.prediction_module.to(device)
         self.convert_actions = lambda a: F.one_hot(a, num_classes=config["num_actions"])
         self.reward_module.to(device)
@@ -120,7 +124,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.steps = 0
         self.target_encoder.load_state_dict(self.encoder.state_dict())
 
-    def generate_batch(self, transitions, actions=None):
+    def generate_batch(self, transitions):
         total_steps = len(transitions)
         print('Total Steps: {}'.format(len(transitions)))
         # Episode sampler
@@ -137,6 +141,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             indices -= underflow
             t1 -= underflow
             x_t, x_tnext, a_t, r_tnext, dones = [], [], [], [], []
+            all_states = []
             for t1, t2 in zip(t1, indices):
                 # Get one sample from this episode
                 while transitions[t2].nonterminal is False:
@@ -170,15 +175,23 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 x_t.append(torch.stack(states, 0))
                 x_tnext.append(torch.stack(next_states, 0))
                 # x_tnext.append(transitions[t2].state)
+                if self.dense_supervision:
+                    all_states.append(torch.stack([t.state for t in transitions[t1:t2]], 0))
                 a_t.append(actions)
                 r_tnext.append(rewards)
                 dones.append(transitions[t2].nonterminal)
 
-            yield torch.stack(x_t).to(self.device).float() / 255.,\
-                  torch.stack(x_tnext).to(self.device).float() / 255.,\
+            if self.dense_supervision:
+                all_states = torch.stack(all_states).to(self.device).float()/255.
+            else:
+                all_states = None
+
+            yield torch.stack(x_t).to(self.device).float()/255.,\
+                  torch.stack(x_tnext).to(self.device).float()/255.,\
                   torch.tensor(a_t, device=self.device).long(),\
                   torch.tensor(r_tnext, device=self.device).long(),\
                   torch.tensor(dones, device=self.device).unsqueeze(-1).float(),\
+                  all_states,\
                   gap
 
     def nce_with_negs_from_same_loc(self, f_glb, f_lcl):
@@ -255,7 +268,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.sd_losses[n] += sd_loss
         self.counts[n] += 1
 
-    def summarize_trackers(self,):
+    def summarize_trackers(self):
         pos_recalls = []
         pos_precs = []
         zero_recalls = []
@@ -302,7 +315,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.zero_rew_tns = np.zeros(self.maximum_length)
         self.sd_losses = np.zeros(self.maximum_length)
 
-    def do_one_epoch(self, episodes):
+    def do_one_epoch(self, episodes, plots=False):
         mode = "train" if self.encoder.training else "val"
         epoch_loss, steps = 0., 0.
         epoch_local_loss, epoch_rew_loss, epoch_global_loss, rew_acc, = 0., 0., 0., 0.
@@ -314,7 +327,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.reset_trackers()
 
         data_generator = self.generate_batch(episodes)
-        for x_tprev, x_t, actions, rewards, done, n in data_generator:
+        for x_tprev, x_t, actions, rewards, done, all_states, n in data_generator:
             init_shape = x_t.shape
             x_tprev = x_tprev.view(init_shape[0]*4, *init_shape[2:])
             x_t = x_t.view(init_shape[0]*4, *init_shape[2:])
@@ -332,8 +345,14 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             f_t_stack = f_t_maps["out"].view(init_shape[0], 4, -1)
             f_t_global = f_t_stack[:, -1]
 
+            if self.dense_supervision:
+                all_states = all_states.view(init_shape[0]*n, *init_shape[2:])
+                all_states = self.encoder(all_states)
+                all_states = all_states.view(init_shape[0], n, -1)
+
             N = f_t_prev.size(0)
             reward_loss = 0
+            local_sd_loss = 0
 
             if self.online_agent_training:
                 self.agent.reset_noise()
@@ -380,16 +399,33 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 current_stack = torch.cat([current_stack[:, self.encoder.hidden_size:],
                                            f_t_current], -1)
 
-            f_t_pred_delta = f_t_current - f_t_initial
-            f_t_pred = f_t_current
+                if self.dense_supervision or i == actions.shape[1] - 1:
+                    if i == actions.shape[1] - 1:
+                        target = f_t_global
+                    else:
+                        target = all_states[:, i]
+                    if self.detach_target:
+                        sd_loss_target = target.detach()
+                    else:
+                        sd_loss_target = target
+                    step_sd_loss = F.mse_loss(sd_loss_target, f_t_current,
+                                       reduction="mean")
+                    local_sd_loss = local_sd_loss + step_sd_loss
 
+                    pred_delta = f_t_current - f_t_initial
+                    true_delta = target - f_t_initial
+                    cos_sim = F.cosine_similarity(pred_delta, true_delta,
+                                                  dim=-1).mean()
+
+                    self.update_cos_sim_trackers(i, cos_sim, step_sd_loss)
+
+            f_t_pred = f_t_current
             # Loss 1: Global at time t, f5 patches at time t-1
             predictions = self.classifier(f_t_pred)
             f_t = f_t.flatten(1, 2).transpose(-1, -2)
             loss1 = self.nce_with_negs_from_same_loc(predictions, f_t).mean()
 
             if self.global_loss or self.bilinear_global_loss:
-                f_t_pred_delta = f_t_pred[:f_t_global.shape[0]] - f_t_initial
                 logits = torch.matmul(f_t_pred, f_t_global.t())
                 loss2 = F.cross_entropy(logits.t(),
                                         torch.arange(N).to(self.device))
@@ -398,14 +434,15 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 loss2 = 0
 
             # log information about the quality of the predictions/latents
-            sd_loss_target = f_t_global - f_t_initial
-            if self.detach_target:
-                sd_loss_target = sd_loss_target.detach()
-            local_sd_loss = F.mse_loss(f_t_pred_delta, sd_loss_target,
-                                       reduction="mean")
+            # sd_loss_target = f_t_global - f_t_initial
+            # if self.detach_target:
+            #     sd_loss_target = sd_loss_target.detach()
+            # local_sd_loss = F.mse_loss(f_t_pred_delta, sd_loss_target,
+            #                            reduction="mean")
             sd_loss += local_sd_loss
-            cos_sim = F.cosine_similarity(f_t_pred_delta, f_t_global - f_t_initial, dim=-1).mean()
-            self.update_cos_sim_trackers(n-1, cos_sim, local_sd_loss)
+            # cos_sim = F.cosine_similarity(f_t_pred_delta,
+            #                               f_t_global - f_t_initial, dim=-1).mean()
+            # self.update_cos_sim_trackers(n-1, cos_sim, local_sd_loss)
             true_representation_norm += torch.norm(f_t_global, dim=-1).mean()
             pred_representation_norm += torch.norm(f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
 
@@ -454,7 +491,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                          zero_precs,
                          cosine_sims,
                          sd_losses,
-                         prefix=mode)
+                         prefix=mode,
+                         plots=plots)
         if mode == "val":
             self.early_stopper(-epoch_loss / steps, self.encoder)
 
@@ -470,7 +508,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
             if val_eps:
                 self.encoder.eval(), self.classifier.eval()
-                self.do_one_epoch(val_eps)
+                with torch.no_grad():
+                    self.do_one_epoch(val_eps)
 
                 if self.early_stopper.early_stop:
                     break
@@ -517,7 +556,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                     cosine_sims,
                     sd_losses,
                     prefix="",
-                    verbose_print=True):
+                    verbose_print=True,
+                    plots=False):
         print(
             "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Prediction Cosine Similarity: {:.3f}, Reward Accuracy: {:.3f}, DQN Loss: {:.3f} {}".format(
                 prefix.capitalize(),
@@ -576,4 +616,79 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                         prefix + " Pred norm": pred_norm,
                         prefix + " True norm": true_norm,
                         'FM epoch': self.epochs_till_now})
+
+        if plots:
+            images = []
+            fig = plt.figure()
+            plt.plot(np.arange(len(rew_accs)), zero_recalls)
+            plt.xlabel("Number of jumps")
+            plt.ylabel("zero recall")
+            plt.tight_layout()
+            plt.savefig("{}_zero_recall_{}.png".format(prefix, self.epochs_till_now))
+            image = fig2data(fig)#"{}_zero_recall_{}.png".format(prefix, self.epochs_till_now))
+            images.append(wandb.Image(image,
+                                      caption="{} zero recall {}".format(prefix, self.epochs_till_now)))
+
+            fig = plt.figure()
+            plt.plot(np.arange(len(rew_accs)), pos_recalls)
+            plt.xlabel("Number of jumps")
+            plt.ylabel("pos recall")
+            plt.tight_layout()
+            plt.savefig("{}_pos_recall_{}.png".format(prefix, self.epochs_till_now))
+            image = fig2data(fig)#"{}_pos_recall_{}.png".format(prefix, self.epochs_till_now))
+            images.append(wandb.Image(image,
+                                      caption="{} pos recall {}".format(prefix, self.epochs_till_now)))
+
+            fig = plt.figure()
+            plt.plot(np.arange(len(rew_accs)), rew_accs)
+            plt.xlabel("Number of jumps")
+            plt.ylabel("Reward Accuracy")
+            plt.tight_layout()
+            plt.savefig("{}_rew_acc_{}.png".format(prefix, self.epochs_till_now))
+            image = fig2data(fig)#"{}_rew_acc_{}.png".format(prefix, self.epochs_till_now))
+            images.append(wandb.Image(image,
+                                      caption="{} rew acc {}".format(prefix, self.epochs_till_now)))
+
+            fig = plt.figure()
+            plt.plot(np.arange(len(rew_accs)), pos_precs)
+            plt.xlabel("Number of jumps")
+            plt.ylabel("pos precision")
+            plt.tight_layout()
+            plt.savefig("{}_pos_prec_{}.png".format(prefix, self.epochs_till_now))
+            image = fig2data(fig)#"{}_pos_prec_{}.png".format(prefix, self.epochs_till_now))
+            images.append(wandb.Image(image,
+                                      caption="{} pos prec {}".format(prefix, self.epochs_till_now)))
+
+            fig = plt.figure()
+            plt.plot(np.arange(len(rew_accs)), zero_precs)
+            plt.xlabel("Number of jumps")
+            plt.ylabel("zero precision")
+            plt.tight_layout()
+            plt.savefig("{}_zero_prec_{}.png".format(prefix, self.epochs_till_now))
+            image = fig2data(fig)#"{}_zero_prec_{}.png".format(prefix, self.epochs_till_now))
+            images.append(wandb.Image(image,
+                                      caption="{} zero prec {}".format(prefix, self.epochs_till_now)))
+
+            fig = plt.figure()
+            plt.plot(np.arange(len(rew_accs)), cosine_sims)
+            plt.xlabel("Number of jumps")
+            plt.ylabel("cosine similarity")
+            plt.tight_layout()
+            plt.savefig("{}_cos_sim_{}.png".format(prefix, self.epochs_till_now))
+            image = fig2data(fig)#"{}_cos_sim_{}.png".format(prefix, self.epochs_till_now))
+            images.append(wandb.Image(image,
+                                      caption="{} cos sim {}".format(prefix, self.epochs_till_now)))
+
+            fig = plt.figure()
+            plt.plot(np.arange(len(rew_accs)), sd_losses)
+            plt.xlabel("Number of jumps")
+            plt.ylabel("sd loss")
+            plt.tight_layout()
+            plt.savefig("{}_sd_loss_{}.png".format(prefix, self.epochs_till_now))
+            image = fig2data(fig)#"{}_sd_loss_{}.png".format(prefix, self.epochs_till_now))
+            images.append(wandb.Image(image,
+                                      caption="{} sd loss {}".format(prefix, self.epochs_till_now)))
+
+            self.wandb.log({"{} prediction performance".format(prefix): images,
+                            'FM epoch': self.epochs_till_now})
 

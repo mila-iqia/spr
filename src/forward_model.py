@@ -57,6 +57,7 @@ class ForwardModel:
                   (torch.tensor(r_t) + 1).to(self.device)
 
     def do_one_epoch(self, episodes):
+        mode = "train" if self.sd_predictor.training else "val"
         data_generator = self.generate_batch(episodes)
         epoch_loss, epoch_sd_loss, epoch_reward_loss, steps = 0., 0., 0., 0,
         rew_acc = 0.
@@ -79,7 +80,10 @@ class ForwardModel:
                 reward_loss = F.nll_loss(reward_predictions, r_t, weight=self.class_weights)
             else:
                 # If the batch contains no pos. reward, normalize manually
-                reward_loss = F.nll_loss(reward_predictions, r_t, weight=self.class_weights, reduction='none')
+                reward_loss = F.nll_loss(reward_predictions,
+                                         r_t,
+                                         weight=self.class_weights,
+                                         reduction='none')
                 reward_loss = reward_loss.sum() / (self.class_weights[r_t].sum() + self.class_weights[2])
 
             loss = self.args.sd_loss_coeff * sd_loss + reward_loss * self.reward_loss_weight
@@ -118,13 +122,15 @@ class ForwardModel:
                          pos_recall,
                          pos_precision,
                          zero_recall,
-                         zero_precision)
+                         zero_precision,
+                         prefix=mode)
 
     def train(self, real_transitions, epochs=None):
         if not epochs:
             epochs = self.args.epochs
         for _ in range(epochs):
-            self.class_weights = self.generate_reward_class_weights(real_transitions)
+            self.class_weights = \
+                self.generate_reward_class_weights(real_transitions)
             self.do_one_epoch(real_transitions)
             self.epochs_till_now += 1
 
@@ -144,23 +150,31 @@ class ForwardModel:
                     pos_recall,
                     pos_prec,
                     zero_recall,
-                    zero_prec):
-        print("Epoch: {}, Epoch Loss: {}, SD Loss: {}, Reward Loss: {},  Reward Accuracy: {},  Prediction Cosine Similarity: {:.3f}".
-              format(self.epochs_till_now, epoch_loss, sd_loss, reward_loss, rew_acc, sd_cosine_sim))
+                    zero_prec,
+                    prefix=""):
+        print("{} Epoch: {}, Epoch Loss: {:.3f}, SD Loss: {:.3f}, Reward Loss: {:.3f},  Reward Accuracy: {:.3f},  Prediction Cosine Similarity: {:.3f}".
+              format(prefix,
+                     self.epochs_till_now,
+                     epoch_loss,
+                     sd_loss,
+                     reward_loss,
+                     rew_acc,
+                     sd_cosine_sim))
         print(
-            "Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}".format(
+            "{} Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}".format(
+                prefix,
                 pos_recall,
                 pos_prec,
                 zero_recall,
                 zero_prec))
 
-        wandb.log({'Dynamics loss': epoch_loss,
-                   'SD Loss': sd_loss,
-                   'SD Cosine Similarity': sd_cosine_sim,
-                   'Reward Loss': reward_loss,
-                   "Reward Accuracy": rew_acc,
-                   "Pos. Reward Recall": pos_recall,
-                   "Zero Reward Recall": zero_recall,
-                   "Pos. Reward Precision": pos_prec,
-                   "Zero Reward Precision": zero_prec,
+        wandb.log({prefix+' Dynamics loss': epoch_loss,
+                   prefix+' SD Loss': sd_loss,
+                   prefix+' SD Cosine Similarity': sd_cosine_sim,
+                   prefix+' Reward Loss': reward_loss,
+                   prefix+" Reward Accuracy": rew_acc,
+                   prefix+" Pos. Reward Recall": pos_recall,
+                   prefix+" Zero Reward Recall": zero_recall,
+                   prefix+" Pos. Reward Precision": pos_prec,
+                   prefix+" Zero Reward Precision": zero_prec,
                    'FM Epoch': self.epochs_till_now})
