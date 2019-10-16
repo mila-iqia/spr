@@ -126,7 +126,7 @@ if __name__ == '__main__':
     parser = get_argparser()
     args = parser.parse_args()
 
-    tags = []
+    tags = ["Pretraining"]
     if len(args.name) > 0:
         wandb.init(project=args.wandb_proj, tags=tags, name=args.name, entity="abs-world-models")
     else:

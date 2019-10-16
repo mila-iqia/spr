@@ -8,10 +8,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
+import io
+from PIL import Image
 from torch.utils.data import RandomSampler, BatchSampler
 from .utils import calculate_accuracy, Cutout
 from .trainer import Trainer
-from src.utils import EarlyStopping, fig2data
+from src.utils import EarlyStopping, fig2data, save_to_pil
 from torchvision import transforms
 import torchvision.transforms.functional as TF
 from src.memory import blank_trans
@@ -618,77 +620,100 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                         'FM epoch': self.epochs_till_now})
 
         if plots:
+            dir = "./figs/{}/".format(self.wandb.run.name)
+            try:
+                os.makedirs(dir)
+            except FileExistsError:
+                # directory already exists
+                pass
             images = []
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), zero_recalls)
             plt.xlabel("Number of jumps")
             plt.ylabel("zero recall")
             plt.tight_layout()
-            plt.savefig("{}_zero_recall_{}.png".format(prefix, self.epochs_till_now))
-            image = fig2data(fig)#"{}_zero_recall_{}.png".format(prefix, self.epochs_till_now))
+            plt.savefig(dir+"{}_zero_recall_{}.png".format(prefix, self.epochs_till_now))
+            image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} zero recall {}".format(prefix, self.epochs_till_now)))
+            plt.clf()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), pos_recalls)
             plt.xlabel("Number of jumps")
             plt.ylabel("pos recall")
             plt.tight_layout()
-            plt.savefig("{}_pos_recall_{}.png".format(prefix, self.epochs_till_now))
-            image = fig2data(fig)#"{}_pos_recall_{}.png".format(prefix, self.epochs_till_now))
+            plt.savefig(dir+"{}_pos_recall_{}.png".format(prefix, self.epochs_till_now))
+            image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} pos recall {}".format(prefix, self.epochs_till_now)))
+            plt.clf()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), rew_accs)
             plt.xlabel("Number of jumps")
             plt.ylabel("Reward Accuracy")
             plt.tight_layout()
-            plt.savefig("{}_rew_acc_{}.png".format(prefix, self.epochs_till_now))
-            image = fig2data(fig)#"{}_rew_acc_{}.png".format(prefix, self.epochs_till_now))
+            plt.savefig(dir+"{}_rew_acc_{}.png".format(prefix, self.epochs_till_now))
+            image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} rew acc {}".format(prefix, self.epochs_till_now)))
+            plt.clf()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), pos_precs)
             plt.xlabel("Number of jumps")
             plt.ylabel("pos precision")
             plt.tight_layout()
-            plt.savefig("{}_pos_prec_{}.png".format(prefix, self.epochs_till_now))
-            image = fig2data(fig)#"{}_pos_prec_{}.png".format(prefix, self.epochs_till_now))
+            plt.savefig(dir+"{}_pos_prec_{}.png".format(prefix, self.epochs_till_now))
+            image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} pos prec {}".format(prefix, self.epochs_till_now)))
+            plt.clf()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), zero_precs)
             plt.xlabel("Number of jumps")
             plt.ylabel("zero precision")
             plt.tight_layout()
-            plt.savefig("{}_zero_prec_{}.png".format(prefix, self.epochs_till_now))
-            image = fig2data(fig)#"{}_zero_prec_{}.png".format(prefix, self.epochs_till_now))
+            plt.savefig(dir+"{}_zero_prec_{}.png".format(prefix, self.epochs_till_now))
+            image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} zero prec {}".format(prefix, self.epochs_till_now)))
+            plt.clf()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), cosine_sims)
             plt.xlabel("Number of jumps")
             plt.ylabel("cosine similarity")
             plt.tight_layout()
-            plt.savefig("{}_cos_sim_{}.png".format(prefix, self.epochs_till_now))
-            image = fig2data(fig)#"{}_cos_sim_{}.png".format(prefix, self.epochs_till_now))
+            plt.savefig(dir+"{}_cos_sim_{}.png".format(prefix, self.epochs_till_now))
+            image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} cos sim {}".format(prefix, self.epochs_till_now)))
+            plt.clf()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), sd_losses)
             plt.xlabel("Number of jumps")
             plt.ylabel("sd loss")
             plt.tight_layout()
-            plt.savefig("{}_sd_loss_{}.png".format(prefix, self.epochs_till_now))
-            image = fig2data(fig)#"{}_sd_loss_{}.png".format(prefix, self.epochs_till_now))
+            plt.savefig(dir+"{}_sd_loss_{}.png".format(prefix, self.epochs_till_now))
+            image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} sd loss {}".format(prefix, self.epochs_till_now)))
 
-            self.wandb.log({"{} prediction performance".format(prefix): images,
-                            'FM epoch': self.epochs_till_now})
+            labels = [
+              "{} pos recall {}".format(prefix, self.epochs_till_now),
+              "{} zero recall {}".format(prefix, self.epochs_till_now),
+              "{} rew acc {}".format(prefix, self.epochs_till_now),
+              "{} pos prec {}".format(prefix, self.epochs_till_now),
+              "{} zero prec {}".format(prefix, self.epochs_till_now),
+              "{} cos sim {}".format(prefix, self.epochs_till_now),
+              "{} sd loss {}".format(prefix, self.epochs_till_now),
+            ]
+            log = {label: image for label, image in zip(labels, images)}
+            log["FM epoch"] = self.epochs_till_now
+
+            self.wandb.log(log)
 
