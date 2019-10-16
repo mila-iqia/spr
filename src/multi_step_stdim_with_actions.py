@@ -12,7 +12,7 @@ from .trainer import Trainer
 from src.utils import EarlyStopping
 from torchvision import transforms
 import torchvision.transforms.functional as TF
-from src.memory import blank_trans
+from src.memory import Transition
 
 
 class Classifier(nn.Module):
@@ -77,6 +77,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.noncontrastive_loss_weight = config['noncontrastive_loss_weight']
 
         self.device = device
+        self.blank_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8, device=self.device), None, 0, False)
         self.classifier = nn.Linear(self.encoder.hidden_size, 64).to(device)
         self.global_classifier = nn.Linear(self.encoder.hidden_size,
                                            self.encoder.hidden_size).to(device)
@@ -139,7 +140,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 trans[-1] = transitions[t1]
                 for i in range(4 - 2, -1, -1):  # e.g. 2 1 0
                     if trans[i + 1].timestep == 0:
-                        trans[i] = blank_trans  # If future frame has timestep 0
+                        trans[i] = self.blank_trans  # If future frame has timestep 0
                     else:
                         trans[i] = transitions[t1 - 4 + 1 + i]
                 states = [t.state for t in trans]

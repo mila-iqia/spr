@@ -2,10 +2,8 @@ import torch
 import numpy as np
 from collections import deque, namedtuple
 
-from src.memory import blank_trans
+from src.memory import Transition
 from src.envs import Env
-
-Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'nonterminal'))
 
 
 def get_random_agent_episodes(args):
@@ -32,17 +30,18 @@ def get_random_agent_episodes(args):
     return transitions
 
 
-def sample_real_transitions(real_transitions, num_samples):
+def sample_real_transitions(real_transitions, num_samples, device=torch.device('cpu')):
     samples = []
     while len(samples) < num_samples:
         idx = np.random.randint(0, len(real_transitions))
         samples.append(
-            torch.stack([trans.state.float() / 255. for trans in get_framestacked_transition(idx, real_transitions)]))
+            torch.stack([trans.state.float() / 255. for trans in get_framestacked_transition(idx, real_transitions, device=device)]))
     return torch.stack(samples)
 
 
-def get_framestacked_transition(idx, transitions):
+def get_framestacked_transition(idx, transitions, device=torch.device('cpu')):
     history = 4
+    blank_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8, device=device), None, 0, False)
     transition = np.array([None] * history)
     transition[history - 1] = transitions[idx]
     for t in range(4 - 2, -1, -1):  # e.g. 2 1 0

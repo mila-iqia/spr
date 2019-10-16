@@ -224,7 +224,7 @@ class EnvModel(nn.Module):
                 while transitions[t].nonterminal is False:
                     t = np.random.randint(0, total_steps-1)
                 # Get frame-stacked transition corresponding to the index.
-                framestacked_transition = get_framestacked_transition(t, transitions)
+                framestacked_transition = get_framestacked_transition(t, transitions, device=self.device)
                 s_t.append(torch.stack([trans.state for trans in framestacked_transition]))
                 x_t_next.append(transitions[t + 1].state)
                 a_t.append(framestacked_transition[-1].action)
