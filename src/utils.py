@@ -47,7 +47,7 @@ def get_argparser():
                         default=False, help='Train an integrated model over multiple jumps')
     parser.add_argument('--max-jump-length', type=int, default=5,
                         help='Maximum number of steps to use in multi-step training.')
-    parser.add_argument('--visualization_jumps', type=int, default=20,
+    parser.add_argument('--visualization_jumps', type=int, default=30,
                         help='Maximum number of steps to use in multi-step training.')
     parser.add_argument('--min-jump-length', type=int, default=1,
                         help='Minimum number of steps to use in multi-step training.')
