@@ -44,6 +44,8 @@ def get_argparser():
                         default=False, help='Train an integrated model over multiple jumps')
     parser.add_argument('--max-jump-length', type=int, default=5,
                         help='Maximum number of steps to use in multi-step training.')
+    parser.add_argument('--min-jump-length', type=int, default=1,
+                        help='Minimum number of steps to use in multi-step training.')
     parser.add_argument('--framestack-infomax', action="store_true",
                         default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
@@ -58,6 +60,8 @@ def get_argparser():
                         help="How many hard negative action samples to use.")
     parser.add_argument("--dropout-prob", type=float, default=0.0,
                         help="How much dropout to use in the model and reward predictor.")
+    parser.add_argument("--detach-target", action="store_true", default=False,
+                        help="Whether or not to detach the target for latent predictions.")
 
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
@@ -80,6 +84,7 @@ def get_argparser():
     parser.add_argument('--sd_loss_coeff', type=int, default=10, help='Coefficient for the dynamics loss')
     parser.add_argument("--reward-loss-weight", default=1.0, type=float,
                         help="Weight for reward in shared loss.")
+
     # Rainbow Args
     parser.add_argument('--id', type=str, default='default', help='Experiment ID')
     parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
@@ -125,7 +130,8 @@ def get_argparser():
     parser.add_argument('--evaluation-size', type=int, default=500, metavar='N',
                         help='Number of transitions to use for validating Q')
     parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
-    parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
+    parser.add_argument('--enable-cudnn', action='store_true',
+                        help='Enable cuDNN (faster but nondeterministic)')
 
     return parser
 
