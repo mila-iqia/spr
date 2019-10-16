@@ -26,6 +26,7 @@ def train_policy(args):
     env.train()
 
     # get initial exploration data
+
     real_transitions = get_random_agent_episodes(args)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
     encoder, encoder_trainer = train_encoder(args,
@@ -83,8 +84,7 @@ def train_policy(args):
             timestep = 0 if done else timestep + 1
 
             # sample states from real_transitions
-            # TODO: Store real transitions on the GPU
-            samples = sample_real_transitions(real_transitions, args.num_model_rollouts).to(args.device)
+            samples = sample_real_transitions(real_transitions, args.num_model_rollouts, device=args.device)
             samples = samples.flatten(0, 1)
             H, N = args.history_length, args.num_model_rollouts
             with torch.no_grad():
