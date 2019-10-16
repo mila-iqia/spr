@@ -30,7 +30,7 @@ def get_argparser():
                         help='Number of epochs to pretrain model and encoder for (default: 20 (same as --epochs)).')
     parser.add_argument('--cuda-id', type=int, default=0,
                         help='CUDA device index')
-    parser.add_argument('--seed', type=int, default=42,
+    parser.add_argument('--seed', type=int, default=123,
                         help='Random seed to use')
     parser.add_argument('--encoder-type', type=str, default="Nature", choices=["Impala", "Nature"],
                         help='Encoder type (Impala or Nature)')
