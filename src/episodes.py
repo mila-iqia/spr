@@ -19,7 +19,7 @@ def get_random_agent_episodes(args):
         if done:
             state, done = env.reset(), False
         state = state[-1].mul(255).to(dtype=torch.uint8,
-                                      device=torch.device('cpu'))  # Only store last frame and discretise to save memory
+                                      device=args.device)  # Only store last frame and discretise to save memory
         action = np.random.randint(0, action_space)
         next_state, reward, done = env.step(action)
         if args.reward_clip > 0:
