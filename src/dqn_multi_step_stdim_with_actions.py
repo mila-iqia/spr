@@ -435,16 +435,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             else:
                 loss2 = 0
 
-            # log information about the quality of the predictions/latents
-            # sd_loss_target = f_t_global - f_t_initial
-            # if self.detach_target:
-            #     sd_loss_target = sd_loss_target.detach()
-            # local_sd_loss = F.mse_loss(f_t_pred_delta, sd_loss_target,
-            #                            reduction="mean")
             sd_loss += local_sd_loss
-            # cos_sim = F.cosine_similarity(f_t_pred_delta,
-            #                               f_t_global - f_t_initial, dim=-1).mean()
-            # self.update_cos_sim_trackers(n-1, cos_sim, local_sd_loss)
             true_representation_norm += torch.norm(f_t_global, dim=-1).mean()
             pred_representation_norm += torch.norm(f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
 
