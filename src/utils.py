@@ -11,6 +11,9 @@ import numpy as np
 from sklearn.metrics import f1_score as compute_f1_score
 from collections import defaultdict
 import wandb
+import matplotlib.pyplot as plt
+import io
+from PIL import Image
 
 train_encoder_methods = ["infonce-stdim"]
 
@@ -293,3 +296,11 @@ def fig2data(fig):
     # canvas.tostring_argb give pixmap in ARGB mode. Roll the ALPHA channel to have it in RGBA mode
     buf = np.roll(buf, 3, axis=2)
     return buf
+
+def save_to_pil():
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    im = Image.open(buf)
+    im.load()
+    return im
