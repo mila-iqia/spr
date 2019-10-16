@@ -114,8 +114,8 @@ class NatureCNN(nn.Module):
         self.train()
 
     def forward(self, inputs, fmaps=False):
-        f5 = self.main[:5](inputs)
-        out = self.main[5:](f5)
+        f5 = self.main[:6](inputs)
+        out = self.main[6:](f5)
         if self.end_with_relu:
             assert self.args.method != "vae", "can't end with relu and use vae!"
             out = F.relu(out)

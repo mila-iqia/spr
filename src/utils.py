@@ -44,6 +44,8 @@ def get_argparser():
                         default=False, help='Train an integrated model over multiple jumps')
     parser.add_argument('--max-jump-length', type=int, default=5,
                         help='Maximum number of steps to use in multi-step training.')
+    parser.add_argument('--visualization_jumps', type=int, default=20,
+                        help='Maximum number of steps to use in multi-step training.')
     parser.add_argument('--min-jump-length', type=int, default=1,
                         help='Minimum number of steps to use in multi-step training.')
     parser.add_argument('--framestack-infomax', action="store_true",
@@ -56,6 +58,8 @@ def get_argparser():
                         help='Detach the target representation.')
     parser.add_argument('--noncontrastive-global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
+    parser.add_argument('--dense-supervision', action="store_true", default=False,
+                        help='Evaluate L2 and cosine similarity at each jump.')
     parser.add_argument("--noncontrastive-loss-weight", default=10.0, type=float,
                         help="Weight for noncontrastive global loss in shared loss.")
     parser.add_argument("--hard-neg-factor", type=int, default=0,
@@ -65,7 +69,7 @@ def get_argparser():
     parser.add_argument('--online-agent-training', action="store_true",
                         default=False, help='Train agent on real data alongside integrated model.')
 
-    parser.add_argument("--patience", type=int, default=15)
+    parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
     parser.add_argument("--wandb-proj", type=str, default="awm")
     parser.add_argument("--name", type=str, default="", help="Name for run in wandb.")
@@ -269,3 +273,23 @@ def set_learning_rate(optimizer, lr):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
+
+
+def fig2data(fig):
+    """
+    Borrowed from http://www.icare.univ-lille1.fr/tutorials/convert_a_matplotlib_figure
+    @brief Convert a Matplotlib figure to a 4D numpy array with RGBA channels and return it
+    @param fig a matplotlib figure
+    @return a numpy 3D array of RGBA values
+    """
+    # draw the renderer
+    fig.canvas.draw()
+
+    # Get the RGBA buffer from the figure
+    w, h = fig.canvas.get_width_height()
+    buf = np.fromstring(fig.canvas.tostring_argb(), dtype=np.uint8)
+    buf.shape = (w, h, 4)
+
+    # canvas.tostring_argb give pixmap in ARGB mode. Roll the ALPHA channel to have it in RGBA mode
+    buf = np.roll(buf, 3, axis=2)
+    return buf
