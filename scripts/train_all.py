@@ -77,12 +77,13 @@ def train_policy(args):
             next_state, reward, done = env.step(action)
             if args.reward_clip > 0:
                 reward = max(min(reward, args.reward_clip), -args.reward_clip)  # Clip rewards
-            state = state[-1].mul(255).to(dtype=torch.uint8, device=torch.device('cpu'))
+            state = state[-1].mul(255).to(dtype=torch.uint8)
             real_transitions.append(Transition(timestep, state, action, reward, not done))
             state = next_state
             timestep = 0 if done else timestep + 1
 
             # sample states from real_transitions
+            # TODO: Store real transitions on the GPU
             samples = sample_real_transitions(real_transitions, args.num_model_rollouts).to(args.device)
             samples = samples.flatten(0, 1)
             H, N = args.history_length, args.num_model_rollouts
