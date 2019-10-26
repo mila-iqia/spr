@@ -30,9 +30,77 @@ class Classifier(nn.Module):
         return self.network(x1, x2)
 
 
-class PredictionModule(nn.Module):
-    def __init__(self, state_dim, num_actions, dropout=0):
+class FILM(nn.Module):
+    def __init__(self, input_dim, cond_dim, layernorm=True):
         super().__init__()
+        self.input_dim = input_dim
+        self.cond_dim = cond_dim
+        self.layernorm = nn.LayerNorm(input_dim, elementwise_affine=False) \
+            if layernorm else nn.Identity()
+        self.conditioning = nn.Linear(cond_dim, input_dim*2)
+
+    def forward(self, input, cond):
+        conditioning = self.conditioning(cond)
+        gamma = conditioning[..., :self.input_dim]
+        beta = conditioning[..., self.input_dim:]
+
+        return self.layernorm(input)*gamma + beta
+
+
+class FILMPredictionModule(nn.Module):
+    def __init__(self, state_dim, num_actions, layernorm=False):
+        super().__init__()
+        self.convert_actions = lambda a: F.one_hot(a, num_classes=num_actions)
+        self.films = nn.ModuleList()
+        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
+        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
+        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
+        self.network = nn.Sequential(
+            nn.Linear(state_dim*4, state_dim*4),
+            nn.ReLU(),
+            nn.Linear(state_dim*4, state_dim*4),
+            nn.ReLU(),
+            nn.Linear(state_dim*4, state_dim))
+
+    def forward(self, states, actions):
+        actions = self.convert_actions(actions).float()
+        current = self.films[0](states, actions)
+        current = self.network[:2](current)
+        current = self.films[1](current, actions)
+        current = self.network[2:4](current)
+        current = self.films[2](current, actions)
+        return self.network[4:](current)
+
+
+class FILMRewardPredictionModule(nn.Module):
+    def __init__(self, state_dim, num_actions, reward_dim=3, layernorm=False):
+        super().__init__()
+        self.convert_actions = lambda a: F.one_hot(a, num_classes=num_actions)
+        self.films = nn.ModuleList()
+        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
+        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
+        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
+        self.network = nn.Sequential(
+            nn.Linear(state_dim*4, state_dim*4),
+            nn.ReLU(),
+            nn.Linear(state_dim*4, state_dim*4),
+            nn.ReLU(),
+            nn.Linear(state_dim*4, reward_dim))
+
+    def forward(self, states, actions):
+        actions = self.convert_actions(actions).float()
+        current = self.films[0](states, actions)
+        current = self.network[:2](current)
+        current = self.films[1](current, actions)
+        current = self.network[2:4](current)
+        current = self.films[2](current, actions)
+        return self.network[4:](current)
+
+
+class PredictionModule(nn.Module):
+    def __init__(self, state_dim, num_actions):
+        super().__init__()
+        self.convert_actions = lambda a: F.one_hot(a, num_classes=num_actions)
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions*4, state_dim*4),
             nn.ReLU(),
@@ -41,6 +109,7 @@ class PredictionModule(nn.Module):
             nn.Linear(state_dim*4, state_dim))
 
     def forward(self, states, actions):
+        actions = self.convert_actions(actions).float()
         N = states.size(0)
         output = self.network(
             torch.bmm(states.unsqueeze(2), actions.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
@@ -50,6 +119,7 @@ class PredictionModule(nn.Module):
 class RewardPredictionModule(nn.Module):
     def __init__(self, state_dim, num_actions, reward_dim=3, dropout=0):
         super().__init__()
+        self.convert_actions = lambda a: F.one_hot(a, num_classes=num_actions)
         self.network = nn.Sequential(
             nn.Linear(state_dim*num_actions*4, state_dim*4),
             nn.ReLU(),
@@ -58,6 +128,7 @@ class RewardPredictionModule(nn.Module):
             nn.Linear(state_dim*4, reward_dim))
 
     def forward(self, states, actions):
+        actions = self.convert_actions(actions).float()
         N = states.size(0)
         output = self.network(
             torch.bmm(states.unsqueeze(2), actions.unsqueeze(1)).view(N, -1))  # outer-product / bilinear integration, then flatten
@@ -93,17 +164,25 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.target_update = self.config["target_update"]
         self.steps = 0
 
-        self.prediction_module = PredictionModule(self.encoder.hidden_size,
-                                                  config["num_actions"])
-        self.reward_module = RewardPredictionModule(self.encoder.hidden_size,
-                                                    config["num_actions"])
+        if config["film"]:
+            self.prediction_module = FILMPredictionModule(self.encoder.hidden_size,
+                                                          config["num_actions"],
+                                                          layernorm=config["layernorm"])
+            self.reward_module = FILMRewardPredictionModule(self.encoder.hidden_size,
+                                                            config["num_actions"],
+                                                            layernorm=config["layernorm"])
+
+        else:
+            self.prediction_module = PredictionModule(self.encoder.hidden_size,
+                                                      config["num_actions"])
+            self.reward_module = RewardPredictionModule(self.encoder.hidden_size,
+                                                        config["num_actions"])
 
         self.reward_loss_weight = config["reward_loss_weight"]
 
         self.dense_supervision = config["dense_supervision"]
 
         self.prediction_module.to(device)
-        self.convert_actions = lambda a: F.one_hot(a, num_classes=config["num_actions"])
         self.reward_module.to(device)
         self.params += list(self.prediction_module.parameters())
         self.params += list(self.reward_module.parameters())
@@ -139,6 +218,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 gap = np.random.randint(self.minimum_length,
                                         self.maximum_length + 1)
             t1 = indices - gap
+            # don't allow negative indices.
             underflow = np.clip(t1, a_max=0, a_min=None)
             indices -= underflow
             t1 -= underflow
@@ -146,9 +226,11 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             all_states = []
             for t1, t2 in zip(t1, indices):
                 # Get one sample from this episode
-                while transitions[t2].nonterminal is False:
+                # If our sample would cross an episode boundary, resample.
+                while transitions[t2].timestep - gap < 0:
                     t2 = np.random.randint(0, total_steps)
                     t1 = t2 - gap
+                    # don't allow negative indices.
                     underflow = np.clip(t1, a_max=0, a_min=None)
                     t1 -= underflow
                     t2 -= underflow
@@ -339,8 +421,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             f_t_prev_stack = f_t_prev_maps["out"].view(init_shape[0], 4, -1)
             f_t_initial = f_t_prev_stack[:, -1]
             f_t_prev = f_t_prev_maps["out"].view(init_shape[0], -1)
-            # f_t_stack = f_t_maps["out"].view(x_t.shape[0], 4,
-            #                                   *f_t.shape[1:])[:, -1]
             f_t_target_stack = self.target_encoder(x_t, fmaps=False).view(init_shape[0], -1)
             f_t = f_t_maps['f5']
             f_t = f_t.unsqueeze(1).view(init_shape[0], 4, *f_t.shape[1:])[:, -1]
@@ -377,7 +457,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             for i in range(actions.shape[1]):
                 jumps += 1
                 a_i = actions[:, i]
-                a_i = self.convert_actions(a_i).float()
                 r_i = rewards[:, i]
                 reward_preds = self.reward_module(current_stack, a_i)
                 if rewards.max() == 2:

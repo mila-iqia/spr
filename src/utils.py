@@ -55,6 +55,10 @@ def get_argparser():
                         default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
+    parser.add_argument('--film', action="store_true", default=False,
+                        help='Use FILM instead of an outer product to integrate actions')
+    parser.add_argument('--layernorm', action="store_true", default=False,
+                        help='Use layernorm with FILM.')
     parser.add_argument('--bilinear-global-loss', action="store_true", default=False,
                         help='Use a global bilinear loss in addition to the standard local-global loss.')
     parser.add_argument('--detach-target', action="store_true", default=False,
@@ -71,6 +75,7 @@ def get_argparser():
                         help="How much dropout to use in the model and reward predictor.")
     parser.add_argument('--online-agent-training', action="store_true",
                         default=False, help='Train agent on real data alongside integrated model.')
+    parser.add_argument('--probe-lr', type=float, default=3e-4)
 
     parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
@@ -304,3 +309,52 @@ def save_to_pil():
     im = Image.open(buf)
     im.load()
     return im
+
+
+class appendabledict(defaultdict):
+    def __init__(self, type_=list, *args, **kwargs):
+        self.type_ = type_
+        super().__init__(type_, *args, **kwargs)
+
+    #     def map_(self, func):
+    #         for k, v in self.items():
+    #             self.__setitem__(k, func(v))
+
+    def subslice(self, slice_):
+        """indexes every value in the dict according to a specified slice
+
+        Parameters
+        ----------
+        slice : int or slice type
+            An indexing slice , e.g., ``slice(2, 20, 2)`` or ``2``.
+
+
+        Returns
+        -------
+        sliced_dict : dict (not appendabledict type!)
+            A dictionary with each value from this object's dictionary, but the value is sliced according to slice_
+            e.g. if this dictionary has {a:[1,2,3,4], b:[5,6,7,8]}, then self.subslice(2) returns {a:3,b:7}
+                 self.subslice(slice(1,3)) returns {a:[2,3], b:[6,7]}
+
+         """
+        sliced_dict = {}
+        for k, v in self.items():
+            sliced_dict[k] = v[slice_]
+        return sliced_dict
+
+    def append_update(self, other_dict):
+        """appends current dict's values with values from other_dict
+
+        Parameters
+        ----------
+        other_dict : dict
+            A dictionary that you want to append to this dictionary
+
+
+        Returns
+        -------
+        Nothing. The side effect is this dict's values change
+
+         """
+        for k, v in other_dict.items():
+            self.__getitem__(k).append(v)
