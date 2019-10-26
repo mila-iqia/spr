@@ -101,9 +101,8 @@ def train_policy(args):
                 z = torch.stack(list(state_deque))
                 z = z.view(N, H, -1).view(N, -1)  # take a second look at this later
                 actions = dqn.act(z, batch=True)
-                actions_one_hot = F.one_hot(actions, num_classes=env.action_space())
                 with torch.no_grad():
-                    next_z, rewards = forward_model.predict(z, actions_one_hot.float())
+                    next_z, rewards = forward_model.predict(z, actions)
                 z = z.view(N, H, -1)
 
                 actions, rewards = actions.tolist(), rewards.tolist()

@@ -2,8 +2,6 @@ from collections import deque
 from itertools import chain
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 import os
 import wandb
@@ -17,9 +15,12 @@ from src.forward_model import ForwardModel
 from src.stdim import InfoNCESpatioTemporalTrainer
 from src.dqn_multi_step_stdim_with_actions import MultiStepActionInfoNCESpatioTemporalTrainer
 from src.stdim_with_actions import ActionInfoNCESpatioTemporalTrainer
-from src.utils import get_argparser, log, set_learning_rate
-from src.episodes import get_random_agent_episodes, Transition, sample_real_transitions
+from src.utils import get_argparser, log, set_learning_rate, save_to_pil
+from src.episodes import get_random_agent_episodes, get_labeled_episodes,\
+    Transition, sample_real_transitions
 from src.memory import blank_trans
+from src.probe import ProbeTrainer
+import matplotlib.pyplot as plt
 
 
 def pretrain(args):
@@ -28,14 +29,15 @@ def pretrain(args):
     dqn = Agent(args, env)
 
     # get initial exploration data
-    real_transitions = get_random_agent_episodes(args)
-    val_transitions = get_random_agent_episodes(args)
+    train_transitions, train_labels,\
+    val_transitions, val_labels, \
+    test_transitions, test_labels = get_labeled_episodes(args)
     encoder, encoder_trainer = init_encoder(args,
-                                            real_transitions,
+                                            train_transitions,
                                             num_actions=env.action_space(),
                                             agent=dqn)
 
-    encoder_trainer.train(real_transitions,
+    encoder_trainer.train(train_transitions,
                           val_transitions,
                           epochs=args.pretrain_epochs)
 
@@ -44,7 +46,7 @@ def pretrain(args):
     if not args.integrated_model:
         forward_model = train_model(args,
                                     encoder,
-                                    real_transitions,
+                                    train_transitions,
                                     env.action_space(),
                                     init_epochs=args.pretrain_epochs,
                                     val_eps=val_transitions)
@@ -52,6 +54,34 @@ def pretrain(args):
         encoder_trainer.epochs = args.epochs // 2
 
     visualize_temporal_prediction_accuracy(forward_model, val_transitions, args)
+
+    probe = ProbeTrainer(encoder=encoder_trainer.encoder,
+                         forward=encoder_trainer.prediction_module,
+                         epochs=args.epochs,
+                         method_name=args.method,
+                         lr=args.probe_lr,
+                         batch_size=args.batch_size,
+                         patience=args.patience,
+                         wandb=wandb,
+                         # fully_supervised=(args.method == "supervised"),
+                         save_dir=wandb.run.dir)
+
+    probe.train(train_transitions, val_transitions,
+                train_labels, val_labels)
+    test_acc, test_f1score = probe.test(test_transitions, test_labels)
+
+    wandb.log(test_acc)
+    wandb.log(test_f1score)
+    print(test_acc, test_f1score)
+
+    with torch.no_grad():
+        train_probe_loss, train_probe_acc = probe.run_multistep(train_transitions, train_labels)
+        val_probe_loss, val_probe_acc = probe.run_multistep(val_transitions, val_labels)
+        test_probe_loss, test_probe_acc = probe.run_multistep(test_transitions, test_labels)
+
+    plot_multistep_probing(wandb, train_probe_loss, train_probe_acc, "train")
+    plot_multistep_probing(wandb, val_probe_loss, val_probe_acc, "val")
+    plot_multistep_probing(wandb, test_probe_loss, test_probe_acc, "test")
 
 
 def visualize_temporal_prediction_accuracy(model, transitions, args):
@@ -67,6 +97,7 @@ def visualize_temporal_prediction_accuracy(model, transitions, args):
         model.minimum_length = args.min_jump_length
         model.maximum_length = args.max_jump_length
         model.dense_supervision = args.dense_supervision
+
 
 def init_encoder(args,
                  transitions,
@@ -120,6 +151,46 @@ def train_model(args,
         forward_model.hidden.train()
         forward_model.reward_predictor.train()
     return forward_model
+
+
+def plot_multistep_probing(wandb, epoch_loss, accuracy, prefix="train"):
+    images = []
+    labels = []
+
+    dir = "./figs/{}/".format(wandb.run.name)
+    try:
+        os.makedirs(dir)
+    except FileExistsError:
+        # directory already exists
+        pass
+    for k, data in epoch_loss.items():
+        plt.figure()
+        plt.plot(np.arange(len(data)), data)
+        plt.xlabel("Number of jumps")
+        plt.ylabel(k)
+        plt.tight_layout()
+        plt.savefig(dir + "{}_{}_loss.png".format(prefix, k))
+        image = save_to_pil()
+        labels.append("{}_{}_loss".format(prefix, k))
+        images.append(wandb.Image(image,
+                                  caption="{} {} loss".format(prefix, k)))
+        plt.clf()
+
+    for k, data in accuracy.items():
+        plt.figure()
+        plt.plot(np.arange(len(data)), data)
+        plt.xlabel("Number of jumps")
+        plt.ylabel(k)
+        plt.tight_layout()
+        plt.savefig(dir + "{}_{}_accuracy.png".format(prefix, k))
+        image = save_to_pil()
+        labels.append("{}_{}_loss".format(prefix, k))
+        images.append(wandb.Image(image,
+                                  caption="{} {} accuracy".format(prefix, k)))
+        plt.clf()
+
+    log = {label: image for label, image in zip(labels, images)}
+    wandb.log(log)
 
 
 if __name__ == '__main__':

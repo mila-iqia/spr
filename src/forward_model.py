@@ -135,6 +135,7 @@ class ForwardModel:
             self.epochs_till_now += 1
 
     def predict(self, z, a):
+        a = F.one_hot(a, num_classes=self.num_actions).float()
         N = z.size(0)
         hidden = F.relu(self.hidden(
             torch.bmm(z.unsqueeze(2), a.unsqueeze(1)).view(N, -1)))  # outer-product / bilinear integration, then flatten

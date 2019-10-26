@@ -3,6 +3,7 @@ from collections import deque
 import random
 import atari_py
 import cv2
+from .ram_annotations import atari_dict
 
 import torch
 
@@ -94,3 +95,37 @@ class Env():
 
     def close(self):
         cv2.destroyAllWindows()
+
+
+class AARIEnv(Env):
+    def __init__(self, args):
+        super().__init__(args)
+        self.env_name = args.game
+        self.game_name = self.env_name.replace("_", "").lower()#split("-")[0].split("No")[0].split("Deterministic")[0]
+        assert self.game_name in atari_dict, "{} is not currently supported by AARI. It's either not an Atari game or we don't have the ram annotations yet!".format(game_name)
+
+    def info(self, info):
+        label_dict = self.labels()
+        info["labels"] = label_dict
+        return info
+
+    def step(self, action):
+        states, rewards, done = super().step(action)
+        labels = self.labels()
+        info = {"labels": labels}
+        return states, rewards, done, info
+
+    def labels(self):
+        ram = self.ale.getRAM()
+        label_dict = ram2label(self.game_name, ram)
+        return label_dict
+
+
+def ram2label(game_name, ram):
+    if game_name.lower() in atari_dict:
+        label_dict = {k: ram[ind] for k, ind in atari_dict[game_name.lower()].items()}
+    else:
+        assert False, "{} is not currently supported by AARI. It's either not an Atari game or we don't have the ram annotations yet!".format(game_name)
+    return label_dict
+
+
