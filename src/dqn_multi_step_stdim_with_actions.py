@@ -182,6 +182,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
         self.dense_supervision = config["dense_supervision"]
 
+        self.dqn_loss_weight = config["dqn_loss_weight"]
+
         self.prediction_module.to(device)
         self.reward_module.to(device)
         self.params += list(self.prediction_module.parameters())
@@ -208,8 +210,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
     def generate_batch(self, transitions):
         total_steps = len(transitions)
         print('Total Steps: {}'.format(len(transitions)))
-        # Episode sampler
-        # Sample `num_samples` episodes then batchify them with `self.batch_size` episodes per batch
         for idx in range(total_steps // self.batch_size):
             indices = np.random.randint(0, total_steps, size=self.batch_size)
             if self.minimum_length == self.maximum_length + 1:
@@ -519,10 +519,14 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             pred_representation_norm += torch.norm(f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
 
             self.optimizer.zero_grad()
-            loss = loss1 + loss2 + reward_loss*self.reward_loss_weight + dqn_loss
+            loss = (loss1 +
+                    loss2 +
+                    reward_loss*self.reward_loss_weight)
             if self.noncontrastive_global_loss:
                 loss = loss + local_sd_loss*self.noncontrastive_loss_weight
             if self.online_agent_training:
+                loss = (loss + dqn_loss *
+                        self.dqn_loss_weight)/self.dqn_loss_weight
                 self.agent.optimiser.zero_grad()
             if mode == "train":
                 loss.backward()

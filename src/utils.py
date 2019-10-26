@@ -98,6 +98,8 @@ def get_argparser():
     parser.add_argument('--sd_loss_coeff', type=int, default=10, help='Coefficient for the dynamics loss')
     parser.add_argument("--reward-loss-weight", default=1.0, type=float,
                         help="Weight for reward in shared loss.")
+    parser.add_argument("--dqn-loss-weight", default=1.0, type=float,
+                        help="Weight for dqn when doing online training.")
     # Rainbow Args
     parser.add_argument('--id', type=str, default='default', help='Experiment ID')
     parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
