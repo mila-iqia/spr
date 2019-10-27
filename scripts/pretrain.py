@@ -20,6 +20,7 @@ from src.episodes import get_random_agent_episodes, get_labeled_episodes,\
     Transition, sample_real_transitions
 from src.memory import blank_trans
 from src.probe import ProbeTrainer
+from atariari.benchmark.ram_annotations import atari_dict
 import matplotlib.pyplot as plt
 
 
@@ -54,6 +55,9 @@ def pretrain(args):
         encoder_trainer.epochs = args.epochs // 2
 
     visualize_temporal_prediction_accuracy(forward_model, val_transitions, args)
+
+    if args.game not in atari_dict:
+        return
 
     probe = ProbeTrainer(encoder=encoder_trainer.encoder,
                          forward=encoder_trainer.prediction_module,
