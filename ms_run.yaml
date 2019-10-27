@@ -29,7 +29,7 @@ search:
     command:
       - export PATH=$$PATH:~/.local/bin
       - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly
-      - pip install git+git://github.com/mila-iqia/atari-representation-learning.git
+      - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
       - export LC_ALL=C.UTF-8
       - export LANG=C.UTF-8
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
