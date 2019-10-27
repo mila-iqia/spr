@@ -12,6 +12,7 @@ conda install pytorch torchvision -c pytorch
 
 # Other requirements
 pip install -r requirements.txt
+pip install git+git://github.com/mila-iqia/atari-representation-learning.git
 ```
 
 ## Usage:
