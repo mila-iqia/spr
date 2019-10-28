@@ -124,8 +124,10 @@ class ProbeTrainer():
 
     def run_multistep(self, transitions, labels, n=30, train=False):
         sample_label = labels[0]
-        epoch_loss, accuracy = {k + "_loss": np.zeros(n) for k in sample_label.keys()},\
-                               {k + "_acc": np.zeros(n) for k in sample_label.keys()}
+        epoch_loss = [{k + "_loss": 0 for k in sample_label.keys()}
+                      for _ in range(n)]
+        pred_dict = [{k: [] for k in sample_label.keys()} for _ in range(n)]
+        labels_dict = [{k: [] for k in sample_label.keys()} for _ in range(n)]
         iterator = self.generate_multistep_batch(transitions, labels, n+3)
         steps = 0
         for step, (x, actions, labels_batch) in enumerate(iterator):
@@ -148,25 +150,25 @@ class ProbeTrainer():
             for jump, (step_representation, step_labels) in \
                     enumerate(zip(representations, labels_batch[3:])):
                 for k, label in step_labels.items():
-                    if self.early_stoppers[k].early_stop:
-                        continue
                     optim = self.optimizers[k]
                     optim.zero_grad()
 
                     label = torch.tensor(label).long().to(self.device)
                     preds = self.probe(None, k, vector=step_representation)
+                    pred_dict[jump][k].append(preds.cpu())
+                    labels_dict[jump][k].append(label.cpu())
                     loss = self.loss_fn(preds, label)
 
-                    epoch_loss[k + "_loss"][jump] += (loss.detach().item())
-                    accuracy[k + "_acc"][jump] += (calculate_multiclass_accuracy(preds, label))
+                    epoch_loss[jump][k + "_loss"] += (loss.detach().item())
+                    # accuracy[k + "_acc"][jump] += (calculate_multiclass_accuracy(preds, label))
                     if self.probes[k].training and train:
                         loss.backward()
                         optim.step()
 
-        epoch_loss = {k: loss/steps for k, loss in epoch_loss.items()}
-        accuracy = {k: acc/steps for k, acc in accuracy.items()}
+        epoch_loss = [{k: l/steps for k, l in d.items()} for d in epoch_loss]
+        acc_dict, f1_dict = postprocess_temporal_dict(pred_dict, labels_dict)
 
-        return epoch_loss, accuracy
+        return epoch_loss, acc_dict, f1_dict
 
 
     def generate_batch(self, transitions, labels):
@@ -301,7 +303,6 @@ class ProbeTrainer():
         for k, probe in self.probes.items():
             probe.eval()
         acc_dict, f1_dict = self.do_test_epoch(test_episodes, test_label_dicts)
-
         acc_dict, f1_dict = postprocess_raw_metrics(acc_dict, f1_dict)
 
         print("""In our paper, we report F1 scores and accuracies averaged across each category. 
@@ -319,6 +320,24 @@ class ProbeTrainer():
             for k, v in dictionary.items():
                 print("\t {}: {:8.4f}".format(k, v))
             print("\t --")
+
+
+def postprocess_temporal_dict(pred_dicts, label_dicts):
+    f1s = []
+    accs = []
+    for preds, labels in zip(pred_dicts, label_dicts):
+        acc_t = {}
+        f1_t = {}
+        for k, pred_k in preds.items():
+            lab_k = labels[k]
+            pred_k = torch.cat(pred_k, 0)
+            lab_k = torch.cat(lab_k, 0)
+            f1_t[k] = calculate_multiclass_f1_score(pred_k, lab_k)
+            acc_t[k] = calculate_multiclass_accuracy(pred_k, lab_k)
+        acc_t, f1_t = postprocess_raw_metrics(acc_t, f1_t)
+        f1s.append(f1_t)
+        accs.append(acc_t)
+    return f1s, accs
 
 
 def postprocess_raw_metrics(acc_dict, f1_dict):
