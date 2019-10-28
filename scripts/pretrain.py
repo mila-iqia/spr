@@ -197,11 +197,11 @@ def plot_multistep_probing(wandb, epoch_loss, accuracy, f1, prefix="train"):
         plt.xlabel("Number of jumps")
         plt.ylabel(k)
         plt.tight_layout()
-        plt.savefig(dir + "{}_{}_accuracy.png".format(prefix, k))
+        plt.savefig(dir + "{}_{}.png".format(prefix, k))
         image = save_to_pil()
-        labels.append("{}_{}_acc".format(prefix, k))
+        labels.append("{}_{}".format(prefix, k))
         images.append(wandb.Image(image,
-                                  caption="{} {} accuracy".format(prefix, k)))
+                                  caption="{} {}".format(prefix, k)))
         plt.close()
 
     # Iterate over keys, extracting data from list of dicts.
@@ -212,11 +212,11 @@ def plot_multistep_probing(wandb, epoch_loss, accuracy, f1, prefix="train"):
         plt.xlabel("Number of jumps")
         plt.ylabel(k)
         plt.tight_layout()
-        plt.savefig(dir + "{}_{}_f1.png".format(prefix, k))
+        plt.savefig(dir + "{}_{}.png".format(prefix, k))
         image = save_to_pil()
-        labels.append("{}_{}_f1".format(prefix, k))
+        labels.append("{}_{}".format(prefix, k))
         images.append(wandb.Image(image,
-                                  caption="{} {} f1".format(prefix, k)))
+                                  caption="{} {}".format(prefix, k)))
         plt.close()
 
     log = {label: image for label, image in zip(labels, images)}

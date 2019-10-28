@@ -337,7 +337,7 @@ def postprocess_temporal_dict(pred_dicts, label_dicts):
         acc_t, f1_t = postprocess_raw_metrics(acc_t, f1_t)
         f1s.append(f1_t)
         accs.append(acc_t)
-    return f1s, accs
+    return accs, f1s
 
 
 def postprocess_raw_metrics(acc_dict, f1_dict):
