@@ -30,9 +30,15 @@ def pretrain(args):
     dqn = Agent(args, env)
 
     # get initial exploration data
-    train_transitions, train_labels,\
-    val_transitions, val_labels, \
-    test_transitions, test_labels = get_labeled_episodes(args)
+    if args.game.replace("_", "").lower() in atari_dict:
+        train_transitions, train_labels,\
+        val_transitions, val_labels, \
+        test_transitions, test_labels = get_labeled_episodes(args)
+    else:
+        print("{} does not support probing; omitting.".format(args.game))
+        train_transitions = get_random_agent_episodes(args)
+        val_transitions = get_random_agent_episodes(args)
+
     encoder, encoder_trainer = init_encoder(args,
                                             train_transitions,
                                             num_actions=env.action_space(),
@@ -56,7 +62,7 @@ def pretrain(args):
 
     visualize_temporal_prediction_accuracy(forward_model, val_transitions, args)
 
-    if args.game not in atari_dict:
+    if args.game.replace("_", "").lower() not in atari_dict:
         return
 
     probe = ProbeTrainer(encoder=encoder_trainer.encoder,
@@ -79,13 +85,13 @@ def pretrain(args):
     print(test_acc, test_f1score)
 
     with torch.no_grad():
-        train_probe_loss, train_probe_acc = probe.run_multistep(train_transitions, train_labels)
-        val_probe_loss, val_probe_acc = probe.run_multistep(val_transitions, val_labels)
-        test_probe_loss, test_probe_acc = probe.run_multistep(test_transitions, test_labels)
+        train_probe_loss, train_probe_acc, train_probe_f1 = probe.run_multistep(train_transitions, train_labels)
+        val_probe_loss, val_probe_acc, val_probe_f1 = probe.run_multistep(val_transitions, val_labels)
+        test_probe_loss, test_probe_acc, test_probe_f1 = probe.run_multistep(test_transitions, test_labels)
 
-    plot_multistep_probing(wandb, train_probe_loss, train_probe_acc, "train")
-    plot_multistep_probing(wandb, val_probe_loss, val_probe_acc, "val")
-    plot_multistep_probing(wandb, test_probe_loss, test_probe_acc, "test")
+    plot_multistep_probing(wandb, train_probe_loss, train_probe_acc, train_probe_f1, "train")
+    plot_multistep_probing(wandb, val_probe_loss, val_probe_acc, val_probe_f1, "val")
+    plot_multistep_probing(wandb, test_probe_loss, test_probe_acc, test_probe_f1, "test")
 
 
 def visualize_temporal_prediction_accuracy(model, transitions, args):
@@ -157,7 +163,7 @@ def train_model(args,
     return forward_model
 
 
-def plot_multistep_probing(wandb, epoch_loss, accuracy, prefix="train"):
+def plot_multistep_probing(wandb, epoch_loss, accuracy, f1, prefix="train"):
     images = []
     labels = []
 
@@ -167,7 +173,10 @@ def plot_multistep_probing(wandb, epoch_loss, accuracy, prefix="train"):
     except FileExistsError:
         # directory already exists
         pass
-    for k, data in epoch_loss.items():
+
+    # Iterate over keys, extracting data from list of dicts.
+    for k, _ in epoch_loss[0].items():
+        data = [d[k] for d in epoch_loss]
         plt.figure()
         plt.plot(np.arange(len(data)), data)
         plt.xlabel("Number of jumps")
@@ -178,9 +187,11 @@ def plot_multistep_probing(wandb, epoch_loss, accuracy, prefix="train"):
         labels.append("{}_{}_loss".format(prefix, k))
         images.append(wandb.Image(image,
                                   caption="{} {} loss".format(prefix, k)))
-        plt.clf()
+        plt.close()
 
-    for k, data in accuracy.items():
+    # Iterate over keys, extracting data from list of dicts.
+    for k, _ in accuracy[0].items():
+        data = [d[k] for d in accuracy]
         plt.figure()
         plt.plot(np.arange(len(data)), data)
         plt.xlabel("Number of jumps")
@@ -188,10 +199,25 @@ def plot_multistep_probing(wandb, epoch_loss, accuracy, prefix="train"):
         plt.tight_layout()
         plt.savefig(dir + "{}_{}_accuracy.png".format(prefix, k))
         image = save_to_pil()
-        labels.append("{}_{}_loss".format(prefix, k))
+        labels.append("{}_{}_acc".format(prefix, k))
         images.append(wandb.Image(image,
                                   caption="{} {} accuracy".format(prefix, k)))
-        plt.clf()
+        plt.close()
+
+    # Iterate over keys, extracting data from list of dicts.
+    for k, _ in f1[0].items():
+        data = [d[k] for d in f1]
+        plt.figure()
+        plt.plot(np.arange(len(data)), data)
+        plt.xlabel("Number of jumps")
+        plt.ylabel(k)
+        plt.tight_layout()
+        plt.savefig(dir + "{}_{}_f1.png".format(prefix, k))
+        image = save_to_pil()
+        labels.append("{}_{}_f1".format(prefix, k))
+        images.append(wandb.Image(image,
+                                  caption="{} {} f1".format(prefix, k)))
+        plt.close()
 
     log = {label: image for label, image in zip(labels, images)}
     wandb.log(log)
