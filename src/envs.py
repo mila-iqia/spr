@@ -102,7 +102,7 @@ class AARIEnv(Env):
         super().__init__(args)
         self.env_name = args.game
         self.game_name = self.env_name.replace("_", "").lower()#split("-")[0].split("No")[0].split("Deterministic")[0]
-        assert self.game_name in atari_dict, "{} is not currently supported by AARI. It's either not an Atari game or we don't have the ram annotations yet!".format(game_name)
+        assert self.game_name in atari_dict, "{} is not currently supported by AARI. It's either not an Atari game or we don't have the ram annotations yet!".format(self.game_name)
 
     def info(self, info):
         label_dict = self.labels()
