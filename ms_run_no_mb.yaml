@@ -1,0 +1,51 @@
+description: AWM
+
+target:
+  cluster: wu2
+  vc: msrlabs
+
+environment:
+  image: microsoft_pytorch:v1.2.0_gpu_cuda10.0_py36_release_gpuenv_hvd0.16.2
+  registry: phillyregistry.azurecr.io
+
+
+# azure storage configuration
+storage:
+  my_storage:
+    # Replace with the name of the Azure Storage Account you created.
+    #   If you followed the tutorial, this should be your_username
+    storage_account_name: ankdefault
+    # Specify a name of the container on your blob (ex. phillytools),
+    #   to store data, results and code. It will be created if it does not exist.
+    container_name: awmcontainer
+
+# data
+#   data upload is not required for this example
+
+search:
+  job_template:
+    name: awm
+    sku: G1
+    command:
+      - export PATH=$$PATH:~/.local/bin
+      - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly
+      - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
+      - export LC_ALL=C.UTF-8
+      - export LANG=C.UTF-8
+      - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
+      - python -m scripts.train_all --integrated-model --online-agent-training --initial_exp_steps 50000 --pretrain-epochs 100 --max-jump-length {mjl} --game {game} --updates_per_step 0 --rollout_length 0 --noncontrastive-global-loss --bilinear-global-loss --reward-loss-weight {rlw} --noncontrastive-loss-weight {nclw} --dropout-prob 0.2 --dqn-loss-weight {dqnw}
+  type: random
+  max_trials: 200
+  params:
+    - name: game
+      spec: discrete
+      values: ['alien','boxing','seaquest']
+    - name: mjl
+      spec: discrete
+      values: [1, 5, 10]
+    - name: nclw
+      spec: discrete
+      values: [1, 10]
+    - name: dqnw
+      spec: discrete
+      values: [.1, 1, 10.]
