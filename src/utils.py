@@ -43,6 +43,10 @@ def get_argparser():
     # Integrated Model Args
     parser.add_argument('--integrated-model', action="store_true",
                         default=False, help='Use an encoder with the model built in.')
+    parser.add_argument('--reward-layers', type=int, default=3,
+                        help='Number of layers for reward model.')
+    parser.add_argument('--prediction-layers', type=int, default=3,
+                        help='Number of layers for forward prediction model.')
     parser.add_argument('--multi-step-training', action="store_true",
                         default=False, help='Train an integrated model over multiple jumps')
     parser.add_argument('--max-jump-length', type=int, default=5,

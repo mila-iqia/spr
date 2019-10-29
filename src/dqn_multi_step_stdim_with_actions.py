@@ -48,65 +48,68 @@ class FILM(nn.Module):
 
 
 class FILMPredictionModule(nn.Module):
-    def __init__(self, state_dim, num_actions, layernorm=False):
+    def __init__(self, state_dim, num_actions, layernorm=False, layers=3):
         super().__init__()
         self.convert_actions = lambda a: F.one_hot(a, num_classes=num_actions)
         self.films = nn.ModuleList()
-        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
-        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
-        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
-        self.network = nn.Sequential(
-            nn.Linear(state_dim*4, state_dim*4),
-            nn.ReLU(),
-            nn.Linear(state_dim*4, state_dim*4),
-            nn.ReLU(),
-            nn.Linear(state_dim*4, state_dim))
+        for layer in range(layers):
+            self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
+
+        network_layers = []
+        for i in range(layers - 1):
+            network_layers.append(nn.Linear(state_dim*4, state_dim*4))
+            network_layers.append(nn.ReLU())
+        network_layers.append(nn.Linear(state_dim*4, state_dim))
+        self.network = nn.Sequential(*network_layers)
 
     def forward(self, states, actions):
         actions = self.convert_actions(actions).float()
-        current = self.films[0](states, actions)
-        current = self.network[:2](current)
-        current = self.films[1](current, actions)
-        current = self.network[2:4](current)
-        current = self.films[2](current, actions)
-        return self.network[4:](current)
+        current = states
+        for i, film in enumerate(self.films):
+            current = film(current, actions)
+            current = self.network[i*2:i*2+2](current)
+        return current
 
 
 class FILMRewardPredictionModule(nn.Module):
-    def __init__(self, state_dim, num_actions, reward_dim=3, layernorm=False):
+    def __init__(self, state_dim, num_actions, reward_dim=3,
+                 layernorm=False, layers=3):
         super().__init__()
         self.convert_actions = lambda a: F.one_hot(a, num_classes=num_actions)
         self.films = nn.ModuleList()
-        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
-        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
-        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
-        self.network = nn.Sequential(
-            nn.Linear(state_dim*4, state_dim*4),
-            nn.ReLU(),
-            nn.Linear(state_dim*4, state_dim*4),
-            nn.ReLU(),
-            nn.Linear(state_dim*4, reward_dim))
+        for layer in range(layers):
+            self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
+
+        network_layers = []
+        for i in range(layers - 1):
+            network_layers.append(nn.Linear(state_dim*4, state_dim*4))
+            network_layers.append(nn.ReLU())
+        network_layers.append(nn.Linear(state_dim*4, reward_dim))
+        self.network = nn.Sequential(*network_layers)
 
     def forward(self, states, actions):
         actions = self.convert_actions(actions).float()
-        current = self.films[0](states, actions)
-        current = self.network[:2](current)
-        current = self.films[1](current, actions)
-        current = self.network[2:4](current)
-        current = self.films[2](current, actions)
-        return self.network[4:](current)
+        current = states
+        for i, film in enumerate(self.films):
+            current = film(current, actions)
+            current = self.network[i*2:i*2+2](current)
+        return current
 
 
 class PredictionModule(nn.Module):
-    def __init__(self, state_dim, num_actions):
+    def __init__(self, state_dim, num_actions, layers=3):
         super().__init__()
         self.convert_actions = lambda a: F.one_hot(a, num_classes=num_actions)
-        self.network = nn.Sequential(
-            nn.Linear(state_dim*num_actions*4, state_dim*4),
-            nn.ReLU(),
-            nn.Linear(state_dim*4, state_dim*4),
-            nn.ReLU(),
-            nn.Linear(state_dim*4, state_dim))
+        if layers == 1:
+            network_layers = [nn.Linear(state_dim*4*num_actions, state_dim)]
+        else:
+            network_layers = [nn.Linear(state_dim*4*num_actions, 4*state_dim),
+                              nn.ReLU()]
+            for i in range(layers - 2):
+                network_layers.append(nn.Linear(state_dim*4, state_dim*4))
+                network_layers.append(nn.ReLU())
+            network_layers.append(nn.Linear(state_dim*4, state_dim))
+        self.network = nn.Sequential(*network_layers)
 
     def forward(self, states, actions):
         actions = self.convert_actions(actions).float()
@@ -117,15 +120,19 @@ class PredictionModule(nn.Module):
 
 
 class RewardPredictionModule(nn.Module):
-    def __init__(self, state_dim, num_actions, reward_dim=3, dropout=0):
+    def __init__(self, state_dim, num_actions, reward_dim=3, layers=3):
         super().__init__()
         self.convert_actions = lambda a: F.one_hot(a, num_classes=num_actions)
-        self.network = nn.Sequential(
-            nn.Linear(state_dim*num_actions*4, state_dim*4),
-            nn.ReLU(),
-            nn.Linear(state_dim*4, state_dim*4),
-            nn.ReLU(),
-            nn.Linear(state_dim*4, reward_dim))
+        if layers == 1:
+            network_layers = [nn.Linear(state_dim*4*num_actions, reward_dim)]
+        else:
+            network_layers = [nn.Linear(state_dim*4*num_actions, 4*state_dim),
+                              nn.ReLU()]
+            for i in range(layers - 2):
+                network_layers.append(nn.Linear(state_dim*4, state_dim*4))
+                network_layers.append(nn.ReLU())
+            network_layers.append(nn.Linear(state_dim*4, reward_dim))
+        self.network = nn.Sequential(*network_layers)
 
     def forward(self, states, actions):
         actions = self.convert_actions(actions).float()
@@ -167,10 +174,12 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         if config["film"]:
             self.prediction_module = FILMPredictionModule(self.encoder.hidden_size,
                                                           config["num_actions"],
-                                                          layernorm=config["layernorm"])
+                                                          layernorm=config["layernorm"],
+                                                          layers=config["prediction_layers"])
             self.reward_module = FILMRewardPredictionModule(self.encoder.hidden_size,
                                                             config["num_actions"],
-                                                            layernorm=config["layernorm"])
+                                                            layernorm=config["layernorm"],
+                                                            layers=config["reward_layers"])
 
         else:
             self.prediction_module = PredictionModule(self.encoder.hidden_size,
