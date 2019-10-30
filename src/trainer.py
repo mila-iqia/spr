@@ -1,8 +1,9 @@
 import torch
 
 
-class Trainer():
+class Trainer(torch.nn.Module):
     def __init__(self, encoder, wandb, device=torch.device('cpu')):
+        super().__init__()
         self.encoder = encoder
         self.wandb = wandb
         self.device = device

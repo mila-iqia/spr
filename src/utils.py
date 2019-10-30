@@ -224,6 +224,10 @@ class EarlyStopping(object):
             self.save_checkpoint(val_acc, model)
             self.counter = 0
 
+    def load_checkpoint(self, model):
+        save_dir = self.wandb.run.dir
+        model.load_state_dict(torch.load(save_dir + "/" + self.name + ".pt"))
+
     def save_checkpoint(self, val_acc, model):
         '''Saves model when validation loss decrease.'''
         if self.verbose:

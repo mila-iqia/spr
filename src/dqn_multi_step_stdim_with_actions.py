@@ -579,7 +579,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                          prefix=mode,
                          plots=plots)
         if mode == "val":
-            self.early_stopper(-epoch_loss / steps, self.encoder)
+            self.early_stopper(-epoch_loss / steps, self)
 
     def train(self, tr_eps, val_eps=None, epochs=None):
         self.class_weights = self.generate_reward_class_weights(tr_eps)
@@ -598,7 +598,13 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
                 if self.early_stopper.early_stop:
                     break
+
             self.epochs_till_now += 1
+
+        # If we were doing early stopping, now is the time to load in the best params.
+        if val_eps is not None:
+            self.early_stopper.load_checkpoint(self)
+
         torch.save(self.encoder.state_dict(),
                    os.path.join(self.wandb.run.dir,
                                 self.config['game'] + '.pt'))
