@@ -33,22 +33,22 @@ search:
       - export LC_ALL=C.UTF-8
       - export LANG=C.UTF-8
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
-      - python -m scripts.pretrain --integrated-model --initial_exp_steps 50000 --pretrain-epochs 100 --game {game} --max-jump-length {jl} --reward-layers {r_layers} --prediction-layers {p_layers} --noncontrastive-global-loss --bilinear-global-loss --reward-loss-weight 10 --noncontrastive-loss-weight 10 {film} --wandb-proj pretraining
+      - python -m scripts.pretrain --integrated-model --initial_exp_steps 50000 --pretrain-epochs 100 --game {game} --max-jump-length {jl} --reward_hidden {r_hidden} --prediction_hidden {p_hidden} --noncontrastive-global-loss --bilinear-global-loss --reward-loss-weight 10 --noncontrastive-loss-weight 10 {film} --wandb-proj pretraining
   type: grid
   max_trials: 200
   params:
     - name: game
       spec: discrete
-      values: ['alien', 'seaquest']
+      values: ['alien', 'boxing', 'seaquest']
     - name: film
       spec: discrete
-      values: ['', '--film',  '--film --layernorm']
-    - name: r_layers
+      values: ['--film --layernorm']
+    - name: r_hidden
       spec: discrete
-      values: [1, 2, 3]
-    - name: p_layers
+      values: [256, 512, 1024]
+    - name: p_hidden
       spec: discrete
-      values: [1, 2, 3]
+      values: [256, 512, 1024]
     - name: jl
       spec: discrete
       values: [1, 5]

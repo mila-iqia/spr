@@ -47,6 +47,10 @@ def get_argparser():
                         help='Number of layers for reward model.')
     parser.add_argument('--prediction-layers', type=int, default=3,
                         help='Number of layers for forward prediction model.')
+    parser.add_argument('--reward-hidden', type=int, default=-1,
+                        help='Hidden size for reward model.  -1 to use 4*state_dim')
+    parser.add_argument('--prediction-hidden', type=int, default=-1,
+                        help='Hidden size for forward prediction model.  -1 to use 4*state_dim')
     parser.add_argument('--multi-step-training', action="store_true",
                         default=False, help='Train an integrated model over multiple jumps')
     parser.add_argument('--max-jump-length', type=int, default=5,
