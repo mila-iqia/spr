@@ -71,6 +71,8 @@ def get_argparser():
                         help='Use a global bilinear loss in addition to the standard local-global loss.')
     parser.add_argument('--detach-target', action="store_true", default=False,
                         help='Detach the target representation.')
+    parser.add_argument('--no-class-weighting', action="store_true", default=False,
+                        help="Don't reweight reward classes.")
     parser.add_argument('--noncontrastive-global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument('--dense-supervision', action="store_true", default=False,
@@ -84,6 +86,10 @@ def get_argparser():
     parser.add_argument('--online-agent-training', action="store_true",
                         default=False, help='Train agent on real data alongside integrated model.')
     parser.add_argument('--probe-lr', type=float, default=3e-4)
+    parser.add_argument('--model-priority-exponent', type=float, default=0., metavar='ω',
+                        help='Prioritised experience replay exponent (originally denoted α)')
+    parser.add_argument('--model-priority-weight', type=float, default=1.0, metavar='β',
+                        help='Initial prioritised experience replay importance sampling weight')
 
     parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
