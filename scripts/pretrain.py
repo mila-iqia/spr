@@ -39,13 +39,26 @@ def pretrain(args):
         train_transitions = get_random_agent_episodes(args)
         val_transitions = get_random_agent_episodes(args)
 
+    train_memory = ReplayMemory(args, args.fake_buffer_capacity, images=True,
+                                priority_weight=args.model_priority_weight,
+                                priority_exponent=args.model_priority_exponent)
+    val_memory = ReplayMemory(args, args.fake_buffer_capacity, images=True,
+                              priority_weight=args.model_priority_weight,
+                              priority_exponent=args.model_priority_exponent)
+    for t in train_transitions:
+        state, action, reward, terminal = t[1:]
+        train_memory.append(state, action, reward, not terminal)
+    for t in val_transitions:
+        state, action, reward, terminal = t[1:]
+        val_memory.append(state, action, reward, not terminal)
+
     encoder, encoder_trainer = init_encoder(args,
                                             train_transitions,
                                             num_actions=env.action_space(),
                                             agent=dqn)
 
-    encoder_trainer.train(train_transitions,
-                          val_transitions,
+    encoder_trainer.train(train_memory,
+                          val_memory,
                           epochs=args.pretrain_epochs)
 
     if args.integrated_model:

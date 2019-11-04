@@ -79,7 +79,7 @@ class FILMPredictionModule(nn.Module):
 class FILMRewardPredictionModule(nn.Module):
     def __init__(self, state_dim, num_actions, reward_dim=3,
                  layernorm=False, layers=3,
-                 h_size=-1):
+                 h_size=-1, dropout=0):
         super().__init__()
         if h_size <= 0:
             h_size = 4*state_dim
@@ -90,10 +90,12 @@ class FILMRewardPredictionModule(nn.Module):
             self.films.append(FILM(h_size, num_actions, layernorm=layernorm))
 
         network_layers = [nn.Linear(4*state_dim, h_size),
-                          nn.ReLU()]
+                          nn.ReLU(),
+                          nn.Dropout(dropout)]
         for i in range(layers - 2):
             network_layers.append(nn.Linear(h_size, h_size))
             network_layers.append(nn.ReLU())
+            network_layers.append(nn.Dropout(dropout))
         network_layers.append(nn.Linear(h_size, reward_dim))
         self.network = nn.Sequential(*network_layers)
 
@@ -102,7 +104,7 @@ class FILMRewardPredictionModule(nn.Module):
         current = states
         for i, film in enumerate(self.films):
             current = film(current, actions)
-            current = self.network[i*2:i*2+2](current)
+            current = self.network[i*3:i*3+3](current)
         return current
 
 
@@ -134,7 +136,7 @@ class PredictionModule(nn.Module):
 
 class RewardPredictionModule(nn.Module):
     def __init__(self, state_dim, num_actions, reward_dim=3, layers=3,
-                 h_size=-1):
+                 h_size=-1, dropout=0):
         super().__init__()
         if h_size <= 0:
             h_size = 4*state_dim
@@ -143,10 +145,12 @@ class RewardPredictionModule(nn.Module):
             network_layers = [nn.Linear(h_size*num_actions, reward_dim)]
         else:
             network_layers = [nn.Linear(state_dim*4*num_actions, h_size),
-                              nn.ReLU()]
+                              nn.ReLU(),
+                              nn.Dropout(dropout)]
             for i in range(layers - 2):
                 network_layers.append(nn.Linear(h_size, h_size))
                 network_layers.append(nn.ReLU())
+                network_layers.append(nn.Dropout(dropout))
             network_layers.append(nn.Linear(h_size, reward_dim))
         self.network = nn.Sequential(*network_layers)
 
@@ -197,19 +201,27 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                                                             config["num_actions"],
                                                             layernorm=config["layernorm"],
                                                             layers=config["reward_layers"],
-                                                            h_size=config["reward_hidden"])
+                                                            h_size=config["reward_hidden"],
+                                                            dropout=config["dropout_prob"])
 
         else:
             self.prediction_module = PredictionModule(self.encoder.hidden_size,
-                                                      config["num_actions"])
+                                                      layers=config["prediction_layers"],
+                                                      h_size=config["prediction_hidden"],
+                                                      num_actions=config["num_actions"])
             self.reward_module = RewardPredictionModule(self.encoder.hidden_size,
-                                                        config["num_actions"])
+                                                        config["num_actions"],
+                                                        layers=config["reward_layers"],
+                                                        h_size=config["reward_hidden"],
+                                                        dropout=config["dropout_prob"])
 
         self.reward_loss_weight = config["reward_loss_weight"]
 
         self.dense_supervision = config["dense_supervision"]
 
         self.dqn_loss_weight = config["dqn_loss_weight"]
+
+        self.no_class_weighting = config["no_class_weighting"]
 
         self.prediction_module.to(device)
         self.reward_module.to(device)
@@ -352,9 +364,14 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         loss_nce = loss_nce.permute(1, 0)  # (n_batch, n_locs)
         return loss_nce
 
-    def generate_reward_class_weights(self, transitions):
+    def generate_reward_class_weights(self, memory, uniform=False):
+        if uniform:
+            weights = [1., 1., 1.]
+            return torch.tensor(weights, device=self.device)
+
         counts = [0, 0, 0]  # counts for reward=-1,0,1
-        for trans in transitions:
+        for i in range(len(memory.transitions)):
+            trans = memory.transitions.get(i)
             counts[trans.reward + 1] += 1
 
         weights = [0., 0., 0.]
@@ -414,6 +431,16 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                cosine_sims, cosine_sim, sd_losses, sd_loss
 
     def reset_trackers(self,):
+        self.epoch_rew_loss = 0
+        self.epoch_global_loss = 0
+        self.rew_acc = 0
+        self.epoch_loss = 0
+        self.online_dqn_loss = 0
+        self.true_representation_norm = 0
+        self.pred_representation_norm = 0
+        self.jumps = 0
+        self.sd_loss = 0
+        self.epoch_local_loss = 0.
         self.cos_sims = np.zeros(self.maximum_length)
         self.counts = np.zeros(self.maximum_length)
         self.pos_rew_tps = np.zeros(self.maximum_length)
@@ -426,160 +453,44 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.zero_rew_tns = np.zeros(self.maximum_length)
         self.sd_losses = np.zeros(self.maximum_length)
 
-    def do_one_epoch(self, episodes, plots=False, iterations=-1):
+    def do_one_epoch(self, memory, plots=False, iterations=-1):
         mode = "train" if self.encoder.training else "val"
-        epoch_loss, steps = 0., 0.
-        epoch_local_loss, epoch_rew_loss, epoch_global_loss, rew_acc, = 0., 0., 0., 0.
-        sd_loss = 0
-        true_representation_norm = 0
-        pred_representation_norm = 0
-        online_dqn_loss = 0
-        jumps = 0
         self.reset_trackers()
 
-        data_generator = self.generate_batch(episodes)
-        for i, (x_tprev, x_t, actions, rewards, done, all_states, n) in enumerate(data_generator):
-            if i > iterations > 0:
-                break
-            init_shape = x_t.shape
-            x_tprev = x_tprev.view(init_shape[0]*4, *init_shape[2:])
-            x_t = x_t.view(init_shape[0]*4, *init_shape[2:])
-            f_t_maps, f_t_prev_maps = self.encoder(x_t, fmaps=True),\
-                                      self.encoder(x_tprev, fmaps=True)
+        if iterations <= 0:
+            iterations = len(memory.transitions)//self.batch_size
+        for _ in range(iterations):
+            idxs, x_tprev,\
+            actions, rewards, x_t, all_states, nonterminals,\
+            weights, n = memory.sample_multistep(self.batch_size,
+                                                 self.minimum_length,
+                                                 self.maximum_length)
+            x_tprev = x_tprev.float().unsqueeze(2)/255.
+            x_t = x_t.float().unsqueeze(2)/255.
+            all_states = all_states.float().unsqueeze(2)/255.
+            rewards = rewards + 1
 
-            f_t_prev_stack = f_t_prev_maps["out"].view(init_shape[0], 4, -1)
-            f_t_initial = f_t_prev_stack[:, -1]
-            f_t_prev = f_t_prev_maps["out"].view(init_shape[0], -1)
-            f_t_target_stack = self.target_encoder(x_t, fmaps=False).view(init_shape[0], -1)
-            f_t = f_t_maps['f5']
-            f_t = f_t.unsqueeze(1).view(init_shape[0], 4, *f_t.shape[1:])[:, -1]
-            f_t_stack = f_t_maps["out"].view(init_shape[0], 4, -1)
-            f_t_global = f_t_stack[:, -1]
-
-            if self.dense_supervision:
-                all_states = all_states.view(init_shape[0]*n, *init_shape[2:])
-                all_states = self.encoder(all_states)
-                all_states = all_states.view(init_shape[0], n, -1)
-
-            N = f_t_prev.size(0)
-            reward_loss = 0
-            local_sd_loss = 0
-
-            if self.online_agent_training:
-                self.agent.reset_noise()
-                dqn_loss = self.agent.update(f_t_prev,
-                                             actions[:, 0],
-                                             (rewards - 1).float().sum(axis=-1),
-                                             f_t_stack,
-                                             done,
-                                             1,
-                                             step=False,
-                                             n=n,
-                                             target_next_states=f_t_target_stack,).mean()
-                online_dqn_loss += dqn_loss
-            else:
-                dqn_loss = 0
-
-            # Do autoregressive jumps
-            f_t_current = f_t_prev[:, -self.encoder.hidden_size:]
-            current_stack = f_t_prev
-            for i in range(actions.shape[1]):
-                jumps += 1
-                a_i = actions[:, i]
-                r_i = rewards[:, i]
-                reward_preds = self.reward_module(current_stack, a_i)
-                if rewards.max() == 2:
-                    reward_loss = F.cross_entropy(reward_preds,
-                                                  r_i,
-                                                  weight=self.class_weights)
-                else:
-                    # If the batch contains no pos. reward, normalize manually
-                    current_reward_loss = F.cross_entropy(reward_preds,
-                                                          r_i,
-                                                          weight=self.class_weights,
-                                                          reduction='none')
-                    reward_loss += current_reward_loss.sum() / (self.class_weights[r_i].sum() +
-                                                                self.class_weights[2])
-                reward_preds = reward_preds.argmax(dim=-1)
-                self.update_reward_trackers(i, r_i, reward_preds)
-
-                f_t_current = self.prediction_module(current_stack, a_i) + f_t_current
-                if self.bilinear_global_loss:
-                    f_t_current = self.global_classifier(f_t_current)
-                current_stack = torch.cat([current_stack[:, self.encoder.hidden_size:],
-                                           f_t_current], -1)
-
-                if self.dense_supervision or i == actions.shape[1] - 1:
-                    if i == actions.shape[1] - 1:
-                        target = f_t_global
-                    else:
-                        target = all_states[:, i]
-                    if self.detach_target:
-                        sd_loss_target = target.detach()
-                    else:
-                        sd_loss_target = target
-                    step_sd_loss = F.mse_loss(sd_loss_target, f_t_current,
-                                       reduction="mean")
-                    local_sd_loss = local_sd_loss + step_sd_loss
-
-                    pred_delta = f_t_current - f_t_initial
-                    true_delta = target - f_t_initial
-                    cos_sim = F.cosine_similarity(pred_delta, true_delta,
-                                                  dim=-1).mean()
-
-                    self.update_cos_sim_trackers(i, cos_sim, step_sd_loss)
-
-            f_t_pred = f_t_current
-            # Loss 1: Global at time t, f5 patches at time t-1
-            predictions = self.classifier(f_t_pred)
-            f_t = f_t.flatten(1, 2).transpose(-1, -2)
-            loss1 = self.nce_with_negs_from_same_loc(predictions, f_t).mean()
-
-            if self.global_loss or self.bilinear_global_loss:
-                logits = torch.matmul(f_t_pred, f_t_global.t())
-                loss2 = F.cross_entropy(logits.t(),
-                                        torch.arange(N).to(self.device))
-                epoch_global_loss += loss2.detach().item()
-            else:
-                loss2 = 0
-
-            sd_loss += local_sd_loss
-            true_representation_norm += torch.norm(f_t_global, dim=-1).mean()
-            pred_representation_norm += torch.norm(f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
-
-            self.optimizer.zero_grad()
-            loss = (loss1 +
-                    loss2 +
-                    reward_loss*self.reward_loss_weight)
-            if self.noncontrastive_global_loss:
-                loss = loss + local_sd_loss*self.noncontrastive_loss_weight
-            if self.online_agent_training:
-                loss = (loss + dqn_loss *
-                        self.dqn_loss_weight)/self.dqn_loss_weight
-                self.agent.optimiser.zero_grad()
+            loss = self.do_iteration(x_tprev,
+                                     x_t,
+                                     actions,
+                                     rewards,
+                                     nonterminals,
+                                     all_states,
+                                     n,
+                                     weights,
+                                     mode=mode)
             if mode == "train":
-                loss.backward()
-                self.optimizer.step()
-                if self.online_agent_training:
-                    self.agent.optimiser.step()
-
-            epoch_loss += loss.detach().item()
-            epoch_local_loss += loss1.detach().item()
-            epoch_rew_loss += reward_loss.detach().item()
-
-            steps += 1
-            self.steps += 1
-            self.maybe_update_target_net()
+                memory.update_priorities(idxs, loss.detach().cpu().numpy())
 
         rew_accs, pos_recalls, pos_precs, zero_recalls, zero_precs, \
         rew_acc, pos_recall, pos_prec, zero_recall, zero_prec, \
         cosine_sims, cosine_sim, sd_losses, sd_loss = self.summarize_trackers()
 
-        self.log_results(epoch_local_loss / steps,
-                         epoch_rew_loss / steps,
-                         epoch_global_loss / steps,
-                         epoch_loss / steps,
-                         online_dqn_loss / steps,
+        self.log_results(self.epoch_local_loss / iterations,
+                         self.epoch_rew_loss / iterations,
+                         self.epoch_global_loss / iterations,
+                         self.epoch_loss / iterations,
+                         self.online_dqn_loss / iterations,
                          sd_loss,
                          cosine_sim,
                          rew_acc,
@@ -587,8 +498,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                          pos_prec,
                          zero_recall,
                          zero_prec,
-                         true_representation_norm / steps,
-                         pred_representation_norm / steps,
+                         self.true_representation_norm / iterations,
+                         self.pred_representation_norm / iterations,
                          rew_accs,
                          pos_recalls,
                          pos_precs,
@@ -599,10 +510,148 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                          prefix=mode,
                          plots=plots)
         if mode == "val":
-            self.early_stopper(-epoch_loss / steps, self)
+            self.early_stopper(-self.epoch_loss / iterations, self)
+
+    def do_iteration(self, x_tprev, x_t, actions, rewards, done, all_states, n,
+                     weights=1,
+                     mode="train"):
+        init_shape = x_t.shape
+        x_tprev = x_tprev.view(init_shape[0]*4, *init_shape[2:])
+        x_t = x_t.view(init_shape[0]*4, *init_shape[2:])
+        f_t_maps, f_t_prev_maps = self.encoder(x_t, fmaps=True),\
+                                  self.encoder(x_tprev, fmaps=True)
+
+        f_t_prev_stack = f_t_prev_maps["out"].view(init_shape[0], 4, -1)
+        f_t_initial = f_t_prev_stack[:, -1]
+        f_t_prev = f_t_prev_maps["out"].view(init_shape[0], -1)
+        f_t_target_stack = self.target_encoder(x_t, fmaps=False).view(init_shape[0], -1)
+        f_t = f_t_maps['f5']
+        f_t = f_t.unsqueeze(1).view(init_shape[0], 4, *f_t.shape[1:])[:, -1]
+        f_t_stack = f_t_maps["out"].view(init_shape[0], 4, -1)
+        f_t_global = f_t_stack[:, -1]
+
+        if self.dense_supervision:
+            all_states = all_states.view(init_shape[0]*n, *init_shape[2:])
+            all_states = self.encoder(all_states)
+            all_states = all_states.view(init_shape[0], n, -1)
+
+        N = f_t_prev.size(0)
+        reward_loss = 0
+        local_sd_loss = 0
+
+        if self.online_agent_training:
+            self.agent.reset_noise()
+            dqn_loss = self.agent.update(f_t_prev,
+                                         actions[:, 0],
+                                         (rewards - 1).float().sum(axis=-1),
+                                         f_t_stack,
+                                         done,
+                                         1,
+                                         step=False,
+                                         n=n,
+                                         target_next_states=f_t_target_stack,)
+            self.online_dqn_loss += dqn_loss.mean()
+        else:
+            dqn_loss = 0
+
+        # Do autoregressive jumps
+        f_t_current = f_t_prev[:, -self.encoder.hidden_size:]
+        current_stack = f_t_prev
+        for i in range(actions.shape[1]):
+            self.jumps += 1
+            a_i = actions[:, i]
+            r_i = rewards[:, i]
+            reward_preds = self.reward_module(current_stack, a_i)
+            if rewards.max() == 2:
+                current_reward_loss = F.cross_entropy(reward_preds,
+                                                      r_i,
+                                                      weight=self.class_weights,
+                                                      reduction="none")
+            else:
+                # If the batch contains no pos. reward, normalize manually
+                current_reward_loss = F.cross_entropy(reward_preds,
+                                                      r_i,
+                                                      weight=self.class_weights,
+                                                      reduction='none')
+                current_reward_loss = current_reward_loss.sum() / (self.class_weights[r_i].sum() +
+                                                            self.class_weights[2])
+            reward_loss = reward_loss + current_reward_loss
+            reward_preds = reward_preds.argmax(dim=-1)
+            self.update_reward_trackers(i, r_i.detach(), reward_preds.detach())
+
+            f_t_current = self.prediction_module(current_stack, a_i) + f_t_current
+            if self.bilinear_global_loss:
+                f_t_current = self.global_classifier(f_t_current)
+            current_stack = torch.cat([current_stack[:, self.encoder.hidden_size:],
+                                       f_t_current], -1)
+
+            if self.dense_supervision or i == actions.shape[1] - 1:
+                if i == actions.shape[1] - 1:
+                    target = f_t_global
+                else:
+                    target = all_states[:, i]
+                if self.detach_target:
+                    sd_loss_target = target.detach()
+                else:
+                    sd_loss_target = target
+                step_sd_loss = F.mse_loss(sd_loss_target, f_t_current,
+                                          reduction="none").mean(-1)
+                local_sd_loss = local_sd_loss + step_sd_loss
+
+                pred_delta = f_t_current - f_t_initial
+                true_delta = target - f_t_initial
+                cos_sim = F.cosine_similarity(pred_delta, true_delta,
+                                              dim=-1).mean()
+
+                self.update_cos_sim_trackers(i, cos_sim, step_sd_loss.mean())
+
+        f_t_pred = f_t_current
+        # Loss 1: Global at time t, f5 patches at time t-1
+        predictions = self.classifier(f_t_pred)
+        f_t = f_t.flatten(1, 2).transpose(-1, -2)
+        loss1 = self.nce_with_negs_from_same_loc(predictions, f_t).mean(-1)
+
+        if self.global_loss or self.bilinear_global_loss:
+            logits = torch.matmul(f_t_pred, f_t_global.t())
+            loss2 = F.cross_entropy(logits.t(),
+                                    torch.arange(N).to(self.device),
+                                    reduction="none")
+            self.epoch_global_loss += loss2.mean().detach().item()
+        else:
+            loss2 = 0
+
+        self.sd_loss += local_sd_loss
+        self.true_representation_norm += torch.norm(f_t_global, dim=-1).mean()
+        self.pred_representation_norm += torch.norm(f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
+
+        self.optimizer.zero_grad()
+        loss = (loss1 +
+                loss2 +
+                reward_loss*self.reward_loss_weight)
+        if self.noncontrastive_global_loss:
+            loss = loss + local_sd_loss*self.noncontrastive_loss_weight
+        if self.online_agent_training:
+            loss = (loss + dqn_loss *
+                    self.dqn_loss_weight)/self.dqn_loss_weight
+            self.agent.optimiser.zero_grad()
+        if mode == "train":
+            (weights*loss).mean().backward()
+            self.optimizer.step()
+            if self.online_agent_training:
+                self.agent.optimiser.step()
+
+        self.epoch_loss += loss.mean().detach().item()
+        self.epoch_local_loss += loss1.mean().detach().item()
+        self.epoch_rew_loss += reward_loss.mean().detach().item()
+
+        self.steps += 1
+        self.maybe_update_target_net()
+
+        return loss
 
     def train(self, tr_eps, val_eps=None, epochs=None):
-        self.class_weights = self.generate_reward_class_weights(tr_eps)
+        self.class_weights = self.generate_reward_class_weights(tr_eps,
+                                                                self.no_class_weighting)
         self.update_target_net()
         if not epochs:
             epochs = self.epochs
@@ -745,7 +794,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} zero recall {}".format(prefix, self.epochs_till_now)))
-            plt.clf()
+            plt.close()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), pos_recalls)
@@ -756,7 +805,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} pos recall {}".format(prefix, self.epochs_till_now)))
-            plt.clf()
+            plt.close()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), rew_accs)
@@ -767,7 +816,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} rew acc {}".format(prefix, self.epochs_till_now)))
-            plt.clf()
+            plt.close()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), pos_precs)
@@ -778,7 +827,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} pos prec {}".format(prefix, self.epochs_till_now)))
-            plt.clf()
+            plt.close()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), zero_precs)
@@ -789,7 +838,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} zero prec {}".format(prefix, self.epochs_till_now)))
-            plt.clf()
+            plt.close()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), cosine_sims)
@@ -800,7 +849,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} cos sim {}".format(prefix, self.epochs_till_now)))
-            plt.clf()
+            plt.close()
 
             fig = plt.figure()
             plt.plot(np.arange(len(rew_accs)), sd_losses)
@@ -811,6 +860,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             image = save_to_pil()
             images.append(wandb.Image(image,
                                       caption="{} sd loss {}".format(prefix, self.epochs_till_now)))
+            plt.close()
 
             labels = [
               "{} pos recall {}".format(prefix, self.epochs_till_now),

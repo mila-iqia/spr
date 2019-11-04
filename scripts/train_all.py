@@ -27,9 +27,16 @@ def train_policy(args):
     dqn = Agent(args, env)
 
     # get initial exploration data
-    real_transitions = get_random_agent_episodes(args)
+    transitions = get_random_agent_episodes(args)
+    real_transitions = ReplayMemory(args, args.fake_buffer_capacity, images=True,
+                                    priority_weight=args.model_priority_weight,
+                                    priority_exponent=args.model_priority_exponent)
+    for t in transitions:
+        state, action, reward, terminal = t[1:]
+        real_transitions.append(state, action, reward, not terminal)
     model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
     encoder, encoder_trainer = train_encoder(args,
+                                             transitions,
                                              real_transitions,
                                              num_actions=env.action_space(),
                                              init_epochs=args.pretrain_epochs,
@@ -82,7 +89,7 @@ def train_policy(args):
             if args.reward_clip > 0:
                 reward = max(min(reward, args.reward_clip), -args.reward_clip)  # Clip rewards
             state = state[-1].mul(255).to(dtype=torch.uint8, device=torch.device('cpu'))
-            real_transitions.append(Transition(timestep, state, action, reward, not done))
+            real_transitions.append(state, action, reward, done)
             state = next_state
             timestep = 0 if done else timestep + 1
 
@@ -123,6 +130,7 @@ def train_policy(args):
 
 def train_encoder(args,
                   transitions,
+                  buffer,
                   num_actions,
                   val_eps=None,
                   init_epochs=None,
@@ -156,7 +164,7 @@ def train_encoder(args,
     else:
         assert False, "method {} has no trainer".format(args.method)
 
-    trainer.train(transitions, val_eps, epochs=init_epochs)
+    trainer.train(buffer, val_eps, epochs=init_epochs)
     return encoder, trainer
 
 
