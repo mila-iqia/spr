@@ -4,7 +4,7 @@ from collections import deque, namedtuple
 from itertools import chain
 
 
-from src.memory import blank_trans
+from src.memory import blank_batch_trans as blank_trans
 from src.envs import Env, AARIEnv
 
 Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'nonterminal'))
@@ -36,11 +36,17 @@ def get_random_agent_episodes(args):
 
 def sample_real_transitions(real_transitions, num_samples):
     samples = []
-    while len(samples) < num_samples:
+    actions = np.zeros((num_samples, 4))
+    rewards = np.zeros((num_samples, 4))
+    for i in range(num_samples):
         idx = np.random.randint(0, len(real_transitions))
-        samples.append(
-            torch.stack([trans.state.float() / 255. for trans in get_framestacked_transition(idx, real_transitions)]))
-    return torch.stack(samples)
+        states = []
+        for k, trans in enumerate(get_framestacked_transition(idx, real_transitions)):
+            states.append(trans.state.float() / 255.)
+            actions[i, k] = trans.action
+            rewards[i, k] = trans.reward
+        samples.append(torch.stack(states))
+    return torch.stack(samples), torch.tensor(actions).long(), torch.tensor(rewards).long()
 
 
 def get_framestacked_transition(idx, transitions):

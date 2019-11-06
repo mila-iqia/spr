@@ -10,7 +10,7 @@ from src.envs import Env
 
 
 # Test DQN
-def test(args, T, dqn, encoder, metrics, results_dir, evaluate=False):
+def test(args, T, dqn, model, encoder, metrics, results_dir, evaluate=False):
     env = Env(args)
     env.eval()
     metrics['steps'].append(T)
@@ -24,7 +24,8 @@ def test(args, T, dqn, encoder, metrics, results_dir, evaluate=False):
                 state, reward_sum, done = env.reset(), 0, False
 
             state = encoder(state).view(-1)
-            action = dqn.act_e_greedy(state)  # Choose an action ε-greedily
+            action = dqn.act_with_planner(state, model, length=args.planning_horizon,
+                                          shots=args.planning_shots)  # Choose an action ε-greedily
             state, reward, done = env.step(action)  # Step
             reward_sum += reward
             if args.render:

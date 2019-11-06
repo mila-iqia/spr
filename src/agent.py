@@ -50,6 +50,9 @@ class Agent():
         q_loss = np.mean(self.q_losses)
         weighted_q_loss = np.mean(self.weighted_q_losses)
 
+        print("Q-Loss: {}, Weighted Q-Loss: {}, Env-steps: {}".format(q_loss,
+                                                                      weighted_q_loss,
+                                                                      env_steps))
         wandb.log({'Q-Loss': q_loss,
                    'Weighted Q-Loss': weighted_q_loss,
                    'Env-steps': env_steps})
@@ -71,6 +74,39 @@ class Agent():
     # Acts with an ε-greedy policy (used for evaluation only)
     def act_e_greedy(self, state, epsilon=0.001):  # High ε can reduce evaluation scores drastically
         return np.random.randint(0, self.action_space) if np.random.random() < epsilon else self.act(state)
+
+    def act_with_planner(self, state, planner, length=2, shots=100, epsilon=0.001):
+        """
+        A form of model-based Q bootstrapping inspired by the paper
+        Bootstrapping the Expressivity with Model-Based Planning
+        https://arxiv.org/pdf/1910.05927.pdf
+        :param state: An individual state.
+        :param planner: Forward model with predict() method returning state, reward.
+        :param length: Number of steps to plan for.
+        :param shots: Number of shots per initial action.
+        :param epsilon: Epsilon for epsilon-greedy (0=greedy).
+        :return: Action selected by bootstrapping.
+        """
+        if len(state.shape) == 1:
+            state = state.unsqueeze(0)
+        actions = torch.arange(self.action_space, device=state.device)
+        actions = actions[:, None].expand(-1, shots).reshape(-1)
+        all_runs = torch.zeros(self.action_space*shots, device=state.device)
+        current_state = state.expand(self.action_space*shots, -1)
+        for i in range(length):
+            pred_state, reward = planner.predict(current_state, actions, mean_rew=True)
+            current_state = current_state[:, current_state.shape[-1]//4:]
+            current_state = torch.cat([current_state, pred_state], -1)
+            all_runs += reward*self.discount**i
+
+        final_value = (self.online_net(current_state)*self.support).sum(2)
+        final_value = torch.max(final_value, -1)[0]
+        all_runs = all_runs + self.discount**length * final_value
+
+        all_runs = all_runs.view(self.action_space, shots)
+        best_action = torch.argmax(torch.max(all_runs, -1, keepdim=True)[0]).item()
+
+        return np.random.randint(0, self.action_space) if np.random.random() < epsilon else best_action
 
     def learn(self, mem):
         # Sample transitions

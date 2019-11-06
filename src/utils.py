@@ -53,27 +53,31 @@ def get_argparser():
                         help='Hidden size for forward prediction model.  -1 to use 4*state_dim')
     parser.add_argument('--multi-step-training', action="store_true",
                         default=False, help='Train an integrated model over multiple jumps')
-    parser.add_argument('--max-jump-length', type=int, default=5,
+    parser.add_argument('--max-jump-length', type=int, default=1,
                         help='Maximum number of steps to use in multi-step training.')
     parser.add_argument('--visualization_jumps', type=int, default=30,
-                        help='Maximum number of steps to use in multi-step training.')
+                        help='Maximum number of steps in visualizing multi-step performance.')
     parser.add_argument('--min-jump-length', type=int, default=1,
                         help='Minimum number of steps to use in multi-step training.')
     parser.add_argument('--framestack-infomax', action="store_true",
                         default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
-    parser.add_argument('--film', action="store_true", default=False,
+    parser.add_argument('--nofilm', action="store_false", default=True,
+                        dest="film",
                         help='Use FILM instead of an outer product to integrate actions')
-    parser.add_argument('--layernorm', action="store_true", default=False,
+    parser.add_argument('--nolayernorm', action="store_false", default=True,
+                        dest="layernorm",
                         help='Use layernorm with FILM.')
-    parser.add_argument('--bilinear-global-loss', action="store_true", default=False,
+    parser.add_argument('--no-bilinear-global-loss', action="store_false", default=True,
+                        dest="bilinear_global_loss",
                         help='Use a global bilinear loss in addition to the standard local-global loss.')
     parser.add_argument('--detach-target', action="store_true", default=False,
                         help='Detach the target representation.')
     parser.add_argument('--no-class-weighting', action="store_true", default=False,
                         help="Don't reweight reward classes.")
-    parser.add_argument('--noncontrastive-global-loss', action="store_true", default=False,
+    parser.add_argument('--no-noncontrastive-global-loss', action="store_false", default=True,
+                        dest="noncontrastive_global_loss",
                         help='Use a global L2 loss in addition to the standard local-global loss.')
     parser.add_argument('--dense-supervision', action="store_true", default=False,
                         help='Evaluate L2 and cosine similarity at each jump.')
@@ -90,7 +94,11 @@ def get_argparser():
                         help='Prioritised experience replay exponent (originally denoted α)')
     parser.add_argument('--model-priority-weight', type=float, default=1.0, metavar='β',
                         help='Initial prioritised experience replay importance sampling weight')
-
+    parser.add_argument('--real-buffer-capacity', type=int, default=int(4e6),
+                        help='Size of the replay buffer for transitions')
+    parser.add_argument("--model-updates-per-step", type=int, default=20)
+    parser.add_argument("--planning-horizon", type=int, default=0)
+    parser.add_argument("--planning-shots", type=int, default=1)
     parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
     parser.add_argument("--wandb-proj", type=str, default="awm")
