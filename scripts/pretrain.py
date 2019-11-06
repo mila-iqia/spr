@@ -39,10 +39,10 @@ def pretrain(args):
         train_transitions = get_random_agent_episodes(args)
         val_transitions = get_random_agent_episodes(args)
 
-    train_memory = ReplayMemory(args, args.fake_buffer_capacity, images=True,
+    train_memory = ReplayMemory(args, args.real_buffer_capacity, images=True,
                                 priority_weight=args.model_priority_weight,
                                 priority_exponent=args.model_priority_exponent)
-    val_memory = ReplayMemory(args, args.fake_buffer_capacity, images=True,
+    val_memory = ReplayMemory(args, args.real_buffer_capacity, images=True,
                               priority_weight=args.model_priority_weight,
                               priority_exponent=args.model_priority_exponent)
     for t in train_transitions:
@@ -114,7 +114,7 @@ def visualize_temporal_prediction_accuracy(model, transitions, args):
         model.dense_supervision = True
 
         model.encoder.eval(), model.classifier.eval()
-        model.do_one_epoch(transitions, plots=True)
+        model.do_one_epoch(transitions, log=True, plots=True)
         model.encoder.train(), model.classifier.train()
 
         model.minimum_length = args.min_jump_length

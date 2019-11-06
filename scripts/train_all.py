@@ -28,13 +28,14 @@ def train_policy(args):
 
     # get initial exploration data
     transitions = get_random_agent_episodes(args)
-    real_transitions = ReplayMemory(args, args.fake_buffer_capacity, images=True,
+    real_transitions = ReplayMemory(args, args.real_buffer_capacity, images=True,
                                     priority_weight=args.model_priority_weight,
                                     priority_exponent=args.model_priority_exponent)
     for t in transitions:
         state, action, reward, terminal = t[1:]
         real_transitions.append(state, action, reward, not terminal)
-    model_transitions = ReplayMemory(args, args.fake_buffer_capacity)
+    model_transitions = ReplayMemory(args, args.fake_buffer_capacity,
+                                     no_overshoot=True)
     encoder, encoder_trainer = train_encoder(args,
                                              transitions,
                                              real_transitions,
@@ -62,18 +63,18 @@ def train_policy(args):
     while j * args.env_steps_per_epoch < args.total_steps:
         # Train encoder and forward model on real data
         if j != 0:
-            if args.integrated_model:
-                if args.online_agent_training:
-                    dqn.update_target_net()
-                    encoder_trainer.update_target_net()
-                encoder_trainer.train(real_transitions)
-            else:
+            # if args.integrated_model:
+            #     if args.online_agent_training:
+            #         dqn.update_target_net()
+            #         encoder_trainer.update_target_net()
+            #     encoder_trainer.train(real_transitions)
+            if not args.integrated_model:
                 forward_model.train(real_transitions)
 
         steps = j * args.env_steps_per_epoch
         if steps % args.evaluation_interval == 0:
             dqn.eval()  # Set DQN (online network) to evaluation mode
-            avg_reward = test(args, steps, dqn, encoder, metrics, results_dir, evaluate=True)  # Test
+            avg_reward = test(args, steps, dqn, encoder_trainer, encoder, metrics, results_dir, evaluate=True)  # Test
             log(steps, avg_reward)
             dqn.train()  # Set DQN (online network) back to training mode
 
@@ -84,24 +85,34 @@ def train_policy(args):
                 state, done = env.reset(), False
             # Take action in env acc. to current policy, and add to real_transitions
             real_z = encoder(state).view(-1)
-            action = dqn.act(real_z)
+            action = dqn.act_with_planner(real_z, encoder_trainer, length=args.planning_horizon,
+                                          shots=args.planning_shots, epsilon=0.)
             next_state, reward, done = env.step(action)
             if args.reward_clip > 0:
                 reward = max(min(reward, args.reward_clip), -args.reward_clip)  # Clip rewards
             state = state[-1].mul(255).to(dtype=torch.uint8, device=torch.device('cpu'))
             real_transitions.append(state, action, reward, done)
+            transitions.append(Transition(timestep, state, action, reward, not done))
             state = next_state
             timestep = 0 if done else timestep + 1
 
             # sample states from real_transitions
-            samples = sample_real_transitions(real_transitions, args.num_model_rollouts).to(args.device)
-            samples = samples.flatten(0, 1)
+            all_zs = []
+            all_actions = []
+            all_rewards = []
+            samples, actions, rewards = sample_real_transitions(transitions, args.num_model_rollouts)
+            samples = samples.flatten(0, 1).to(args.device)
             H, N = args.history_length, args.num_model_rollouts
             with torch.no_grad():
                 z = encoder(samples).view(H, N, -1)
             state_deque = deque(maxlen=4)
             for s in z.unbind():
                 state_deque.append(s)
+
+            for i in range(4):
+                all_zs.append(z[i, :])
+                all_actions.append(actions[:, i])
+                all_rewards.append(rewards[:, i])
 
             # Perform k-step model rollout starting from s using current policy
             for k in range(args.rollout_length):
@@ -110,21 +121,35 @@ def train_policy(args):
                 actions = dqn.act(z, batch=True)
                 with torch.no_grad():
                     next_z, rewards = forward_model.predict(z, actions)
-                z = z.view(N, H, -1)
 
                 actions, rewards = actions.tolist(), rewards.tolist()
-                # Add imagined data to model_transitions
-                for i in range(N):
-                    model_transitions.append(z[i], actions[i], rewards[i], True)
                 state_deque.append(next_z)
+                all_zs.append(next_z)
+                all_actions.append(actions)
+                all_rewards.append(rewards)
+
+            # Add imagined data to model_transitions
+            for i in range(N):
+                for k in range(args.rollout_length+4):
+                    priority = 0 if k < 3 else None
+                    model_transitions.append(all_zs[k][i].unsqueeze(0),
+                                             all_actions[k][i],
+                                             all_rewards[k][i],
+                                             False,
+                                             timestep=k,
+                                             init_priority=priority)
 
             if j >= 1:
                 # Update policy parameters on model data
                 for g in range(args.updates_per_step):
                     dqn.learn(model_transitions)
 
+            encoder_trainer.do_one_epoch(real_transitions,
+                                         iterations=args.model_updates_per_step)
+
         if j > 0:
             dqn.log(env_steps=(j+1) * args.env_steps_per_epoch)
+        encoder_trainer.log_results("train")
         j += 1
 
 

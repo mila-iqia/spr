@@ -7,6 +7,7 @@ import torch
 Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'nonterminal'))
 blank_latent_trans = Transition(0, torch.zeros(256, dtype=torch.float32), None, 0, False)
 blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0, False)
+blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0, False)
 
 
 # Segment tree data structure where parent node values are sum/max of children node values
@@ -73,7 +74,7 @@ class SegmentTree():
 
 class ReplayMemory:
     def __init__(self, args, capacity, images=False, priority_exponent=None,
-                 priority_weight=None):
+                 priority_weight=None, no_overshoot=False):
         self.device = args.device
         self.capacity = capacity
         self.history = args.history_length
@@ -84,19 +85,25 @@ class ReplayMemory:
         self.priority_weight = priority_weight if priority_weight is not None else args.priority_weight  # Initial importance sampling weight β, annealed to 1 over course of training
         self.priority_exponent = priority_exponent if priority_exponent is not None else args.priority_exponent
         self.t = 0  # Internal episode timestep counter
+        self.no_overshoot = no_overshoot
         self.transitions = SegmentTree(
             capacity)  # Store transitions in a wrap-around cyclic buffer within a sum tree for querying priorities
 
     # Adds state and action at time t, reward and terminal at time t + 1
-    def append(self, state, action, reward, terminal):
+    def append(self, state, action, reward, terminal, timestep=None,
+               init_priority=None):
         state = state[-1].to(device=torch.device('cpu'))
-        self.transitions.append(Transition(self.t, state, action, reward, not terminal),
-                                self.transitions.max)  # Store new transition with maximum priority
-        self.t = 0 if terminal else self.t + 1  # Start new episodes with t = 0
+        if timestep is None:
+            timestep = self.t
+        if init_priority is None:
+            init_priority = self.transitions.max
+        self.transitions.append(Transition(timestep, state, action, reward, not terminal),
+                                init_priority)  # Store new transition with maximum priority
+        self.t = 0 if terminal else timestep + 1  # Start new episodes with t = 0
 
     # Returns a transition with blank states where appropriate
-    def _get_transition(self, idx, n=-1):
-        if n <= 0:
+    def _get_transition(self, idx, n=None):
+        if n is None:
             n = self.n
         transition = np.array([None] * (self.history + n))
         transition[self.history - 1] = self.transitions.get(idx)
@@ -121,9 +128,15 @@ class ReplayMemory:
             prob, idx, tree_idx = self.transitions.find(
                 sample)  # Retrieve sample from tree with un-normalised probability
             # Resample if transition straddled current index or probablity 0
+
             if (self.transitions.index - idx) % self.capacity > self.n and (
                     idx - self.transitions.index) % self.capacity >= self.history and prob != 0:
                 valid = True  # Note that conditions are valid but extra conservative around buffer index 0
+
+                if self.no_overshoot:
+                    trans = self.transitions.get(idx + self.n)
+                    if trans.timestep < self.n + self.history - 1:
+                        valid = False
 
         # Retrieve all required transition data (from t - h to t + n)
         transition = self._get_transition(idx)
@@ -134,7 +147,7 @@ class ReplayMemory:
         # Discrete action to be used as index
         action = torch.tensor([transition[self.history - 1].action], dtype=torch.int64, device=self.device)
         # Calculate truncated n-step discounted return R^n = Σ_k=0->n-1 (γ^k)R_t+k+1 (note that invalid nth next states have reward 0)
-        R = torch.tensor([sum(self.discount ** i * transition[self.history + i - 1].reward for i in range(n))],
+        R = torch.tensor([sum(self.discount ** i * transition[self.history + i - 1].reward for i in range(self.n))],
                          dtype=torch.float32, device=self.device)
         # Mask for non-terminal nth next states
         nonterminal = torch.tensor([transition[self.history + self.n - 1].nonterminal], dtype=torch.float32,
