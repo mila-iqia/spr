@@ -486,7 +486,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             if mode == "train":
                 memory.update_priorities(idxs, loss.detach().cpu().numpy())
         if mode == "val":
-            self.early_stopper(-self.epoch_loss / self.iterations, self)
+            self.early_stopper(-self.epoch_loss / (self.iterations + 1), self)
 
         self.iterations += iterations
         if log:
