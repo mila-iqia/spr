@@ -3,11 +3,12 @@ from itertools import chain
 
 import torch
 import numpy as np
+import scipy
 import os
 import wandb
 
 from src.agent import Agent
-from src.memory import ReplayMemory
+from src.memory import ReplayMemory, blank_batch_trans
 from src.encoders import NatureCNN, ImpalaCNN
 from src.envs import Env
 from src.eval import test
@@ -27,7 +28,7 @@ import matplotlib.pyplot as plt
 def pretrain(args):
     env = Env(args)
     env.train()
-    dqn = Agent(args, env)
+    dqn = Agent(args, env.action_space())
 
     # get initial exploration data
     if args.game.replace("_", "").lower() in atari_dict:
@@ -93,6 +94,9 @@ def pretrain(args):
                 train_labels, val_labels)
     test_acc, test_f1score = probe.test(test_transitions, test_labels)
 
+    assess_returns(encoder_trainer, train_transitions, "Train")
+    assess_returns(encoder_trainer, train_transitions, "Val")
+
     wandb.log(test_acc)
     wandb.log(test_f1score)
     print(test_acc, test_f1score)
@@ -105,6 +109,63 @@ def pretrain(args):
     plot_multistep_probing(wandb, train_probe_loss, train_probe_acc, train_probe_f1, "train")
     plot_multistep_probing(wandb, val_probe_loss, val_probe_acc, val_probe_f1, "val")
     plot_multistep_probing(wandb, test_probe_loss, test_probe_acc, test_probe_f1, "test")
+
+
+def assess_returns(model, transitions, mode="Val"):
+    dir = "./figs/{}/".format(wandb.run.name)
+    try:
+        os.makedirs(dir)
+    except FileExistsError:
+        # directory already exists
+        pass
+
+    episodes = []
+    current_ep = []
+    for transition in transitions:
+        current_ep.append(transition)
+        if not transition.nonterminal:
+            episodes.append(current_ep)
+            current_ep = []
+
+    state_deque = deque(maxlen=4)
+    for i in range(4):
+        state_deque.append(blank_batch_trans.state)
+
+    pred_rewards = []
+    ep_rew = 0
+    for episode in episodes:
+        for transition in episode:
+            state_deque.append(transition.state)
+            state = torch.stack(list(state_deque))
+            state = state.float()/255.
+            state = state.to(model.encoder.device)
+            z = model.encoder(state).view(1, -1)
+            _, reward = model.predict(z, transition.action, mean_rew=True)
+            ep_rew += reward.item()
+
+        pred_rewards.append(ep_rew)
+
+    true_rewards = [[t.reward for t in episode] for episode in episodes]
+    true_rewards = np.sum(np.array(true_rewards), axis=-1)
+    pred_rewards = np.array(pred_rewards)
+    slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(pred_rewards, y=true_rewards)
+
+    plt.figure()
+    plt.scatter(pred_rewards, true_rewards)
+    predictions = slope*pred_rewards + intercept
+    plt.plot(pred_rewards, predictions, c="red")
+    plt.xlabel("Predicted returns")
+    plt.ylabel("True returns")
+    plt.title(r"{} r^2 = {}, p = {}".format(mode, r_value**2, p_value))
+
+    plt.savefig(dir + "{}_returns.png".format(mode))
+    image = save_to_pil()
+    dict = {"{}_returns".format(mode):
+                wandb.Image(image, caption="{} returns".format(mode))}
+    wandb.log(dict)
+
+    plt.close()
+
 
 
 def visualize_temporal_prediction_accuracy(model, transitions, args):
