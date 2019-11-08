@@ -34,6 +34,40 @@ def get_random_agent_episodes(args):
     return transitions
 
 
+def get_current_policy_episodes(args, episodes, dqn, model, encoder, epsilon=0):
+    env = Env(args)
+    env.train()
+
+    # Test performance over several episodes
+    done = True
+    transitions = []
+    for _ in range(episodes):
+        timestep = 0
+        while True:
+            if done:
+                state, reward_sum, done = env.reset(), 0, False
+
+            # Only store last frame and discretise to save memory
+            latent_state = encoder(state).view(-1)
+            action = dqn.act_with_planner(latent_state, model,
+                                          length=args.planning_horizon,
+                                          shots=args.planning_shots,
+                                          epsilon=epsilon)
+            next_state, reward, done = env.step(action)  # Step
+            if args.reward_clip > 0:
+                reward = max(min(reward, args.reward_clip), -args.reward_clip)  # Clip rewards
+            state = state[-1].mul(255).to(dtype=torch.uint8,
+                                          device=torch.device('cpu'))
+            transitions.append(Transition(timestep, state, action, reward, not done))
+            state = next_state
+            timestep = 0 if done else timestep + 1
+            if done:
+                break
+    env.close()
+
+    return transitions
+
+
 def sample_real_transitions(real_transitions, num_samples):
     samples = []
     actions = np.zeros((num_samples, 4))

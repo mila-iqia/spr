@@ -96,10 +96,18 @@ def get_argparser():
                         help='Initial prioritised experience replay importance sampling weight')
     parser.add_argument('--real-buffer-capacity', type=int, default=int(4e6),
                         help='Size of the replay buffer for transitions')
+    parser.add_argument('--val-episodes', type=int, default=1,
+                        help='How many val episodes to use at once')
+    parser.add_argument('--val-buffer-capacity', type=int, default=int(5e4),
+                        help='How many validation steps to use at once')
+    parser.add_argument('--update-val-every', type=int, default=10000,
+                        help='How often to update the validation set.')
+    parser.add_argument('--check-val-every', type=int, default=100,
+                        help='How often to update the validation set.')
     parser.add_argument("--model-updates-per-step", type=int, default=20)
     parser.add_argument("--planning-horizon", type=int, default=0)
-    parser.add_argument("--planning-shots", type=int, default=1)
-    parser.add_argument("--patience", type=int, default=100)
+    parser.add_argument("--planning-shots", type=int, default=100)
+    parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
     parser.add_argument("--wandb-proj", type=str, default="awm")
     parser.add_argument("--name", type=str, default="", help="Name for run in wandb.")
@@ -118,7 +126,7 @@ def get_argparser():
     parser.add_argument("--initial_exp_steps", type=int, default=5000)
     parser.add_argument('--forward-hidden-size', type=int, default=512, help='Hidden Size for the Forward Model MLP')
     parser.add_argument('--sd_loss_coeff', type=int, default=10, help='Coefficient for the dynamics loss')
-    parser.add_argument("--reward-loss-weight", default=1.0, type=float,
+    parser.add_argument("--reward-loss-weight", default=10.0, type=float,
                         help="Weight for reward in shared loss.")
     parser.add_argument("--dqn-loss-weight", default=1.0, type=float,
                         help="Weight for dqn when doing online training.")
@@ -160,7 +168,7 @@ def get_argparser():
     parser.add_argument('--learn-start', type=int, default=int(20e3), metavar='STEPS',
                         help='Number of steps before starting training')
     parser.add_argument('--evaluate', action='store_true', help='Evaluate only')
-    parser.add_argument('--evaluation-interval', type=int, default=5000, metavar='STEPS',
+    parser.add_argument('--evaluation-interval', type=int, default=1000, metavar='STEPS',
                         help='Number of training steps between evaluations')
     parser.add_argument('--evaluation-episodes', type=int, default=5, metavar='N',
                         help='Number of evaluation episodes to average over')

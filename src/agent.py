@@ -10,8 +10,8 @@ from src.dqn import DQN
 
 
 class Agent():
-    def __init__(self, args, env):
-        self.action_space = env.action_space()
+    def __init__(self, args, action_space):
+        self.action_space = action_space
         self.atoms = args.atoms
         self.Vmin = args.V_min
         self.Vmax = args.V_max
@@ -87,6 +87,10 @@ class Agent():
         :param epsilon: Epsilon for epsilon-greedy (0=greedy).
         :return: Action selected by bootstrapping.
         """
+        if length == 0:
+            # Just act, no planning is done.
+            return self.act_e_greedy(state, epsilon)
+
         if len(state.shape) == 1:
             state = state.unsqueeze(0)
         actions = torch.arange(self.action_space, device=state.device)

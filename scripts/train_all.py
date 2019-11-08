@@ -1,5 +1,4 @@
 from collections import deque
-from itertools import chain
 
 import torch
 import torch.nn as nn
@@ -16,15 +15,14 @@ from src.eval import test
 from src.forward_model import ForwardModel
 from src.stdim import InfoNCESpatioTemporalTrainer
 from src.dqn_multi_step_stdim_with_actions import MultiStepActionInfoNCESpatioTemporalTrainer
-from src.stdim_with_actions import ActionInfoNCESpatioTemporalTrainer
-from src.utils import get_argparser, log, set_learning_rate
-from src.episodes import get_random_agent_episodes, Transition, sample_real_transitions
+from src.utils import get_argparser, log
+from src.episodes import get_random_agent_episodes, Transition, sample_real_transitions, get_current_policy_episodes
 
 
 def train_policy(args):
     env = Env(args)
     env.train()
-    dqn = Agent(args, env)
+    dqn = Agent(args, env.action_space())
 
     # get initial exploration data
     transitions = get_random_agent_episodes(args)
@@ -43,6 +41,33 @@ def train_policy(args):
                                              init_epochs=args.pretrain_epochs,
                                              agent=dqn)
 
+    # General outline of validation set:
+    # 1.  Append new steps to val_transitions.  Use a fixed # of episodes, to
+    #     facilitate merging the buffers.  Start with random episodes.
+    # 2.  Have ES tolerance of ~100 steps
+    # 3.  If ES is triggered, the weight of the encoder shifts to
+    #     DQN-only and the normal prediction/reward objectives are not trained.
+    # 4.  This lasts until a set number of new transitions have been integrated,
+    #     at which point a new validation set is created and the ES counter
+    #     is reset.  Merge the old validation set into the training set.
+    #     Wait until an episode boundary is reached to do this, so that the
+    #     integrity of the buffer is preserved
+
+    val_buffer = ReplayMemory(args,
+                              args.val_buffer_capacity,
+                              priority_weight=0,
+                              priority_exponent=0,
+                              images=True)
+
+    val_transitions = get_current_policy_episodes(args, args.val_episodes, dqn,
+                                                  encoder_trainer, encoder, 1.)
+    old_val_transitions = []
+    global val_losses
+    val_losses = []
+    for t in val_transitions:
+        state, action, reward, terminal = t[1:]
+        val_buffer.append(state, action, reward, not terminal)
+
     if args.integrated_model:
         forward_model = encoder_trainer
     else:
@@ -59,6 +84,7 @@ def train_policy(args):
     results_dir = os.path.join('results', args.id)
     metrics = {'steps': [], 'rewards': [], 'Qs': [], 'best_avg_reward': -float('inf')}
 
+    env_steps = args.initial_exp_steps + len(val_transitions)
     state, done = env.reset(), False
     while j * args.env_steps_per_epoch < args.total_steps:
         # Train encoder and forward model on real data
@@ -70,12 +96,10 @@ def train_policy(args):
             #     encoder_trainer.train(real_transitions)
             if not args.integrated_model:
                 forward_model.train(real_transitions)
-
-        steps = j * args.env_steps_per_epoch
-        if steps % args.evaluation_interval == 0:
+        if env_steps % args.evaluation_interval == 0:
             dqn.eval()  # Set DQN (online network) to evaluation mode
-            avg_reward = test(args, steps, dqn, encoder_trainer, encoder, metrics, results_dir, evaluate=True)  # Test
-            log(steps, avg_reward)
+            avg_reward = test(args, env_steps, dqn, encoder_trainer, encoder, metrics, results_dir, evaluate=True)  # Test
+            log(env_steps, avg_reward)
             dqn.train()  # Set DQN (online network) back to training mode
 
         timestep, done = 0, True
@@ -83,6 +107,14 @@ def train_policy(args):
         for e in range(args.env_steps_per_epoch):
             if done:
                 state, done = env.reset(), False
+                if len(old_val_transitions) > 0:
+                    for t in old_val_transitions:
+                        state, action, reward, terminal = t[1:]
+                        real_transitions.append(state,
+                                                action,
+                                                reward,
+                                                not terminal)
+
             # Take action in env acc. to current policy, and add to real_transitions
             real_z = encoder(state).view(-1)
             action = dqn.act_with_planner(real_z, encoder_trainer, length=args.planning_horizon,
@@ -95,6 +127,7 @@ def train_policy(args):
             transitions.append(Transition(timestep, state, action, reward, not done))
             state = next_state
             timestep = 0 if done else timestep + 1
+            env_steps += 1
 
             # sample states from real_transitions
             all_zs = []
@@ -144,14 +177,49 @@ def train_policy(args):
                 for g in range(args.updates_per_step):
                     dqn.learn(model_transitions)
 
-            encoder_trainer.do_one_epoch(real_transitions,
-                                         iterations=args.model_updates_per_step)
+            if e % args.check_val_every == 0\
+                    and not encoder_trainer.early_stopper.early_stop:
+                with torch.no_grad():
+                    encoder_trainer.encoder.eval()
+                    encoder_trainer.prediction_module.eval()
+                    encoder_trainer.reward_module.eval()
+                    encoder_trainer.do_one_epoch(val_buffer)
+                    encoder_trainer.encoder.train()
+                    encoder_trainer.prediction_module.train()
+                    encoder_trainer.reward_module.train()
+
+            if not encoder_trainer.early_stopper.early_stop:
+                encoder_trainer.do_one_epoch(real_transitions,
+                                             iterations=args.model_updates_per_step)
+
+
+        if j*args.env_steps_per_epoch % args.update_val_every == 0:
+            val_losses = []
+            old_val_transitions = val_transitions
+            val_buffer = ReplayMemory(args,
+                                      args.val_buffer_capacity,
+                                      priority_weight=0,
+                                      priority_exponent=0)
+            encoder_trainer.log_results("val")
+
+            val_transitions = get_current_policy_episodes(args,
+                                                          args.val_episodes,
+                                                          dqn,
+                                                          encoder_trainer,
+                                                          1.)
+            env_steps += len(val_transitions)
+            val_losses = []
+            for t in val_transitions:
+                state, action, reward, terminal = t[1:]
+                val_buffer.append(state, action, reward, not terminal)
+            encoder_trainer.reset_es()
+            print("Encoder stopping has reset.")
 
         if j > 0:
-            dqn.log(env_steps=(j+1) * args.env_steps_per_epoch)
+            dqn.log(env_steps=env_steps)
         encoder_trainer.log_results("train")
+        encoder_trainer.epochs_till_now += 1
         j += 1
-
 
 def train_encoder(args,
                   transitions,
@@ -193,11 +261,10 @@ def train_encoder(args,
     return encoder, trainer
 
 
-def train_model(args, encoder, real_transitions, num_actions, val_eps=None, init_epochs=None):
+def train_model(args, encoder, real_transitions, num_actions, init_epochs=None):
     forward_model = ForwardModel(args, encoder, num_actions)
     forward_model.train(real_transitions, init_epochs)
     return forward_model
-
 
 if __name__ == '__main__':
     parser = get_argparser()
