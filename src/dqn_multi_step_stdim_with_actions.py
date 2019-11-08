@@ -727,9 +727,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                     plots=False,
                     verbose_print=True,):
 
-        rew_accs, pos_recalls, pos_precs, zero_recalls, zero_precs, \
-        rew_acc, pos_recall, pos_precision, zero_recall, zero_precision, \
-        cosine_sims, cosine_sim, sd_losses, sd_loss = self.summarize_trackers(prefix)
         if prefix == "train":
             trackers = self.train_trackers
         else:
@@ -740,6 +737,9 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             self.reset_trackers(prefix)
             return
 
+        rew_accs, pos_recalls, pos_precs, zero_recalls, zero_precs, \
+        rew_acc, pos_recall, pos_precision, zero_recall, zero_precision, \
+        cosine_sims, cosine_sim, sd_losses, sd_loss = self.summarize_trackers(prefix)
         local_loss = trackers["epoch_local_loss"] / iterations
         reward_loss = trackers["epoch_rew_loss"] / iterations
         global_loss = trackers["epoch_global_loss"] / iterations
