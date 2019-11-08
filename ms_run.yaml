@@ -44,10 +44,10 @@ search:
       spec: discrete
       values: [1, 5]
     - name: mpw
-      spec: float
+      spec: discrete
       values: [0, 0.5, 1]
     - name: mpe
-      spec: float
+      spec: discrete
       values: [0., 1.,]
     - name: rcw
       spec: discrete
