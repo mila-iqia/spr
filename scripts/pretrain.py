@@ -74,7 +74,7 @@ def pretrain(args):
         forward_model.args.epochs = args.epochs // 2
         encoder_trainer.epochs = args.epochs // 2
 
-    visualize_temporal_prediction_accuracy(forward_model, val_transitions, args)
+    visualize_temporal_prediction_accuracy(forward_model, val_memory, args)
 
     if args.game.replace("_", "").lower() not in atari_dict:
         return
