@@ -74,6 +74,8 @@ def pretrain(args):
         forward_model.args.epochs = args.epochs // 2
         encoder_trainer.epochs = args.epochs // 2
 
+    assess_returns(encoder_trainer, train_transitions, "Train")
+    assess_returns(encoder_trainer, val_transitions, "Val")
     visualize_temporal_prediction_accuracy(forward_model, val_memory, args)
 
     if args.game.replace("_", "").lower() not in atari_dict:
@@ -94,8 +96,6 @@ def pretrain(args):
                 train_labels, val_labels)
     test_acc, test_f1score = probe.test(test_transitions, test_labels)
 
-    assess_returns(encoder_trainer, train_transitions, "Train")
-    assess_returns(encoder_trainer, train_transitions, "Val")
 
     wandb.log(test_acc)
     wandb.log(test_f1score)
@@ -127,40 +127,41 @@ def assess_returns(model, transitions, mode="Val"):
             episodes.append(current_ep)
             current_ep = []
 
-    state_deque = deque(maxlen=4)
-    for i in range(4):
-        state_deque.append(blank_batch_trans.state)
 
     pred_rewards = []
-    ep_rew = 0
     for episode in episodes:
+        ep_rew = 0
+        state_deque = deque(maxlen=4)
+        for i in range(4):
+            state_deque.append(blank_batch_trans.state)
         for transition in episode:
             state_deque.append(transition.state)
             state = torch.stack(list(state_deque))
             state = state.float()/255.
-            state = state.to(model.encoder.device)
+            state = state.to(args.device)
             z = model.encoder(state).view(1, -1)
-            _, reward = model.predict(z, transition.action, mean_rew=True)
+            action = torch.tensor(transition.action, device=args.device).long().unsqueeze(0)
+            _, reward = model.predict(z, action, mean_rew=True)
             ep_rew += reward.item()
 
-        pred_rewards.append(ep_rew)
+        pred_rewards.append(ep_rew/len(episode))
 
-    true_rewards = [[t.reward for t in episode] for episode in episodes]
-    true_rewards = np.sum(np.array(true_rewards), axis=-1)
+    true_rewards = [np.mean([t.reward for t in episode]) for episode in episodes]
     pred_rewards = np.array(pred_rewards)
     slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(pred_rewards, y=true_rewards)
 
+    print("{} r^2 = {}, p = {}".format(mode, r_value**2, p_value))
     plt.figure()
     plt.scatter(pred_rewards, true_rewards)
     predictions = slope*pred_rewards + intercept
     plt.plot(pred_rewards, predictions, c="red")
-    plt.xlabel("Predicted returns")
-    plt.ylabel("True returns")
+    plt.xlabel("Predicted mean reward")
+    plt.ylabel("True mean reward")
     plt.title(r"{} r^2 = {}, p = {}".format(mode, r_value**2, p_value))
 
-    plt.savefig(dir + "{}_returns.png".format(mode))
+    plt.savefig(dir + "{}_rewards.png".format(mode))
     image = save_to_pil()
-    dict = {"{}_returns".format(mode):
+    dict = {"{}_rewards".format(mode):
                 wandb.Image(image, caption="{} returns".format(mode))}
     wandb.log(dict)
 
@@ -174,6 +175,7 @@ def visualize_temporal_prediction_accuracy(model, transitions, args):
         model.maximum_length = args.visualization_jumps + 1
         model.dense_supervision = True
 
+        model.reset_trackers("val")
         model.encoder.eval(), model.classifier.eval()
         model.do_one_epoch(transitions, log=True, plots=True)
         model.encoder.train(), model.classifier.train()
