@@ -235,9 +235,18 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.detach_target = config["detach_target"]
 
         self.optimizer = torch.optim.Adam(self.params, lr=config['encoder_lr'], eps=1e-5)
-        self.early_stopper = EarlyStopping(patience=self.patience, verbose=False, wandb=self.wandb, name="encoder")
+        self.early_stopper = EarlyStopping(patience=self.patience, verbose=False, wandb=self.wandb, name="model")
         self.epochs_till_now = 0
-        self.reset_trackers()
+        self.train_trackers = dict()
+        self.reset_trackers("train")
+        self.val_trackers = dict()
+        self.reset_trackers("val")
+
+    def reset_es(self):
+        self.early_stopper = EarlyStopping(patience=self.patience,
+                                           verbose=False,
+                                           wandb=self.wandb,
+                                           name="model")
 
     def maybe_update_target_net(self):
         # Check also to see if the agent has updated on its own due to
@@ -384,85 +393,112 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 weights[i] = sum(counts) / counts[i]
         return torch.tensor(weights, device=self.device)
 
-    def update_reward_trackers(self, n, rewards, reward_preds):
-        self.pos_rew_tps[n] += ((reward_preds == 2)*(rewards == 2)).float().sum()
-        self.pos_rew_fps[n] += ((reward_preds == 2)*(rewards != 2)).float().sum()
-        self.pos_rew_fns[n] += ((reward_preds != 2)*(rewards == 2)).float().sum()
-        self.pos_rew_tns[n] += ((reward_preds != 2)*(rewards != 2)).float().sum()
+    def update_reward_trackers(self, n, rewards, reward_preds, mode="train"):
+        if mode == "train":
+            trackers = self.train_trackers
+        else:
+            trackers = self.val_trackers
+        trackers["pos_rew_tps"][n] += ((reward_preds == 2)*(rewards == 2)).float().sum()
+        trackers["pos_rew_fps"][n] += ((reward_preds == 2)*(rewards != 2)).float().sum()
+        trackers["pos_rew_fns"][n] += ((reward_preds != 2)*(rewards == 2)).float().sum()
+        trackers["pos_rew_tns"][n] += ((reward_preds != 2)*(rewards != 2)).float().sum()
 
-        self.zero_rew_tps[n] += ((reward_preds == 1)*(rewards == 1)).float().sum()
-        self.zero_rew_fps[n] += ((reward_preds == 1)*(rewards != 1)).float().sum()
-        self.zero_rew_fns[n] += ((reward_preds != 1)*(rewards == 1)).float().sum()
-        self.zero_rew_tns[n] += ((reward_preds != 1)*(rewards != 1)).float().sum()
+        trackers["zero_rew_tps"][n] += ((reward_preds == 1)*(rewards == 1)).float().sum()
+        trackers["zero_rew_fps"][n] += ((reward_preds == 1)*(rewards != 1)).float().sum()
+        trackers["zero_rew_fns"][n] += ((reward_preds != 1)*(rewards == 1)).float().sum()
+        trackers["zero_rew_tns"][n] += ((reward_preds != 1)*(rewards != 1)).float().sum()
 
-    def update_cos_sim_trackers(self, n, cos_sim, sd_loss):
-        self.cos_sims[n] += cos_sim
-        self.sd_losses[n] += sd_loss
-        self.counts[n] += 1
+    def update_cos_sim_trackers(self, n, cos_sim, sd_loss, mode="train"):
+        if mode == "train":
+            trackers = self.train_trackers
+        else:
+            trackers = self.val_trackers
+        trackers["cos_sims"][n] += cos_sim
+        trackers["sd_losses"][n] += sd_loss
+        trackers["counts"][n] += 1
 
-    def summarize_trackers(self):
+    def summarize_trackers(self, mode="train"):
+        if mode == "train":
+            trackers = self.train_trackers
+        else:
+            trackers = self.val_trackers
         pos_recalls = []
         pos_precs = []
         zero_recalls = []
         zero_precs = []
         rew_accs = []
         for i in range(self.maximum_length):
-            pos_recalls.append(self.pos_rew_tps[i] / (self.pos_rew_fns[i] + self.pos_rew_tps[i]))
-            pos_precs.append(self.pos_rew_tps[i] / (self.pos_rew_tps[i] + self.pos_rew_fps[i]))
+            pos_recalls.append(trackers["pos_rew_tps"][i] / (trackers["pos_rew_fns"][i] + trackers["pos_rew_tps"][i]))
+            pos_precs.append(trackers["pos_rew_tps"][i] / (trackers["pos_rew_tps"][i] + trackers["pos_rew_fps"][i]))
 
-            zero_recalls.append(self.zero_rew_tps[i] / (self.zero_rew_fns[i] + self.zero_rew_tps[i]))
-            zero_precs.append(self.zero_rew_tps[i] / (self.zero_rew_tps[i] + self.zero_rew_fps[i]))
-            acc = (self.pos_rew_tps[i] + self.pos_rew_tns[i]) / \
-                  (self.pos_rew_fns[i] + self.pos_rew_tps[i] +
-                   self.pos_rew_fps[i] + self.pos_rew_tns[i])
+            zero_recalls.append(trackers["zero_rew_tps"][i] / (trackers["zero_rew_fns"][i] + trackers["zero_rew_tps"][i]))
+            zero_precs.append(trackers["zero_rew_tps"][i] / (trackers["zero_rew_tps"][i] + trackers["zero_rew_fps"][i]))
+            acc = (trackers["pos_rew_tps"][i] + trackers["pos_rew_tns"][i]) / \
+                  (trackers["pos_rew_fns"][i] + trackers["pos_rew_tps"][i] +
+                   trackers["pos_rew_fps"][i] + trackers["pos_rew_tns"][i])
             rew_accs.append(acc)
 
-        pos_recall = (np.sum(self.pos_rew_tps) / (np.sum(self.pos_rew_fns) + np.sum(self.pos_rew_tps)))
-        pos_prec = (np.sum(self.pos_rew_tps) / (np.sum(self.pos_rew_tps) + np.sum(self.pos_rew_fps)))
-        zero_recall = (np.sum(self.zero_rew_tps) / (np.sum(self.zero_rew_fns) + np.sum(self.zero_rew_tps)))
-        zero_prec = (np.sum(self.zero_rew_tps) / (np.sum(self.zero_rew_tps) + np.sum(self.zero_rew_fps)))
-        acc = (np.sum(self.pos_rew_tps) + np.sum(self.pos_rew_tns)) / \
-              (np.sum(self.pos_rew_fns) + np.sum(self.pos_rew_tps) +
-               np.sum(self.pos_rew_fps) + np.sum(self.pos_rew_tns))
+        pos_recall = (np.sum(trackers["pos_rew_tps"]) / (np.sum(trackers["pos_rew_fns"]) + np.sum(trackers["pos_rew_tps"])))
+        pos_prec = (np.sum(trackers["pos_rew_tps"]) / (np.sum(trackers["pos_rew_tps"]) + np.sum(trackers["pos_rew_fps"])))
+        zero_recall = (np.sum(trackers["zero_rew_tps"]) / (np.sum(trackers["zero_rew_fns"]) + np.sum(trackers["zero_rew_tps"])))
+        zero_prec = (np.sum(trackers["zero_rew_tps"]) / (np.sum(trackers["zero_rew_tps"]) + np.sum(trackers["zero_rew_fps"])))
+        acc = (np.sum(trackers["pos_rew_tps"]) + np.sum(trackers["pos_rew_tns"])) / \
+              (np.sum(trackers["pos_rew_fns"]) + np.sum(trackers["pos_rew_tps"]) +
+               np.sum(trackers["pos_rew_fps"]) + np.sum(trackers["pos_rew_tns"]))
 
-        cosine_sim = np.sum(self.cos_sims)/np.sum(self.counts)
-        cosine_sims = self.cos_sims/self.counts
-        sd_losses = self.sd_losses/self.counts
-        sd_loss = np.sum(self.sd_losses/np.sum(self.counts))
+        cosine_sim = np.sum(trackers["cos_sims"])/np.sum(trackers["counts"])
+        cosine_sims = trackers["cos_sims"]/trackers["counts"]
+        sd_losses = trackers["sd_losses"]/trackers["counts"]
+        sd_loss = np.sum(trackers["sd_losses"]/np.sum(trackers["counts"]))
 
         return rew_accs, pos_recalls, pos_precs, zero_recalls, zero_precs,\
                acc, pos_recall, pos_prec, zero_recall, zero_prec, \
                cosine_sims, cosine_sim, sd_losses, sd_loss
 
-    def reset_trackers(self,):
-        self.epoch_rew_loss = 0
-        self.epoch_global_loss = 0
-        self.rew_acc = 0
-        self.epoch_loss = 0
-        self.online_dqn_loss = 0
-        self.true_representation_norm = 0
-        self.pred_representation_norm = 0
-        self.iterations = 0
-        self.jumps = 0
-        self.sd_loss = 0
-        self.epoch_local_loss = 0.
-        self.cos_sims = np.zeros(self.maximum_length)
-        self.counts = np.zeros(self.maximum_length)
-        self.pos_rew_tps = np.zeros(self.maximum_length)
-        self.zero_rew_tps = np.zeros(self.maximum_length)
-        self.pos_rew_fps = np.zeros(self.maximum_length)
-        self.zero_rew_fps = np.zeros(self.maximum_length)
-        self.pos_rew_fns = np.zeros(self.maximum_length)
-        self.zero_rew_fns = np.zeros(self.maximum_length)
-        self.pos_rew_tns = np.zeros(self.maximum_length)
-        self.zero_rew_tns = np.zeros(self.maximum_length)
-        self.sd_losses = np.zeros(self.maximum_length)
+    def reset_trackers(self, mode="train"):
+        if mode == "train":
+            trackers = self.train_trackers
+        else:
+            trackers = self.val_trackers
+        trackers["epoch_rew_loss"] = 0
+        trackers["epoch_global_loss"] = 0
+        trackers["rew_acc"] = 0
+        trackers["epoch_loss"] = 0
+        trackers["online_dqn_loss"] = 0
+        trackers["true_representation_norm"] = 0
+        trackers["pred_representation_norm"] = 0
+        trackers["iterations"] = 0
+        trackers["jumps"] = 0
+        trackers["sd_loss"] = 0
+        trackers["epoch_local_loss"] = 0.
+        trackers["cos_sims"] = np.zeros(self.maximum_length)
+        trackers["counts"] = np.zeros(self.maximum_length)
+        trackers["pos_rew_tps"] = np.zeros(self.maximum_length)
+        trackers["zero_rew_tps"] = np.zeros(self.maximum_length)
+        trackers["pos_rew_fps"] = np.zeros(self.maximum_length)
+        trackers["zero_rew_fps"] = np.zeros(self.maximum_length)
+        trackers["pos_rew_fns"] = np.zeros(self.maximum_length)
+        trackers["zero_rew_fns"] = np.zeros(self.maximum_length)
+        trackers["pos_rew_tns"] = np.zeros(self.maximum_length)
+        trackers["zero_rew_tns"] = np.zeros(self.maximum_length)
+        trackers["sd_losses"] = np.zeros(self.maximum_length)
 
-    def do_one_epoch(self, memory, plots=False, iterations=-1, log=False):
+    def do_one_epoch(self, memory,
+                     plots=False,
+                     iterations=-1,
+                     log=False,
+                     early_stopping=True):
         mode = "train" if self.encoder.training else "val"
 
+        if mode == "train":
+            trackers = self.train_trackers
+        else:
+            trackers = self.val_trackers
+
+        iter_loss = 0
         if iterations <= 0:
             iterations = len(memory.transitions)//self.batch_size
+        trackers["iterations"] += iterations
         for _ in range(iterations):
             idxs, x_tprev,\
             actions, rewards, x_t, all_states, nonterminals,\
@@ -483,18 +519,25 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                                      n,
                                      weights,
                                      mode=mode)
+            iter_loss += loss.mean().item()
             if mode == "train":
                 memory.update_priorities(idxs, loss.detach().cpu().numpy())
-        if mode == "val":
-            self.early_stopper(-self.epoch_loss / self.iterations, self)
-
-        self.iterations += iterations
+        if mode == "val" and early_stopping:
+            self.early_stopper(-trackers["epoch_loss"] / trackers["iterations"],
+                               self)
         if log:
             self.log_results(mode, plots)
+
+        return iter_loss / iterations
 
     def do_iteration(self, x_tprev, x_t, actions, rewards, done, all_states, n,
                      weights=1,
                      mode="train"):
+        if mode == "train":
+            trackers = self.train_trackers
+        else:
+            trackers = self.val_trackers
+
         init_shape = x_t.shape
         x_tprev = x_tprev.view(init_shape[0]*4, *init_shape[2:])
         x_t = x_t.view(init_shape[0]*4, *init_shape[2:])
@@ -530,7 +573,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                                          step=False,
                                          n=n,
                                          target_next_states=f_t_target_stack,)
-            self.online_dqn_loss += dqn_loss.mean()
+            trackers["online_dqn_loss"] += dqn_loss.mean().item()
         else:
             dqn_loss = 0
 
@@ -538,7 +581,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         f_t_current = f_t_prev[:, -self.encoder.hidden_size:]
         current_stack = f_t_prev
         for i in range(actions.shape[1]):
-            self.jumps += 1
+            trackers["jumps"] += 1
             a_i = actions[:, i]
             r_i = rewards[:, i]
             reward_preds = self.reward_module(current_stack, a_i)
@@ -557,7 +600,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                                                             self.class_weights[2])
             reward_loss = reward_loss + current_reward_loss
             reward_preds = reward_preds.argmax(dim=-1)
-            self.update_reward_trackers(i, r_i.detach(), reward_preds.detach())
+            self.update_reward_trackers(i, r_i.detach(), reward_preds.detach(), mode)
 
             f_t_current = self.prediction_module(current_stack, a_i) + f_t_current
             if self.bilinear_global_loss:
@@ -583,7 +626,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 cos_sim = F.cosine_similarity(pred_delta, true_delta,
                                               dim=-1).mean()
 
-                self.update_cos_sim_trackers(i, cos_sim, step_sd_loss.mean())
+                self.update_cos_sim_trackers(i, cos_sim, step_sd_loss.mean(), mode)
 
         f_t_pred = f_t_current
         # Loss 1: Global at time t, f5 patches at time t-1
@@ -596,39 +639,42 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             loss2 = F.cross_entropy(logits.t(),
                                     torch.arange(N).to(self.device),
                                     reduction="none")
-            self.epoch_global_loss += loss2.mean().detach().item()
+            trackers["epoch_global_loss"] += loss2.mean().detach().item()
         else:
             loss2 = 0
 
-        self.sd_loss += local_sd_loss
-        self.true_representation_norm += torch.norm(f_t_global, dim=-1).mean()
-        self.pred_representation_norm += torch.norm(f_t_pred[:f_t_global.shape[0]], dim=-1).mean()
+        trackers["sd_loss"] += local_sd_loss.mean().item()
+        trackers["true_representation_norm"] += torch.norm(f_t_global, dim=-1).mean().item()
+        trackers["pred_representation_norm"] += torch.norm(f_t_pred[:f_t_global.shape[0]], dim=-1).mean().item()
 
         self.optimizer.zero_grad()
-        loss = (loss1 +
+        base_loss = (loss1 +
                 loss2 +
                 reward_loss*self.reward_loss_weight)
         if self.noncontrastive_global_loss:
-            loss = loss + local_sd_loss*self.noncontrastive_loss_weight
+            base_loss = base_loss + local_sd_loss*self.noncontrastive_loss_weight
         if self.online_agent_training:
-            loss = (loss + dqn_loss *
+            loss = (base_loss + dqn_loss *
                     self.dqn_loss_weight)/self.dqn_loss_weight
             self.agent.optimiser.zero_grad()
+        else:
+            loss = base_loss
         if mode == "train":
             (weights*loss).mean().backward()
             self.optimizer.step()
             if self.online_agent_training:
                 self.agent.optimiser.step()
 
-        self.epoch_loss += loss.mean().detach().item()
-        self.epoch_local_loss += loss1.mean().detach().item()
-        self.epoch_rew_loss += reward_loss.mean().detach().item()
+        trackers["epoch_loss"] += loss.mean().detach().item()
+        trackers["epoch_local_loss"] += loss1.mean().detach().item()
+        trackers["epoch_rew_loss"] += reward_loss.mean().detach().item()
 
         self.steps += 1
         if self.online_agent_training:
             self.maybe_update_target_net()
 
-        return loss
+        # Don't take DQN into account for ES.
+        return base_loss
 
     def train(self, tr_eps, val_eps=None, epochs=None):
         self.class_weights = self.generate_reward_class_weights(tr_eps,
@@ -684,15 +730,26 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
         rew_accs, pos_recalls, pos_precs, zero_recalls, zero_precs, \
         rew_acc, pos_recall, pos_precision, zero_recall, zero_precision, \
-        cosine_sims, cosine_sim, sd_losses, sd_loss = self.summarize_trackers()
-        local_loss = self.epoch_local_loss / self.iterations
-        reward_loss = self.epoch_rew_loss / self.iterations
-        global_loss = self.epoch_global_loss / self.iterations
-        epoch_loss = self.epoch_loss / self.iterations
-        online_dqn_loss = self.online_dqn_loss / self.iterations
-        true_norm = self.true_representation_norm / self.iterations
-        pred_norm = self.pred_representation_norm / self.iterations
-        self.reset_trackers()
+        cosine_sims, cosine_sim, sd_losses, sd_loss = self.summarize_trackers(prefix)
+        if prefix == "train":
+            trackers = self.train_trackers
+        else:
+            trackers = self.val_trackers
+        iterations = trackers["iterations"]
+        if iterations == 0:
+            # We did nothing since the last log, so just quit.
+            self.reset_trackers(prefix)
+            return
+
+        local_loss = trackers["epoch_local_loss"] / iterations
+        reward_loss = trackers["epoch_rew_loss"] / iterations
+        global_loss = trackers["epoch_global_loss"] / iterations
+        epoch_loss = trackers["epoch_loss"] / iterations
+        online_dqn_loss = trackers["online_dqn_loss"] / iterations
+        true_norm = trackers["true_representation_norm"] / iterations
+        pred_norm = trackers["pred_representation_norm"] / iterations
+        self.reset_trackers(prefix)
+
 
         print(
             "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Prediction Cosine Similarity: {:.3f}, Reward Accuracy: {:.3f}, DQN Loss: {:.3f} {}".format(

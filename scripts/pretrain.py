@@ -121,7 +121,6 @@ def visualize_temporal_prediction_accuracy(model, transitions, args):
         model.maximum_length = args.max_jump_length
         model.dense_supervision = args.dense_supervision
 
-
 def init_encoder(args,
                  transitions,
                  num_actions,
