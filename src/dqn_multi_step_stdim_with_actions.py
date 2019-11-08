@@ -748,8 +748,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         true_norm = trackers["true_representation_norm"] / iterations
         pred_norm = trackers["pred_representation_norm"] / iterations
         self.reset_trackers(prefix)
-
-
         print(
             "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Prediction Cosine Similarity: {:.3f}, Reward Accuracy: {:.3f}, DQN Loss: {:.3f} {}".format(
                 prefix.capitalize(),

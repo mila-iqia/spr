@@ -171,6 +171,7 @@ class Agent():
             m.view(-1).index_add_(0, (u + offset).view(-1),
                                   (pns_a * (b - l.float())).view(-1))  # m_u = m_u + p(s_t+n, a*)(b - l)
 
+        # print(m, log_ps_a)
         loss = -torch.sum(m * log_ps_a, 1)  # Cross-entropy loss (minimises DKL(m||p(s_t, a_t)))
         # print(returns[0], m[0].argmax(), m[0].max())
         if step:
