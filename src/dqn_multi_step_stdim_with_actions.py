@@ -486,8 +486,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
     def do_one_epoch(self, memory,
                      plots=False,
                      iterations=-1,
-                     log=False,
-                     early_stopping=True):
+                     log=False):
         mode = "train" if self.encoder.training else "val"
 
         if mode == "train":
@@ -522,7 +521,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             iter_loss += loss.mean().item()
             if mode == "train":
                 memory.update_priorities(idxs, loss.detach().cpu().numpy())
-        if mode == "val" and early_stopping:
+        if mode == "val":
             self.early_stopper(-trackers["epoch_loss"] / trackers["iterations"],
                                self)
         if log:
