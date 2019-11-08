@@ -150,19 +150,20 @@ def assess_returns(model, transitions, mode="Val"):
     pred_rewards = np.array(pred_rewards)
     slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(pred_rewards, y=true_rewards)
 
-    print("{} r^2 = {}, p = {}".format(mode, r_value**2, p_value))
+    print("{} r = {}, p = {}".format(mode, r_value, p_value))
     plt.figure()
     plt.scatter(pred_rewards, true_rewards)
     predictions = slope*pred_rewards + intercept
     plt.plot(pred_rewards, predictions, c="red")
     plt.xlabel("Predicted mean reward")
     plt.ylabel("True mean reward")
-    plt.title(r"{} r^2 = {}, p = {}".format(mode, r_value**2, p_value))
+    plt.title(r"{} r = {}, p = {}".format(mode, r_value, p_value))
 
     plt.savefig(dir + "{}_rewards.png".format(mode))
     image = save_to_pil()
     dict = {"{}_rewards".format(mode):
-                wandb.Image(image, caption="{} returns".format(mode))}
+                wandb.Image(image, caption="{} returns".format(mode)),
+            "{}_rewards_r".format(mode): r_value}
     wandb.log(dict)
 
     plt.close()
