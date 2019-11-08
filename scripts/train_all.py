@@ -192,7 +192,6 @@ def train_policy(args):
                 encoder_trainer.do_one_epoch(real_transitions,
                                              iterations=args.model_updates_per_step)
 
-
         if j*args.env_steps_per_epoch % args.update_val_every == 0:
             val_losses = []
             old_val_transitions = val_transitions
@@ -220,6 +219,7 @@ def train_policy(args):
         encoder_trainer.log_results("train")
         encoder_trainer.epochs_till_now += 1
         j += 1
+
 
 def train_encoder(args,
                   transitions,
