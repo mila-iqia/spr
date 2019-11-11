@@ -35,6 +35,9 @@ def pretrain(args):
         train_transitions, train_labels,\
         val_transitions, val_labels, \
         test_transitions, test_labels = get_labeled_episodes(args)
+        print("Using {} train transitions, {} validation transitions and {} test transitions.".format(len(train_transitions),
+                                                                                                      len(val_transitions),
+                                                                                                      len(test_transitions)))
     else:
         print("{} does not support probing; omitting.".format(args.game))
         train_transitions = get_random_agent_episodes(args)
@@ -126,7 +129,6 @@ def assess_returns(model, transitions, mode="Val"):
         if not transition.nonterminal:
             episodes.append(current_ep)
             current_ep = []
-
 
     pred_rewards = []
     for episode in episodes:
