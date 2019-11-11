@@ -33,7 +33,7 @@ search:
       - export LC_ALL=C.UTF-8
       - export LANG=C.UTF-8
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
-      - python -m scripts.train_all --integrated-model --online-agent-training --initial_exp_steps 50000 --pretrain-epochs 100 --max-jump-length {mjl} --game {game} --updates_per_step 0 --rollout_length 0 --noncontrastive-global-loss --bilinear-global-loss --reward-loss-weight {rlw} --noncontrastive-loss-weight {nclw} --dropout-prob 0.2 --dqn-loss-weight {dqnw}
+      - python -m scripts.train_all --online-agent-training --initial_exp_steps 50000 --pretrain-epochs 100 --max-jump-length {mjl} --game {game} --updates_per_step 0 --rollout_length 0 --reward-loss-weight {rlw} --noncontrastive-loss-weight {nclw} --dropout-prob 0.2 --dqn-loss-weight {dqnw}
   type: random
   max_trials: 200
   params:

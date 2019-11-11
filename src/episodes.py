@@ -95,7 +95,7 @@ def get_framestacked_transition(idx, transitions):
     return transition
 
 
-def get_labeled_rollouts(args):
+def get_labeled_rollouts(args, steps=None, episodes=None):
     env = AARIEnv(args)
     env.train()
     action_space = env.action_space()
@@ -103,9 +103,14 @@ def get_labeled_rollouts(args):
     transitions = []
     labels = []
     timestep, done = 0, True
-    for T in range(args.initial_exp_steps):
+    if steps is None and episodes is None:
+        steps = args.initial_exp_steps
+    episode = 0
+    step = 0
+    while True:
         if done:
             state, done = env.reset(), False
+            episode += 1
         state = state[-1].mul(255).to(dtype=torch.uint8,
                                       device=torch.device('cpu'))  # Only store last frame and discretise to save memory
         action = np.random.randint(0, action_space)
@@ -115,11 +120,17 @@ def get_labeled_rollouts(args):
         transitions.append(Transition(timestep, state, action, reward, not done))
         state = next_state
         timestep = 0 if done else timestep + 1
+        step += 1
         if "labels" in info.keys():
             labels.append(info["labels"])
 
+        if (steps is not None and step > steps) or \
+           (episodes is not None and episode > episodes):
+            break
+
     env.close()
     return transitions, labels
+
 
 def remove_low_entropy_labels(episode_labels, entropy_threshold=0.3):
     flat_label_list = list(chain.from_iterable(episode_labels))
@@ -145,7 +156,6 @@ def remove_low_entropy_labels(episode_labels, entropy_threshold=0.3):
         for obs in e:
             for key in low_entropy_labels:
                 del obs[key]
-    # wandb.log(entropy_dict)
     return episode_labels, entropy_dict
 
 
@@ -153,9 +163,9 @@ def get_labeled_episodes(args,
                          entropy_threshold=0.6,):
 
         # List of episodes. Each episode is a list of 160x210 observations
-        train_transitions, train_labels = get_labeled_rollouts(args)
-        val_transitions, val_labels = get_labeled_rollouts(args)
-        test_transitions, test_labels = get_labeled_rollouts(args)
+        train_transitions, train_labels = get_labeled_rollouts(args, steps=args.initial_exp_steps)
+        val_transitions, val_labels = get_labeled_rollouts(args, episodes=args.val_episodes)
+        test_transitions, test_labels = get_labeled_rollouts(args, episodes=args.val_episodes)
 
         all_labels = [train_labels, val_labels, test_labels]
         all_labels, entropy_dict = remove_low_entropy_labels(all_labels,

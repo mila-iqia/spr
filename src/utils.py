@@ -41,8 +41,8 @@ def get_argparser():
                         help='Size of features')
 
     # Integrated Model Args
-    parser.add_argument('--integrated-model', action="store_true",
-                        default=False, help='Use an encoder with the model built in.')
+    parser.add_argument('--detached-model', action="store_false", dest="integrated_model",
+                        default=True, help='Use a model separate from the encoder.')
     parser.add_argument('--reward-layers', type=int, default=3,
                         help='Number of layers for reward model.')
     parser.add_argument('--prediction-layers', type=int, default=3,
@@ -63,8 +63,7 @@ def get_argparser():
                         default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
-    parser.add_argument('--nofilm', action="store_false", default=True,
-                        dest="film",
+    parser.add_argument('--nofilm', action="store_false", default=True, dest="film",
                         help='Use FILM instead of an outer product to integrate actions')
     parser.add_argument('--nolayernorm', action="store_false", default=True,
                         dest="layernorm",
