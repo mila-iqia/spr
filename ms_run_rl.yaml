@@ -55,6 +55,3 @@ search:
     - name: oat
       spec: discrete
       values: ["--online-agent-training", ""]
-#    - name: rcw
-#      spec: discrete
-#      values: ["--no-class-weighting", ""]
