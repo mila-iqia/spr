@@ -33,13 +33,13 @@ search:
       - export LC_ALL=C.UTF-8
       - export LANG=C.UTF-8
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
-      - python -m scripts.train_all {oat} --initial_exp_steps 50000 --pretrain-epochs 100 --rollout-length {n} --max-jump-length 1 --priority-weight {pw} --priority-exponent {pe} --game {game} --dropout-prob {dropout}
+      - python -m scripts.train_all {oat} --initial_exp_steps 50000 --pretrain-epochs 100 --rollout_length {n} --max-jump-length 1 --priority-weight {pw} --priority-exponent {pe} --game {game} --dropout-prob {dropout}
   type: grid
   max_trials: 200
   params:
     - name: game
       spec: discrete
-      values: ['alien', "boxing", 'seaquest']
+      values: ['alien', 'seaquest']
     - name: dropout
       spec: discrete
       values: [0.2,]
@@ -48,7 +48,7 @@ search:
       values: [0, 0.5, 1]
     - name: pe
       spec: discrete
-      values: [0., 1.,]
+      values: [0., 1.]
     - name: n
       spec: discrete
       values: [1, 5]
