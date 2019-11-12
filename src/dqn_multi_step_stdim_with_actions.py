@@ -716,6 +716,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             rewards = reward_predictions.argmax() - 1
         elif mean_rew:
             weights = torch.arange(reward_predictions.shape[-1], device=z.device).float() - 1
+            reward_predictions = torch.softmax(reward_predictions, -1)
             rewards = reward_predictions @ weights
         else:
             rewards = Categorical(logits=reward_predictions).sample() - 1

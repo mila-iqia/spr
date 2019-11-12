@@ -73,6 +73,8 @@ def get_argparser():
                         help='Use a global bilinear loss in addition to the standard local-global loss.')
     parser.add_argument('--detach-target', action="store_true", default=False,
                         help='Detach the target representation.')
+    parser.add_argument('--load', type=str, default="",
+                        help='Model file to load in.  Blank for none.')
     parser.add_argument('--no-class-weighting', action="store_true", default=False,
                         help="Don't reweight reward classes.")
     parser.add_argument('--no-noncontrastive-global-loss', action="store_false", default=True,
@@ -88,6 +90,8 @@ def get_argparser():
                         help="How much dropout to use in the model and reward predictor.")
     parser.add_argument('--online-agent-training', action="store_true",
                         default=False, help='Train agent on real data alongside integrated model.')
+    parser.add_argument('--real-data-indicator', action="store_true", default=False,
+                        help="Mark real and fake data with binary flag for DQN.")
     parser.add_argument('--probe-lr', type=float, default=3e-4)
     parser.add_argument('--model-priority-exponent', type=float, default=0., metavar='ω',
                         help='Prioritised experience replay exponent (originally denoted α)')
