@@ -62,9 +62,8 @@ def pretrain(args):
                                             agent=dqn)
 
     if len(args.load) > 0:
-        try:
-            print("Loading weights from {}".format(args.load))
-            encoder_trainer.load_state_dict(torch.load(args.load))
+        print("Loading weights from {}".format(args.load))
+        encoder_trainer.load_state_dict(torch.load(args.load))
 
     encoder_trainer.train(train_memory,
                           val_memory,
