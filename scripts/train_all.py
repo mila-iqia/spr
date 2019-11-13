@@ -205,6 +205,7 @@ def train_policy(args):
                                                           args.val_episodes,
                                                           dqn,
                                                           encoder_trainer,
+                                                          encoder,
                                                           1.)
             env_steps += len(val_transitions)
             val_losses = []
