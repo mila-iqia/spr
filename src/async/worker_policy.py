@@ -11,10 +11,14 @@ class WorkerPolicy(Worker):
         pass
 
     def pull(self):
-        pass
+        self.forward_model.load_state_dict(self.queue_prev.get())
 
     def push(self, parameters):
-        pass
+        self.queue.push(self.dqn.state_dict())
+
+    def generate_model_transitions(self):
+        return ''
 
     def step(self):
-        pass
+        model_transitions = self.generate_model_transitions()
+        self.dqn.learn(model_transitions)
