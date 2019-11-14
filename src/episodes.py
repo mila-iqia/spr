@@ -34,6 +34,33 @@ def get_random_agent_episodes(args):
     return transitions
 
 
+def get_consistent_random_agent_episodes(args, env):
+    """
+    Use an existing environment to gather experience with a random policy.
+    Return the current state, timestep and termination status.
+    :param args:
+    :param env:
+    :return:
+    """
+    action_space = env.action_space()
+    print('-------Collecting samples----------')
+    transitions = []
+    timestep, done = 0, True
+    for T in range(args.initial_exp_steps):
+        if done:
+            state, done = env.reset(), False
+        state = state[-1].mul(255).to(dtype=torch.uint8,
+                                      device=torch.device('cpu'))  # Only store last frame and discretise to save memory
+        action = np.random.randint(0, action_space)
+        next_state, reward, done = env.step(action)
+        if args.reward_clip > 0:
+            reward = max(min(reward, args.reward_clip), -args.reward_clip)  # Clip rewards
+        transitions.append(Transition(timestep, state, action, reward, not done))
+        state = next_state
+        timestep = 0 if done else timestep + 1
+    return transitions, done, timestep, next_state
+
+
 def get_current_policy_episodes(args, episodes, dqn, model, encoder, epsilon=0):
     env = Env(args)
     env.train()

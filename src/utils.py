@@ -103,8 +103,8 @@ def get_argparser():
                         help='How many val episodes to use at once')
     parser.add_argument('--val-buffer-capacity', type=int, default=int(5e4),
                         help='How many validation steps to use at once')
-    parser.add_argument('--update-val-every', type=int, default=10000,
-                        help='How often to update the validation set.')
+    parser.add_argument('--update-val-every', type=int, default=10,
+                        help='How often to update the validation set, in epochs.')
     parser.add_argument('--check-val-every', type=int, default=100,
                         help='How often to update the validation set.')
     parser.add_argument("--model-updates-per-step", type=int, default=20)
