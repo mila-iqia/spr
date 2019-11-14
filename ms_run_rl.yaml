@@ -33,7 +33,7 @@ search:
       - export LC_ALL=C.UTF-8
       - export LANG=C.UTF-8
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
-      - python -m scripts.train_all {oat} --initial_exp_steps 50000 --pretrain-epochs 100 --rollout_length {n} --max-jump-length 1 --priority-weight {pw} --priority-exponent {pe} --model-priority-exponent 1. --model-priority-weight 1. --game {game} --dropout-prob {dropout} --model-updates-per-step 2 --updates_per_step 5
+      - python -m scripts.train_all {oat} --initial_exp_steps 50000 --pretrain-epochs 100 --rollout_length {n} --multi-step {n} --max-jump-length 1 --priority-weight {pw} --priority-exponent {pe} --model-priority-exponent 1. --model-priority-weight 1. --game {game} --dropout-prob {dropout} --model-updates-per-step 2 --updates_per_step 5
   type: grid
   max_trials: 200
   params:
