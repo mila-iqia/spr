@@ -96,7 +96,7 @@ def train_policy(args):
             #     encoder_trainer.train(real_transitions)
             if not args.integrated_model:
                 forward_model.train(real_transitions)
-        if env_steps % args.evaluation_interval == 0:
+        if int(env_steps) % args.evaluation_interval == 0:
             dqn.eval()  # Set DQN (online network) to evaluation mode
             avg_reward = test(args, env_steps, dqn, encoder_trainer, encoder, metrics, results_dir, evaluate=True)  # Test
             log(env_steps, avg_reward)
