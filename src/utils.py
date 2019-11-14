@@ -86,7 +86,7 @@ def get_argparser():
                         help="Weight for noncontrastive global loss in shared loss.")
     parser.add_argument("--hard-neg-factor", type=int, default=0,
                         help="How many hard negative action samples to use.")
-    parser.add_argument("--dropout-prob", type=float, default=0.2,
+    parser.add_argument("--dropout-prob", type=float, default=0.0,
                         help="How much dropout to use in the model and reward predictor.")
     parser.add_argument('--online-agent-training', action="store_true",
                         default=False, help='Train agent on real data alongside integrated model.')
@@ -110,7 +110,7 @@ def get_argparser():
     parser.add_argument("--model-updates-per-step", type=int, default=20)
     parser.add_argument("--planning-horizon", type=int, default=0)
     parser.add_argument("--planning-shots", type=int, default=100)
-    parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
     parser.add_argument("--wandb-proj", type=str, default="awm")
     parser.add_argument("--name", type=str, default="", help="Name for run in wandb.")

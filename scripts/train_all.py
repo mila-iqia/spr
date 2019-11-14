@@ -86,6 +86,7 @@ def train_policy(args):
 
     env_steps = args.initial_exp_steps + len(val_transitions)
     state, done = env.reset(), False
+    timestep = 0
     while j * args.env_steps_per_epoch < args.total_steps:
         # Train encoder and forward model on real data
         if j != 0:
@@ -96,17 +97,19 @@ def train_policy(args):
             #     encoder_trainer.train(real_transitions)
             if not args.integrated_model:
                 forward_model.train(real_transitions)
-        if int(env_steps) % args.evaluation_interval == 0:
-            dqn.eval()  # Set DQN (online network) to evaluation mode
-            avg_reward = test(args, env_steps, dqn, encoder_trainer, encoder, metrics, results_dir, evaluate=True)  # Test
-            log(env_steps, avg_reward)
-            dqn.train()  # Set DQN (online network) back to training mode
 
-        timestep, done = 0, True
-        dqn.update_target_net()
         for e in range(args.env_steps_per_epoch):
+            if int(env_steps) % args.evaluation_interval == 0:
+                dqn.eval()  # Set DQN (online network) to evaluation mode
+                avg_reward = test(args, env_steps, dqn, encoder_trainer, encoder, metrics, results_dir,
+                                  evaluate=True)  # Test
+                # print("Evaluation at {}: Reward {}".format(env_steps, avg_reward))
+                log(env_steps, avg_reward)
+                dqn.train()  # Set DQN (online network) back to training mode
+
             if done:
                 state, done = env.reset(), False
+                timestep = 0
                 if len(old_val_transitions) > 0:
                     for t in old_val_transitions:
                         state, action, reward, terminal = t[1:]
@@ -126,14 +129,14 @@ def train_policy(args):
             real_transitions.append(state, action, reward, done)
             transitions.append(Transition(timestep, state, action, reward, not done))
             state = next_state
-            timestep = 0 if done else timestep + 1
             env_steps += 1
 
             # sample states from real_transitions
             all_zs = []
             all_actions = []
             all_rewards = []
-            samples, actions, rewards = sample_real_transitions(transitions, args.num_model_rollouts)
+            samples, actions, rewards = sample_real_transitions(transitions,
+                                                                args.num_model_rollouts)
             samples = samples.flatten(0, 1).to(args.device)
             H, N = args.history_length, args.num_model_rollouts
             with torch.no_grad():
