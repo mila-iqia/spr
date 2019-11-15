@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 # Factorised NoisyLinear layer with bias
 class NoisyLinear(nn.Module):
-    def __init__(self, in_features, out_features, std_init=0.5):
+    def __init__(self, in_features, out_features, std_init=0.5, device=None):
         super(NoisyLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -21,6 +21,7 @@ class NoisyLinear(nn.Module):
         self.register_buffer('bias_epsilon', torch.empty(out_features))
         self.reset_parameters()
         self.reset_noise()
+        self.device = device
 
     def reset_parameters(self):
         mu_range = 1 / math.sqrt(self.in_features)
@@ -30,7 +31,7 @@ class NoisyLinear(nn.Module):
         self.bias_sigma.data.fill_(self.std_init / math.sqrt(self.out_features))
 
     def _scale_noise(self, size):
-        x = torch.randn(size)
+        x = torch.randn(size, device=self.device)
         return x.sign().mul_(x.abs().sqrt_())
 
     def reset_noise(self):
@@ -62,10 +63,10 @@ class DQN(nn.Module):
         #   self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 5, stride=5, padding=0), nn.ReLU(),
         #                              nn.Conv2d(32, 64, 5, stride=5, padding=0), nn.ReLU())
         self.conv_output_size = 1024
-        self.fc_h_v = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
-        self.fc_h_a = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
-        self.fc_z_v = NoisyLinear(args.hidden_size, self.atoms, std_init=args.noisy_std)
-        self.fc_z_a = NoisyLinear(args.hidden_size, action_space * self.atoms, std_init=args.noisy_std)
+        self.fc_h_v = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std, device=args.device)
+        self.fc_h_a = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std, device=args.device)
+        self.fc_z_v = NoisyLinear(args.hidden_size, self.atoms, std_init=args.noisy_std, device=args.device)
+        self.fc_z_a = NoisyLinear(args.hidden_size, action_space * self.atoms, std_init=args.noisy_std, device=args.device)
 
     def forward(self, x, log=False):
         # x = self.convs(x)
