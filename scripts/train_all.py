@@ -94,6 +94,7 @@ def train_policy(args):
                 forward_model.train(real_transitions)
 
         for e in range(args.env_steps_per_epoch):
+            dqn.reset_noise()
             if int(env_steps) % args.evaluation_interval == 0:
                 dqn.eval()  # Set DQN (online network) to evaluation mode
                 avg_reward = test(args, env_steps, dqn, encoder_trainer, encoder, metrics, results_dir,

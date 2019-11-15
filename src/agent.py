@@ -120,6 +120,7 @@ class Agent():
 
     def learn(self, mem):
         # Sample transitions
+        self.reset_noise()
         idxs, states, actions, returns, next_states, nonterminals, weights = mem.sample(self.batch_size)
         loss = self.update(states, actions, returns, next_states, nonterminals, weights)
         mem.update_priorities(idxs, loss.detach().cpu().numpy())  # Update priorities of sampled transitions
