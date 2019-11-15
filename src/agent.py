@@ -91,33 +91,37 @@ class Agent():
             # Just act, no planning is done.
             return self.act_e_greedy(state, epsilon)
 
+        # If we roll to take a random action, just directly return a random action.
+        if np.random.random() < epsilon:
+            return np.random.randint(0, self.action_space)
+
         if len(state.shape) == 1:
             state = state.unsqueeze(0)
         actions = torch.arange(self.action_space, device=state.device)
         actions = actions[:, None].expand(-1, shots).reshape(-1)
         all_runs = torch.zeros(self.action_space*shots, device=state.device)
         current_state = state.expand(self.action_space*shots, -1)
+        continuation_probs = torch.ones_like(all_runs)
         for i in range(length):
-            pred_state, reward = planner.predict(current_state, actions, mean_rew=True)
+            pred_state, reward, nonterminal = planner.predict(current_state, actions, mean_rew=True)
             current_state = current_state[:, current_state.shape[-1]//4:]
             current_state = torch.cat([current_state, pred_state], -1)
-            all_runs += reward*self.discount**i
+            all_runs += reward*continuation_probs*self.discount**i
+            continuation_probs = continuation_probs*nonterminal
 
         final_value = (self.online_net(current_state)*self.support).sum(2)
         final_value = torch.max(final_value, -1)[0]
-        all_runs = all_runs + self.discount**length * final_value
+        all_runs = all_runs + self.discount**length * final_value * continuation_probs
 
         all_runs = all_runs.view(self.action_space, shots)
         best_action = torch.argmax(torch.max(all_runs, -1, keepdim=True)[0]).item()
 
-        return np.random.randint(0, self.action_space) if np.random.random() < epsilon else best_action
+        return best_action
 
     def learn(self, mem):
         # Sample transitions
         idxs, states, actions, returns, next_states, nonterminals, weights = mem.sample(self.batch_size)
-
         loss = self.update(states, actions, returns, next_states, nonterminals, weights)
-
         mem.update_priorities(idxs, loss.detach().cpu().numpy())  # Update priorities of sampled transitions
 
     def update(self,
@@ -171,19 +175,16 @@ class Agent():
             m.view(-1).index_add_(0, (u + offset).view(-1),
                                   (pns_a * (b - l.float())).view(-1))  # m_u = m_u + p(s_t+n, a*)(b - l)
 
-        # print(m, log_ps_a)
         loss = -torch.sum(m * log_ps_a, 1)  # Cross-entropy loss (minimises DKL(m||p(s_t, a_t)))
-        # print(returns[0], m[0].argmax(), m[0].max())
         if step:
             self.online_net.zero_grad()
             (weights * loss).mean().backward()  # Backpropagate importance-weighted minibatch loss
             self.optimiser.step()
-        self.q_losses.append(loss.mean().detach().item())
-        self.weighted_q_losses.append((weights * loss).mean().detach().item())
+            self.q_losses.append(loss.mean().detach().item())
+            self.weighted_q_losses.append((weights * loss).mean().detach().item())
 
         self.steps += 1
         self.maybe_update_target_net()
-
         return loss
 
     def maybe_update_target_net(self):

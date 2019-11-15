@@ -117,6 +117,10 @@ def get_argparser():
     parser.add_argument("--num_rew_evals", type=int, default=10)
     parser.add_argument("--collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
                         default="random_agent")
+    parser.add_argument('--mean-rew', action="store_true", default=False,
+                        help="Use the expectation of reward and termination rather than sampling.")
+    parser.add_argument('--use-dones', action="store_true", default=False,
+                        help="Use predicted terminations in sampling")
 
     # MBPO Args
     parser.add_argument("--total_steps", type=int, default=100000)
