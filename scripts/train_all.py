@@ -131,6 +131,7 @@ def train_policy(args):
             all_zs = []
             all_actions = []
             all_rewards = []
+            all_nonterminals = []
             samples, actions, rewards = sample_real_transitions(transitions,
                                                                 args.num_model_rollouts)
 
@@ -147,28 +148,36 @@ def train_policy(args):
                 all_actions.append(actions[:, i])
                 all_rewards.append(rewards[:, i])
 
+                # By definition from our sampling, all the nonterminals
+                # in the history are 1.
+                all_nonterminals.append(torch.ones_like(rewards[:, i]))
+
             # Perform k-step model rollout starting from s using current policy
             for k in range(args.rollout_length):
                 z = torch.stack(list(state_deque))
                 z = z.view(N, H, -1).view(N, -1)  # take a second look at this later
                 actions = dqn.act(z, batch=True)
                 with torch.no_grad():
-                    next_z, rewards, nonterminal = forward_model.predict(z, actions)
+                    next_z, rewards, nonterminal = forward_model.predict(z, actions, mean_rew=args.mean_rew)
 
                 actions, rewards = actions.tolist(), rewards.tolist()
                 state_deque.append(next_z)
                 all_zs.append(next_z)
                 all_actions.append(actions)
                 all_rewards.append(rewards)
+                all_nonterminals.append(nonterminal)
 
             # Add imagined data to model_transitions
             for i in range(N):
+                done = False
                 for k in range(args.rollout_length+4):
                     priority = None if k >= 3 and k + args.multi_step < args.rollout_length+4 else 0
+                    if args.use_dones:
+                        done = 1 - all_nonterminals[k][i]
                     model_transitions.append(all_zs[k][i].unsqueeze(0),
                                              all_actions[k][i],
                                              all_rewards[k][i],
-                                             False,
+                                             done,
                                              timestep=k,
                                              init_priority=priority)
 

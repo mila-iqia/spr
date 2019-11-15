@@ -98,9 +98,9 @@ class ReplayMemory:
             timestep = self.t
         if init_priority is None:
             init_priority = self.transitions.max
-        self.transitions.append(Transition(timestep, state, action, reward, not terminal),
+        self.transitions.append(Transition(timestep, state, action, reward, 1 - terminal),
                                 init_priority)  # Store new transition with maximum priority
-        self.t = 0 if terminal else timestep + 1  # Start new episodes with t = 0
+        self.t = 0 if terminal == 1 else timestep + 1  # Start new episodes with t = 0
 
     # Returns a transition with blank states where appropriate
     def _get_transition(self, idx, n=None):
@@ -152,12 +152,21 @@ class ReplayMemory:
             device=self.device)
         # Discrete action to be used as index
         action = torch.tensor([transition[self.history - 1].action], dtype=torch.int64, device=self.device)
+
+        nonterminals = torch.tensor([t.nonterminal for t in transition[self.history - 1:]],
+                                    dtype=torch.float32,
+                                    device=self.device)
+
+        continuation_probs = torch.cumprod(nonterminals, dim=-1)
+
         # Calculate truncated n-step discounted return R^n = Σ_k=0->n-1 (γ^k)R_t+k+1 (note that invalid nth next states have reward 0)
-        R = torch.tensor([sum(self.discount ** i * transition[self.history + i - 1].reward for i in range(self.n))],
+        R = torch.tensor([sum(self.discount ** i * continuation_probs[i] * transition[self.history + i - 1].reward for i in range(self.n))],
                          dtype=torch.float32, device=self.device)
         # Mask for non-terminal nth next states
-        nonterminal = torch.tensor([transition[self.history + self.n - 1].nonterminal], dtype=torch.float32,
-                                   device=self.device)
+        # nonterminal = torch.tensor([transition[self.history + self.n - 1].nonterminal], dtype=torch.float32,
+        #                            device=self.device)
+
+        nonterminal = continuation_probs[-1:]
 
         return prob, idx, tree_idx, state, action, R, next_state, nonterminal
 
@@ -186,12 +195,20 @@ class ReplayMemory:
             device=self.device)
         # Discrete action to be used as index
         action = torch.tensor([transition[self.history - 1].action], dtype=torch.int64, device=self.device)
+        nonterminals = torch.tensor([t.nonterminal for t in transition[self.history - 1:]],
+                                    dtype=torch.float32,
+                                    device=self.device)
+
+        continuation_probs = torch.cumprod(nonterminals, dim=-1)
+
         # Calculate truncated n-step discounted return R^n = Σ_k=0->n-1 (γ^k)R_t+k+1 (note that invalid nth next states have reward 0)
-        R = torch.tensor([sum(self.discount ** i * transition[self.history + i - 1].reward for i in range(n))],
+        R = torch.tensor([sum(self.discount ** i * continuation_probs[i] * transition[self.history + i - 1].reward for i in range(n))],
                          dtype=torch.float32, device=self.device)
         # Mask for non-terminal nth next states
-        nonterminal = torch.tensor([transition[self.history + n - 1].nonterminal], dtype=torch.float32,
-                                   device=self.device)
+        # nonterminal = torch.tensor([transition[self.history + self.n - 1].nonterminal], dtype=torch.float32,
+        #                            device=self.device)
+
+        nonterminal = continuation_probs[-1:]
 
         all_rewards = [trans.reward for trans in transition[self.history-1:-1]]
         all_actions = [trans.action for trans in transition[self.history-1:-1]]
