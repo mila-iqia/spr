@@ -107,6 +107,7 @@ def sample_real_transitions(real_transitions, num_samples):
             actions[i, k] = trans.action
             rewards[i, k] = trans.reward
         samples.append(torch.stack(states))
+
     return torch.stack(samples), torch.tensor(actions).long(), torch.tensor(rewards).long()
 
 

@@ -203,6 +203,13 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                                                             layers=config["reward_layers"],
                                                             h_size=config["reward_hidden"],
                                                             dropout=config["dropout_prob"])
+            self.done_module = FILMRewardPredictionModule(self.encoder.hidden_size,
+                                                          config["num_actions"],
+                                                          layernorm=config["layernorm"],
+                                                          layers=config["reward_layers"],
+                                                          h_size=config["reward_hidden"],
+                                                          dropout=config["dropout_prob"],
+                                                          reward_dim=2)
 
         else:
             self.prediction_module = PredictionModule(self.encoder.hidden_size,
@@ -214,6 +221,12 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                                                         layers=config["reward_layers"],
                                                         h_size=config["reward_hidden"],
                                                         dropout=config["dropout_prob"])
+            self.done_module = RewardPredictionModule(self.encoder.hidden_size,
+                                                      config["num_actions"],
+                                                      layers=config["reward_layers"],
+                                                      h_size=config["reward_hidden"],
+                                                      dropout=config["dropout_prob"],
+                                                      reward_dim=2)
 
         self.reward_loss_weight = config["reward_loss_weight"]
 
@@ -225,8 +238,10 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
         self.prediction_module.to(device)
         self.reward_module.to(device)
+        self.done_module.to(device)
         self.params += list(self.prediction_module.parameters())
         self.params += list(self.reward_module.parameters())
+        self.params += list(self.done_module.parameters())
         self.hard_neg_factor = config["hard_neg_factor"]
 
         self.maximum_length = config["max_jump_length"]
@@ -258,77 +273,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
     def update_target_net(self):
         self.steps = 0
         self.target_encoder.load_state_dict(self.encoder.state_dict())
-
-    def generate_batch(self, transitions):
-        total_steps = len(transitions)
-        print('Total Steps: {}'.format(len(transitions)))
-        for idx in range(total_steps // self.batch_size):
-            indices = np.random.randint(0, total_steps, size=self.batch_size)
-            if self.minimum_length == self.maximum_length + 1:
-                gap = self.maximum_length
-            else:
-                gap = np.random.randint(self.minimum_length,
-                                        self.maximum_length + 1)
-            t1 = indices - gap
-            # don't allow negative indices.
-            underflow = np.clip(t1, a_max=0, a_min=None)
-            indices -= underflow
-            t1 -= underflow
-            x_t, x_tnext, a_t, r_tnext, dones = [], [], [], [], []
-            all_states = []
-            for t1, t2 in zip(t1, indices):
-                # Get one sample from this episode
-                # If our sample would cross an episode boundary, resample.
-                while transitions[t2].timestep - gap < 0:
-                    t2 = np.random.randint(0, total_steps)
-                    t1 = t2 - gap
-                    # don't allow negative indices.
-                    underflow = np.clip(t1, a_max=0, a_min=None)
-                    t1 -= underflow
-                    t2 -= underflow
-
-                trans = np.array([None] * 4)
-                trans[-1] = transitions[t1]
-                for i in range(4 - 2, -1, -1):  # e.g. 2 1 0
-                    if trans[i + 1].timestep == 0:
-                        trans[i] = blank_trans  # If future frame has timestep 0
-                    else:
-                        trans[i] = transitions[t1 - 4 + 1 + i]
-                states = [t.state for t in trans]
-
-                next_trans = np.array([None] * 4)
-                next_trans[-1] = transitions[t2]
-                for i in range(4 - 2, -1, -1):  # e.g. 2 1 0
-                    if next_trans[i + 1].timestep == 0:
-                        next_trans[i] = blank_trans  # If future frame has timestep 0
-                    else:
-                        next_trans[i] = transitions[t2 - 4 + 1 + i]
-                next_states = [t.state for t in next_trans]
-
-                actions = [t.action for t in transitions[t1:t2]]
-                rewards = [t.reward + 1 for t in transitions[t1:t2]]
-
-                x_t.append(torch.stack(states, 0))
-                x_tnext.append(torch.stack(next_states, 0))
-                # x_tnext.append(transitions[t2].state)
-                if self.dense_supervision:
-                    all_states.append(torch.stack([t.state for t in transitions[t1:t2]], 0))
-                a_t.append(actions)
-                r_tnext.append(rewards)
-                dones.append(transitions[t2].nonterminal)
-
-            if self.dense_supervision:
-                all_states = torch.stack(all_states).to(self.device).float()/255.
-            else:
-                all_states = None
-
-            yield torch.stack(x_t).to(self.device).float()/255.,\
-                  torch.stack(x_tnext).to(self.device).float()/255.,\
-                  torch.tensor(a_t, device=self.device).long(),\
-                  torch.tensor(r_tnext, device=self.device).long(),\
-                  torch.tensor(dones, device=self.device).unsqueeze(-1).float(),\
-                  all_states,\
-                  gap
 
     def nce_with_negs_from_same_loc(self, f_glb, f_lcl):
         '''
@@ -408,6 +352,16 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         trackers["zero_rew_fns"][n] += ((reward_preds != 1)*(rewards == 1)).float().sum()
         trackers["zero_rew_tns"][n] += ((reward_preds != 1)*(rewards != 1)).float().sum()
 
+    def update_done_trackers(self, dones, done_preds, mode="train"):
+        if mode == "train":
+            trackers = self.train_trackers
+        else:
+            trackers = self.val_trackers
+        trackers["done_tps"] += ((done_preds == 0)*(dones == 0)).float().sum()
+        trackers["done_fps"] += ((done_preds == 0)*(dones != 0)).float().sum()
+        trackers["done_fns"] += ((done_preds != 0)*(dones == 0)).float().sum()
+        trackers["done_tns"] += ((done_preds != 0)*(dones != 0)).float().sum()
+
     def update_cos_sim_trackers(self, n, cos_sim, sd_loss, mode="train"):
         if mode == "train":
             trackers = self.train_trackers
@@ -427,6 +381,11 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         zero_recalls = []
         zero_precs = []
         rew_accs = []
+        done_recall = (trackers["done_tps"] / (trackers["done_fns"] + trackers["done_tps"]))
+        done_prec = (trackers["done_tps"] / (trackers["done_tps"] + trackers["done_fps"]))
+        done_acc = (trackers["done_tps"] + trackers["done_tns"]) / \
+                   (trackers["done_fns"] + trackers["done_tps"] +
+                    trackers["done_fps"] + trackers["done_tns"])
         for i in range(self.maximum_length):
             pos_recalls.append(trackers["pos_rew_tps"][i] / (trackers["pos_rew_fns"][i] + trackers["pos_rew_tps"][i]))
             pos_precs.append(trackers["pos_rew_tps"][i] / (trackers["pos_rew_tps"][i] + trackers["pos_rew_fps"][i]))
@@ -453,7 +412,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
         return rew_accs, pos_recalls, pos_precs, zero_recalls, zero_precs,\
                acc, pos_recall, pos_prec, zero_recall, zero_prec, \
-               cosine_sims, cosine_sim, sd_losses, sd_loss
+               cosine_sims, cosine_sim, sd_losses, sd_loss, \
+               done_acc, done_recall, done_prec
 
     def reset_trackers(self, mode="train"):
         if mode == "train":
@@ -461,6 +421,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         else:
             trackers = self.val_trackers
         trackers["epoch_rew_loss"] = 0
+        trackers["epoch_done_loss"] = 0
         trackers["epoch_global_loss"] = 0
         trackers["rew_acc"] = 0
         trackers["epoch_loss"] = 0
@@ -473,15 +434,22 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         trackers["epoch_local_loss"] = 0.
         trackers["cos_sims"] = np.zeros(self.maximum_length)
         trackers["counts"] = np.zeros(self.maximum_length)
-        trackers["pos_rew_tps"] = np.zeros(self.maximum_length)
-        trackers["zero_rew_tps"] = np.zeros(self.maximum_length)
-        trackers["pos_rew_fps"] = np.zeros(self.maximum_length)
-        trackers["zero_rew_fps"] = np.zeros(self.maximum_length)
-        trackers["pos_rew_fns"] = np.zeros(self.maximum_length)
-        trackers["zero_rew_fns"] = np.zeros(self.maximum_length)
-        trackers["pos_rew_tns"] = np.zeros(self.maximum_length)
-        trackers["zero_rew_tns"] = np.zeros(self.maximum_length)
         trackers["sd_losses"] = np.zeros(self.maximum_length)
+
+        trackers["pos_rew_tps"] = np.zeros(self.maximum_length)
+        trackers["pos_rew_fps"] = np.zeros(self.maximum_length)
+        trackers["pos_rew_fns"] = np.zeros(self.maximum_length)
+        trackers["pos_rew_tns"] = np.zeros(self.maximum_length)
+
+        trackers["zero_rew_tps"] = np.zeros(self.maximum_length)
+        trackers["zero_rew_fps"] = np.zeros(self.maximum_length)
+        trackers["zero_rew_fns"] = np.zeros(self.maximum_length)
+        trackers["zero_rew_tns"] = np.zeros(self.maximum_length)
+
+        trackers["done_tps"] = 0
+        trackers["done_fps"] = 0
+        trackers["done_fns"] = 0
+        trackers["done_tns"] = 0
 
     def do_one_epoch(self, memory,
                      plots=False,
@@ -629,6 +597,10 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
         f_t_pred = f_t_current
         # Loss 1: Global at time t, f5 patches at time t-1
+        done_preds = self.done_module(current_stack, a_i)
+        done_loss = F.cross_entropy(done_preds, done.long()[:, 0], reduction="none")
+        done_preds = done_preds.argmax(dim=-1)
+        self.update_done_trackers(done, done_preds, mode=mode)
         predictions = self.classifier(f_t_pred)
         f_t = f_t.flatten(1, 2).transpose(-1, -2)
         loss1 = self.nce_with_negs_from_same_loc(predictions, f_t).mean(-1)
@@ -648,8 +620,9 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
         self.optimizer.zero_grad()
         base_loss = (loss1 +
-                loss2 +
-                reward_loss*self.reward_loss_weight)
+                     loss2 +
+                     reward_loss*self.reward_loss_weight +
+                     done_loss.mean()*self.reward_loss_weight)
         if self.noncontrastive_global_loss:
             base_loss = base_loss + local_sd_loss*self.noncontrastive_loss_weight
         if self.online_agent_training:
@@ -664,6 +637,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             if self.online_agent_training:
                 self.agent.optimiser.step()
 
+        trackers["epoch_done_loss"] += done_loss.mean().detach().item()
         trackers["epoch_loss"] += loss.mean().detach().item()
         trackers["epoch_local_loss"] += loss1.mean().detach().item()
         trackers["epoch_rew_loss"] += reward_loss.mean().detach().item()
@@ -712,16 +686,22 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         if self.bilinear_global_loss:
             new_states = self.global_classifier(new_states)
         reward_predictions = self.reward_module(z, a)
+        nonterminal_predictions = self.done_module(z, a)
         if deterministic_rew:
             rewards = reward_predictions.argmax() - 1
+            nonterminals = nonterminal_predictions.argmax().float()
         elif mean_rew:
             weights = torch.arange(reward_predictions.shape[-1], device=z.device).float() - 1
             reward_predictions = torch.softmax(reward_predictions, -1)
             rewards = reward_predictions @ weights
+            weights = torch.arange(nonterminal_predictions.shape[-1], device=z.device).float()
+            nonterminal_predictions = torch.softmax(nonterminal_predictions, -1)
+            nonterminals = nonterminal_predictions @ weights
         else:
             rewards = Categorical(logits=reward_predictions).sample() - 1
+            nonterminals = Categorical(logits=nonterminal_predictions).sample()
 
-        return new_states, rewards
+        return new_states, rewards, nonterminals
 
     def log_results(self,
                     prefix="",
@@ -740,9 +720,11 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
         rew_accs, pos_recalls, pos_precs, zero_recalls, zero_precs, \
         rew_acc, pos_recall, pos_precision, zero_recall, zero_precision, \
-        cosine_sims, cosine_sim, sd_losses, sd_loss = self.summarize_trackers(prefix)
+        cosine_sims, cosine_sim, sd_losses, sd_loss,\
+        done_acc, done_recall, done_prec = self.summarize_trackers(prefix)
         local_loss = trackers["epoch_local_loss"] / iterations
         reward_loss = trackers["epoch_rew_loss"] / iterations
+        done_loss = trackers["epoch_done_loss"] / iterations
         global_loss = trackers["epoch_global_loss"] / iterations
         epoch_loss = trackers["epoch_loss"] / iterations
         online_dqn_loss = trackers["online_dqn_loss"] / iterations
@@ -750,24 +732,28 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         pred_norm = trackers["pred_representation_norm"] / iterations
         self.reset_trackers(prefix)
         print(
-            "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Reward Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Prediction Cosine Similarity: {:.3f}, Reward Accuracy: {:.3f}, DQN Loss: {:.3f} {}".format(
+            "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Rew. Loss: {:.3f}, Done Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Pred. cos. sim: {:.3f}, Rew. acc: {:.3f}, Done acc.: {:.3f}, DQN Loss: {:.3f} {}".format(
                 prefix.capitalize(),
                 self.epochs_till_now,
                 epoch_loss,
                 local_loss,
                 reward_loss,
+                done_loss,
                 global_loss,
                 sd_loss,
                 cosine_sim,
                 rew_acc,
+                done_acc,
                 online_dqn_loss,
                 prefix.capitalize()))
         print(
-            "Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}, Pred. Norm: {:.3f}, True Norm: {:.3f}".format(
+            "Pos. Rew. Recall: {:.3f}, Pos. Rew. Prec.: {:.3f}, Zero Rew. Recall: {:.3f}, Zero Rew. Prec.: {:.3f}, Done Recall: {:.3f}, Done Prec.: {:.3f}, Pred. Norm: {:.3f}, True Norm: {:.3f}".format(
                 pos_recall,
                 pos_precision,
                 zero_recall,
                 zero_precision,
+                done_recall,
+                done_prec,
                 pred_norm,
                 true_norm))
 
@@ -796,14 +782,19 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.wandb.log({prefix + ' loss': epoch_loss,
                         prefix + ' local loss': local_loss,
                         prefix + " Reward Loss": reward_loss,
+                        prefix + " Done Loss": done_loss,
                         prefix + ' global loss': global_loss,
+                        prefix + ' online DQN loss': online_dqn_loss,
                         prefix + " Reward Accuracy": rew_acc,
+                        prefix + " Done Accuracy": done_acc,
                         prefix + ' SD Loss': sd_loss,
                         prefix + ' SD Cosine Similarity': cosine_sim,
                         prefix + " Pos. Reward Recall": pos_recall,
                         prefix + " Zero Reward Recall": zero_recall,
                         prefix + " Pos. Reward Precision": pos_precision,
                         prefix + " Zero Reward Precision": zero_precision,
+                        prefix + " Done Recall": done_recall,
+                        prefix + " Done Precision": done_prec,
                         prefix + " Pred norm": pred_norm,
                         prefix + " True norm": true_norm,
                         'FM epoch': self.epochs_till_now})

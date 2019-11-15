@@ -90,11 +90,6 @@ def train_policy(args):
     while j * args.env_steps_per_epoch < args.total_steps:
         # Train encoder and forward model on real data
         if j != 0:
-            # if args.integrated_model:
-            #     if args.online_agent_training:
-            #         dqn.update_target_net()
-            #         encoder_trainer.update_target_net()
-            #     encoder_trainer.train(real_transitions)
             if not args.integrated_model:
                 forward_model.train(real_transitions)
 
@@ -108,15 +103,15 @@ def train_policy(args):
                 dqn.train()  # Set DQN (online network) back to training mode
 
             if done:
-                state, done = env.reset(), False
                 timestep = 0
                 if len(old_val_transitions) > 0:
                     for t in old_val_transitions:
-                        state, action, reward, terminal = t[1:]
-                        real_transitions.append(state,
+                        val_state, action, reward, terminal = t[1:]
+                        real_transitions.append(val_state,
                                                 action,
                                                 reward,
                                                 not terminal)
+                state, done = env.reset(), False
 
             # Take action in env acc. to current policy, and add to real_transitions
             real_z = encoder(state).view(-1)
@@ -138,6 +133,7 @@ def train_policy(args):
             all_rewards = []
             samples, actions, rewards = sample_real_transitions(transitions,
                                                                 args.num_model_rollouts)
+
             samples = samples.flatten(0, 1).to(args.device)
             H, N = args.history_length, args.num_model_rollouts
             with torch.no_grad():
@@ -157,7 +153,7 @@ def train_policy(args):
                 z = z.view(N, H, -1).view(N, -1)  # take a second look at this later
                 actions = dqn.act(z, batch=True)
                 with torch.no_grad():
-                    next_z, rewards = forward_model.predict(z, actions)
+                    next_z, rewards, nonterminal = forward_model.predict(z, actions)
 
                 actions, rewards = actions.tolist(), rewards.tolist()
                 state_deque.append(next_z)
@@ -202,7 +198,8 @@ def train_policy(args):
             val_buffer = ReplayMemory(args,
                                       args.val_buffer_capacity,
                                       priority_weight=0,
-                                      priority_exponent=0)
+                                      priority_exponent=0,
+                                      images=True)
             encoder_trainer.log_results("val")
 
             val_transitions = get_current_policy_episodes(args,
@@ -214,8 +211,8 @@ def train_policy(args):
             env_steps += len(val_transitions)
             val_losses = []
             for t in val_transitions:
-                state, action, reward, terminal = t[1:]
-                val_buffer.append(state, action, reward, not terminal, init_priority=1.)
+                val_state, action, reward, terminal = t[1:]
+                val_buffer.append(val_state, action, reward, not terminal, init_priority=1.)
             encoder_trainer.reset_es()
             print("Encoder stopping has reset.")
 
