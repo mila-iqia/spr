@@ -7,8 +7,8 @@ import scipy
 import os
 import wandb
 
-from src.agent import Agent
 from src.memory import ReplayMemory, blank_batch_trans
+from src.agent import Agent
 from src.encoders import NatureCNN, ImpalaCNN
 from src.envs import Env
 from src.eval import test
@@ -81,8 +81,10 @@ def pretrain(args):
         forward_model.args.epochs = args.epochs // 2
         encoder_trainer.epochs = args.epochs // 2
 
-    assess_returns(encoder_trainer, train_transitions, "Train")
+    assess_dones(encoder_trainer, val_transitions, "Val")
     assess_returns(encoder_trainer, val_transitions, "Val")
+    assess_dones(encoder_trainer, train_transitions, "Train")
+    assess_returns(encoder_trainer, train_transitions, "Train")
     visualize_temporal_prediction_accuracy(forward_model, val_memory, args)
 
     if args.game.replace("_", "").lower() not in atari_dict:
@@ -96,7 +98,6 @@ def pretrain(args):
                          batch_size=args.batch_size,
                          patience=args.patience,
                          wandb=wandb,
-                         # fully_supervised=(args.method == "supervised"),
                          save_dir=wandb.run.dir)
 
     probe.train(train_transitions, val_transitions,
@@ -118,61 +119,120 @@ def pretrain(args):
     plot_multistep_probing(wandb, test_probe_loss, test_probe_acc, test_probe_f1, "test")
 
 
+def assess_dones(model, transitions, mode="Val"):
+    with torch.no_grad():
+        dir = "./figs/{}/".format(wandb.run.name)
+        try:
+            os.makedirs(dir)
+        except FileExistsError:
+            # directory already exists
+            pass
+
+        episodes = []
+        current_ep = []
+        for transition in transitions:
+            current_ep.append(transition)
+            if not transition.nonterminal:
+                episodes.append(current_ep)
+                current_ep = []
+
+        pred_nonterminals = []
+        times_to_termination = []
+        for episode in episodes:
+            state_deque = deque(maxlen=4)
+            for i in range(4):
+                state_deque.append(blank_batch_trans.state)
+            for transition in episode:
+                state_deque.append(transition.state)
+                state = torch.stack(list(state_deque))
+                state = state.float()/255.
+                state = state.to(args.device)
+                z = model.encoder(state).view(1, -1)
+                action = torch.tensor(transition.action, device=args.device).long().unsqueeze(0)
+                _, _, nonterminal = model.predict(z, action, mean_rew=True)
+
+                pred_nonterminals.append(nonterminal.cpu().item())
+                times_to_termination.append(len(episode) - transition.timestep)
+
+        pred_dones = 1 - np.array(pred_nonterminals)
+        times_to_termination = np.array(times_to_termination)
+        slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(pred_dones, times_to_termination)
+
+        print("{} r = {}, p = {}".format(mode, r_value, p_value))
+        plt.figure()
+        plt.scatter(pred_dones, times_to_termination, alpha=0.5)
+        predictions = slope*pred_dones + intercept
+        plt.plot(pred_dones, predictions, c="red")
+        plt.xlabel("Predicted termination probability")
+        plt.ylabel("Timesteps remaining until termination")
+        plt.title(r"{} Termination r = {}, p = {}".format(mode, r_value, p_value))
+
+        plt.savefig(dir + "{}_dones.png".format(mode))
+        image = save_to_pil()
+        dict = {"{}_dones".format(mode):
+                    wandb.Image(image, caption="{} dones".format(mode)),
+                "{}_dones_r".format(mode): r_value}
+        wandb.log(dict)
+
+        plt.close()
+
+
 def assess_returns(model, transitions, mode="Val"):
-    dir = "./figs/{}/".format(wandb.run.name)
-    try:
-        os.makedirs(dir)
-    except FileExistsError:
-        # directory already exists
-        pass
+    with torch.no_grad():
+        dir = "./figs/{}/".format(wandb.run.name)
+        try:
+            os.makedirs(dir)
+        except FileExistsError:
+            # directory already exists
+            pass
 
-    episodes = []
-    current_ep = []
-    for transition in transitions:
-        current_ep.append(transition)
-        if not transition.nonterminal:
-            episodes.append(current_ep)
-            current_ep = []
+        episodes = []
+        current_ep = []
+        for transition in transitions:
+            current_ep.append(transition)
+            if not transition.nonterminal:
+                episodes.append(current_ep)
+                current_ep = []
 
-    pred_rewards = []
-    for episode in episodes:
-        ep_rew = 0
-        state_deque = deque(maxlen=4)
-        for i in range(4):
-            state_deque.append(blank_batch_trans.state)
-        for transition in episode:
-            state_deque.append(transition.state)
-            state = torch.stack(list(state_deque))
-            state = state.float()/255.
-            state = state.to(args.device)
-            z = model.encoder(state).view(1, -1)
-            action = torch.tensor(transition.action, device=args.device).long().unsqueeze(0)
-            _, reward = model.predict(z, action, mean_rew=True)
-            ep_rew += reward.item()
+        pred_rewards = []
+        for episode in episodes:
+            ep_rew = 0
+            state_deque = deque(maxlen=4)
+            for i in range(4):
+                state_deque.append(blank_batch_trans.state)
+            for transition in episode:
+                state_deque.append(transition.state)
+                state = torch.stack(list(state_deque))
+                state = state.float()/255.
+                state = state.to(args.device)
+                z = model.encoder(state).view(1, -1)
+                action = torch.tensor(transition.action, device=args.device).long().unsqueeze(0)
+                _, reward, _ = model.predict(z, action, mean_rew=True)
+                ep_rew += reward.item()
 
-        pred_rewards.append(ep_rew/len(episode))
+            pred_rewards.append(ep_rew/len(episode))
 
-    true_rewards = [np.mean([t.reward for t in episode]) for episode in episodes]
-    pred_rewards = np.array(pred_rewards)
-    slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(pred_rewards, y=true_rewards)
+        true_rewards = [np.mean([t.reward for t in episode]) for episode in episodes]
+        pred_rewards = np.array(pred_rewards)
+        slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(pred_rewards, y=true_rewards)
 
-    print("{} r = {}, p = {}".format(mode, r_value, p_value))
-    plt.figure()
-    plt.scatter(pred_rewards, true_rewards)
-    predictions = slope*pred_rewards + intercept
-    plt.plot(pred_rewards, predictions, c="red")
-    plt.xlabel("Predicted mean reward")
-    plt.ylabel("True mean reward")
-    plt.title(r"{} r = {}, p = {}".format(mode, r_value, p_value))
+        print("{} r = {}, p = {}".format(mode, r_value, p_value))
+        plt.figure()
+        plt.scatter(pred_rewards, true_rewards)
+        predictions = slope*pred_rewards + intercept
+        plt.plot(pred_rewards, predictions, c="red")
+        plt.xlabel("Predicted mean reward")
+        plt.ylabel("True mean reward")
+        plt.title(r"{} Reward r = {}, p = {}".format(mode, r_value, p_value))
 
-    plt.savefig(dir + "{}_rewards.png".format(mode))
-    image = save_to_pil()
-    dict = {"{}_rewards".format(mode):
-                wandb.Image(image, caption="{} returns".format(mode)),
-            "{}_rewards_r".format(mode): r_value}
-    wandb.log(dict)
+        plt.savefig(dir + "{}_rewards.png".format(mode))
+        image = save_to_pil()
+        dict = {"{}_rewards".format(mode):
+                    wandb.Image(image, caption="{} returns".format(mode)),
+                "{}_rewards_r".format(mode): r_value}
+        wandb.log(dict)
 
-    plt.close()
+        plt.close()
 
 
 
