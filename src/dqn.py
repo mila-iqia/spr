@@ -10,6 +10,7 @@ from torch.nn import functional as F
 class NoisyLinear(nn.Module):
     def __init__(self, in_features, out_features, std_init=0.5, device=None):
         super(NoisyLinear, self).__init__()
+        self.device = device
         self.in_features = in_features
         self.out_features = out_features
         self.std_init = std_init
@@ -21,7 +22,6 @@ class NoisyLinear(nn.Module):
         self.register_buffer('bias_epsilon', torch.empty(out_features))
         self.reset_parameters()
         self.reset_noise()
-        self.device = device
 
     def reset_parameters(self):
         mu_range = 1 / math.sqrt(self.in_features)
