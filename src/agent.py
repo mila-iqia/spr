@@ -36,7 +36,6 @@ class Agent():
 
         self.target_net = DQN(args, self.action_space).to(device=args.device)
         self.update_target_net()
-        self.update_target_net()
         self.target_net.train()
         for param in self.target_net.parameters():
             param.requires_grad = False
