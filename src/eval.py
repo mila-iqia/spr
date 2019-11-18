@@ -32,7 +32,7 @@ def test(args, T, dqn, model, encoder, metrics, results_dir, evaluate=False):
 
             state = encoder(state).view(-1)
             action = dqn.act_with_planner(state, model,
-                                          length=args.planning_horizon,
+                                          length=args.test_planning_horizon,
                                           shots=args.planning_shots)  # Choose an action ε-greedily
             state, reward, done = env.step(action)  # Step
             reward_sum += reward

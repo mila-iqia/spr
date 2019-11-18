@@ -109,6 +109,7 @@ def get_argparser():
                         help='How often to update the validation set.')
     parser.add_argument("--model-updates-per-step", type=int, default=20)
     parser.add_argument("--planning-horizon", type=int, default=0)
+    parser.add_argument("--test-planning-horizon", type=int, default=20)
     parser.add_argument("--planning-shots", type=int, default=100)
     parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
