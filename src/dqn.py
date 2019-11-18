@@ -31,7 +31,7 @@ class NoisyLinear(nn.Module):
         self.bias_sigma.data.fill_(self.std_init / math.sqrt(self.out_features))
 
     def _scale_noise(self, size):
-        x = torch.randn(size)  # Creating this tensor on the GPU leads to CPU out-of-memory-error. Why?
+        x = torch.randn(size, device=self.device).detach()  # Creating this tensor on the GPU leads to CPU out-of-memory-error. Why?
         return x.sign().mul_(x.abs().sqrt_())
 
     def reset_noise(self):
