@@ -7,14 +7,21 @@ from plotly.graph_objs.scatter import Line
 import torch
 
 from src.envs import Env
-
+import wandb
 
 # Test DQN
+from src.video_recorder import VideoRecorder
+
+
 def test(args, T, dqn, model, encoder, metrics, results_dir, evaluate=False):
     env = Env(args)
     env.eval()
     metrics['steps'].append(T)
     T_rewards, T_Qs = [], []
+
+    if args.video:
+        video_recorder = VideoRecorder(env, path=os.path.join(wandb.run.dir, args.game + '_' + str(T) + '.mp4'))
+        video_recorder.capture_frame()
 
     # Test performance over several episodes
     done = True
@@ -32,9 +39,14 @@ def test(args, T, dqn, model, encoder, metrics, results_dir, evaluate=False):
             if args.render:
                 env.render()
 
+            if args.video:
+                video_recorder.capture_frame()
+
             if done:
                 T_rewards.append(reward_sum)
                 break
+
+    video_recorder.close()
     env.close()
 
     # # Test Q-values over validation memory

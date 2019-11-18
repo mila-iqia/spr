@@ -80,11 +80,18 @@ def train_policy(args):
         encoder_trainer.epochs = args.epochs // 2
 
     j = 1 if args.integrated_model else 0
+
     dqn.train()
     results_dir = os.path.join('results', args.id)
     metrics = {'steps': [], 'rewards': [], 'Qs': [], 'best_avg_reward': -float('inf')}
 
     env_steps = args.initial_exp_steps + len(val_transitions)
+    dqn.eval()  # Set DQN (online network) to evaluation mode
+    avg_reward = test(args, env_steps, dqn, encoder_trainer, encoder, metrics, results_dir,
+                      evaluate=True)  # Test
+    # print("Evaluation at {}: Reward {}".format(env_steps, avg_reward))
+    log(env_steps, avg_reward)
+    dqn.train()  # Set DQN (online network) back to training mode
     timestep = 0
     state = current_state
     while j * args.env_steps_per_epoch < args.total_steps:
