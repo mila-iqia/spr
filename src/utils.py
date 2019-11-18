@@ -183,6 +183,7 @@ def get_argparser():
                         help='Number of transitions to use for validating Q')
     parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
     parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
+    parser.add_argument('--video', action='store_true', help='Record video (testing only)')
 
     return parser
 
