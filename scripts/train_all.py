@@ -166,7 +166,7 @@ def train_policy(args):
                 z = z.view(N, H, -1).view(N, -1)  # take a second look at this later
                 actions = dqn.act(z, batch=True)
                 with torch.no_grad():
-                    next_z, rewards, nonterminal = forward_model.predict(z, actions, mean_rew=args.mean_rew)
+                    next_z, rewards, nonterminal = forward_model.predict(z, actions, mean_rew=True)
 
                 actions, rewards = actions.tolist(), rewards.tolist()
                 state_deque.append(next_z)
