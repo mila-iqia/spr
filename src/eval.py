@@ -25,7 +25,7 @@ def test(args, T, dqn, model, encoder, metrics, results_dir, evaluate=False):
 
     # Test performance over several episodes
     done = True
-    for _ in range(args.evaluation_episodes):
+    for i in range(args.evaluation_episodes):
         while True:
             if done:
                 state, reward_sum, done = env.reset(), 0, False
@@ -39,15 +39,15 @@ def test(args, T, dqn, model, encoder, metrics, results_dir, evaluate=False):
             if args.render:
                 env.render()
 
-            if args.video:
+            if args.video and i == 0: # Only record the first episode
                 video_recorder.capture_frame()
 
             if done:
                 T_rewards.append(reward_sum)
                 break
 
-    if args.video:
-        video_recorder.close()
+        if args.video and i == 0:
+            video_recorder.close()
     env.close()
 
     # # Test Q-values over validation memory
