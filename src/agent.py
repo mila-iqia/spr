@@ -44,6 +44,7 @@ class Agent():
 
         self.q_losses = []
         self.weighted_q_losses = []
+        self.args = args
 
     def log(self, env_steps):
         q_loss = np.mean(self.q_losses)
@@ -102,7 +103,7 @@ class Agent():
         current_state = state.expand(self.action_space*shots, -1)
         continuation_probs = torch.ones_like(all_runs)
         for i in range(length):
-            pred_state, reward, nonterminal = planner.predict(current_state, actions, mean_rew=True)
+            pred_state, reward, nonterminal = planner.predict(current_state, actions, mean_rew=self.args.mean_rew)
             current_state = current_state[:, current_state.shape[-1]//4:]
             current_state = torch.cat([current_state, pred_state], -1)
             all_runs += reward*continuation_probs*self.discount**i

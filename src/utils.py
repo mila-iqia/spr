@@ -110,8 +110,8 @@ def get_argparser():
     parser.add_argument('--check-val-every', type=int, default=100,
                         help='How often to update the validation set.')
     parser.add_argument("--model-updates-per-step", type=int, default=20)
-    parser.add_argument("--train-planning-horizon", type=int, default=0)
-    parser.add_argument("--test-planning-horizon", type=int, default=0)
+    parser.add_argument("--planning-horizon", type=int, default=0)
+    parser.add_argument("--test-planning-horizon", type=int, default=20)
     parser.add_argument("--planning-shots", type=int, default=100)
     parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--end-with-relu", action='store_true', default=False)
@@ -186,6 +186,7 @@ def get_argparser():
                         help='Number of transitions to use for validating Q')
     parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
     parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
+    parser.add_argument('--video', action='store_true', help='Record video (testing only)')
 
     return parser
 
