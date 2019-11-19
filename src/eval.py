@@ -46,7 +46,8 @@ def test(args, T, dqn, model, encoder, metrics, results_dir, evaluate=False):
                 T_rewards.append(reward_sum)
                 break
 
-    video_recorder.close()
+    if args.video:
+        video_recorder.close()
     env.close()
 
     # # Test Q-values over validation memory
