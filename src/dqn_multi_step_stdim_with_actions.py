@@ -698,8 +698,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             nonterminal_predictions = torch.softmax(nonterminal_predictions, -1)
             nonterminals = nonterminal_predictions @ weights
         else:
-            rewards = Categorical(logits=reward_predictions).sample() - 1
-            nonterminals = Categorical(logits=nonterminal_predictions).sample()
+            rewards = Categorical(logits=reward_predictions).sample().double() - 1
+            nonterminals = Categorical(logits=nonterminal_predictions).sample().double()
 
         return new_states, rewards, nonterminals
 
