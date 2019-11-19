@@ -33,7 +33,7 @@ search:
       - export LC_ALL=C.UTF-8
       - export LANG=C.UTF-8
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
-      - python -m scripts.pretrain --initial_exp_steps 50000 --pretrain-epochs 100 --max-jump-length 1 --model-priority-weight {mpw} --model-priority-exponent {mpe} {rcw} --game {game} --dropout-prob {dropout} --val-episodes 200 --wandb-proj pretraining
+      - python -m scripts.pretrain --initial_exp_steps 50000 --pretrain-epochs 100 --max-jump-length 1 --model-priority-weight {mpw} --model-priority-exponent {mpe} {rcw} --game {game} --dropout-prob {dropout} --val-episodes 200 --wandb-proj pretraining --encoder-type {encoder} {lll}
   type: grid
   max_trials: 200
   params:
@@ -42,13 +42,19 @@ search:
       values: ['alien', "boxing", 'seaquest']
     - name: dropout
       spec: discrete
-      values: [0, 0.2]
+      values: [0]
     - name: mpw
       spec: discrete
-      values: [0, 0.5, 1]
+      values: [ 1]
     - name: mpe
       spec: discrete
-      values: [0., 1.]
+      values: [1.]
     - name: rcw
       spec: discrete
       values: ["--no-class-weighting", ""]
+    - name: encoder
+      spec: discrete
+      values: ["Nature", "Impala"]
+    - name: lll
+      spec: discrete
+      values: ["--local-loss", ""]
