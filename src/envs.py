@@ -89,12 +89,17 @@ class Env():
     def action_space(self):
         return len(self.actions)
 
-    def render(self):
+    def render(self, mode='rgb_array'):
+        if mode == 'rgb_array':
+            return self._get_image()
         cv2.imshow('screen', self.ale.getScreenRGB()[:, :, ::-1])
         cv2.waitKey(1)
 
     def close(self):
         cv2.destroyAllWindows()
+
+    def _get_image(self):
+        return self.ale.getScreenRGB2()
 
 
 class AARIEnv(Env):

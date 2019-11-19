@@ -80,11 +80,18 @@ def train_policy(args):
         encoder_trainer.epochs = args.epochs // 2
 
     j = 1 if args.integrated_model else 0
+
     dqn.train()
     results_dir = os.path.join('results', args.id)
     metrics = {'steps': [], 'rewards': [], 'Qs': [], 'best_avg_reward': -float('inf')}
 
     env_steps = args.initial_exp_steps + len(val_transitions)
+    dqn.eval()  # Set DQN (online network) to evaluation mode
+    avg_reward = test(args, env_steps, dqn, encoder_trainer, encoder, metrics, results_dir,
+                      evaluate=True)  # Test
+    # print("Evaluation at {}: Reward {}".format(env_steps, avg_reward))
+    log(env_steps, avg_reward)
+    dqn.train()  # Set DQN (online network) back to training mode
     timestep = 0
     state = current_state
     while j * args.env_steps_per_epoch < args.total_steps:
@@ -118,7 +125,7 @@ def train_policy(args):
             real_z = encoder(state).view(-1)
             action = dqn.act_with_planner(real_z,
                                           encoder_trainer,
-                                          length=args.train_planning_horizon,
+                                          length=args.planning_horizon,
                                           shots=args.planning_shots,
                                           epsilon=0.)
             next_state, reward, done = env.step(action)
@@ -162,7 +169,7 @@ def train_policy(args):
                 z = z.view(N, H, -1).view(N, -1)  # take a second look at this later
                 actions = dqn.act(z, batch=True)
                 with torch.no_grad():
-                    next_z, rewards, nonterminal = forward_model.predict(z, actions, mean_rew=args.mean_rew)
+                    next_z, rewards, nonterminal = forward_model.predict(z, actions, mean_rew=True)
 
                 actions, rewards = actions.tolist(), rewards.tolist()
                 state_deque.append(next_z)
