@@ -48,9 +48,12 @@ class ResidualBlock(nn.Module):
 class ImpalaCNN(nn.Module):
     def __init__(self, input_channels, args):
         super(ImpalaCNN, self).__init__()
+        self.args = args
         self.hidden_size = args.feature_size
         self.depths = [16, 32, 32, 32]
-        self.downsample = not args.no_downsample
+        self.f5_size = self.depths[-1]
+        self.downsample = True #not args.no_downsample
+        self.end_with_relu = args.end_with_relu
         self.layer1 = self._make_layer(input_channels, self.depths[0])
         self.layer2 = self._make_layer(self.depths[0], self.depths[1])
         self.layer3 = self._make_layer(self.depths[1], self.depths[2])
@@ -73,13 +76,37 @@ class ImpalaCNN(nn.Module):
             ResidualBlock(depth, depth)
         )
 
-    def forward(self, inputs):
+    # def forward(self, inputs):
+    #     out = inputs
+    #     if self.downsample:
+    #         out = self.layer3(self.layer2(self.layer1(out)))
+    #     else:
+    #         out = self.layer4(self.layer3(self.layer2(self.layer1(out))))
+    #     return F.relu(self.final_linear(self.flatten(out)))
+
+    def from_f5_only(self, f5_inputs):
+        out = self.final_linear(self.flatten(f5_inputs))
+        if self.end_with_relu:
+            assert self.args.method != "vae", "can't end with relu and use vae!"
+            out = F.relu(out)
+        return out
+
+    def forward(self, inputs, fmaps=False):
         out = inputs
         if self.downsample:
-            out = self.layer3(self.layer2(self.layer1(out)))
+            fmap = self.layer3(self.layer2(self.layer1(out)))
         else:
-            out = self.layer4(self.layer3(self.layer2(self.layer1(out))))
-        return F.relu(self.final_linear(self.flatten(out)))
+            fmap = self.layer4(self.layer3(self.layer2(self.layer1(out))))
+        out = self.final_linear(self.flatten(fmap))
+        if self.end_with_relu:
+            assert self.args.method != "vae", "can't end with relu and use vae!"
+            out = F.relu(out)
+        if fmaps:
+            return {
+                'f5': fmap.permute(0, 2, 3, 1),
+                'out': out
+            }
+        return out
 
 
 class NatureCNN(nn.Module):
@@ -90,6 +117,7 @@ class NatureCNN(nn.Module):
         self.input_channels = input_channels
         self.end_with_relu = args.end_with_relu
         self.dropout = args.dropout_prob
+        self.f5_size = 64
         self.args = args
         init_ = lambda m: init(m,
                                nn.init.orthogonal_,
@@ -112,6 +140,14 @@ class NatureCNN(nn.Module):
         )
 
         self.train()
+
+    def from_f5_only(self, f5_inputs):
+        out = self.main[6:](f5_inputs)
+        if self.end_with_relu:
+            assert self.args.method != "vae", "can't end with relu and use vae!"
+            out = F.relu(out)
+
+        return out
 
     def forward(self, inputs, fmaps=False):
         f5 = self.main[:6](inputs)

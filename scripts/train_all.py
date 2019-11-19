@@ -116,8 +116,11 @@ def train_policy(args):
 
             # Take action in env acc. to current policy, and add to real_transitions
             real_z = encoder(state).view(-1)
-            action = dqn.act_with_planner(real_z, encoder_trainer, length=args.planning_horizon,
-                                          shots=args.planning_shots, epsilon=0.)
+            action = dqn.act_with_planner(real_z,
+                                          encoder_trainer,
+                                          length=args.train_planning_horizon,
+                                          shots=args.planning_shots,
+                                          epsilon=0.)
             next_state, reward, done = env.step(action)
             if args.reward_clip > 0:
                 reward = max(min(reward, args.reward_clip), -args.reward_clip)  # Clip rewards

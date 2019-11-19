@@ -63,6 +63,8 @@ def get_argparser():
                         default=False, help='Use a framestack in the infomax (integrated model only).')
     parser.add_argument('--global-loss', action="store_true", default=False,
                         help='Use a global L2 loss in addition to the standard local-global loss.')
+    parser.add_argument('--local-loss', action="store_true", default=False,
+                        help='Use a local-local loss in addition to global-global and global-local.')
     parser.add_argument('--nofilm', action="store_false", default=True, dest="film",
                         help='Use FILM instead of an outer product to integrate actions')
     parser.add_argument('--nolayernorm', action="store_false", default=True,
@@ -108,7 +110,8 @@ def get_argparser():
     parser.add_argument('--check-val-every', type=int, default=100,
                         help='How often to update the validation set.')
     parser.add_argument("--model-updates-per-step", type=int, default=20)
-    parser.add_argument("--planning-horizon", type=int, default=0)
+    parser.add_argument("--train-planning-horizon", type=int, default=0)
+    parser.add_argument("--test-planning-horizon", type=int, default=0)
     parser.add_argument("--planning-shots", type=int, default=100)
     parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--end-with-relu", action='store_true', default=False)

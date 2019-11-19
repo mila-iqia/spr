@@ -100,7 +100,9 @@ class ReplayMemory:
             init_priority = self.transitions.max
         self.transitions.append(Transition(timestep, state, action, reward, 1 - terminal),
                                 init_priority)  # Store new transition with maximum priority
-        self.t = 0 if terminal == 1 else timestep + 1  # Start new episodes with t = 0
+        self.t = 0 if terminal is True else timestep + 1  # Start new episodes with t = 0
+        # if terminal > 0:
+        #     print(terminal, terminal is True)
 
     # Returns a transition with blank states where appropriate
     def _get_transition(self, idx, n=None):
@@ -162,10 +164,6 @@ class ReplayMemory:
         # Calculate truncated n-step discounted return R^n = Σ_k=0->n-1 (γ^k)R_t+k+1 (note that invalid nth next states have reward 0)
         R = torch.tensor([sum(self.discount ** i * continuation_probs[i] * transition[self.history + i - 1].reward for i in range(self.n))],
                          dtype=torch.float32, device=self.device)
-        # Mask for non-terminal nth next states
-        # nonterminal = torch.tensor([transition[self.history + self.n - 1].nonterminal], dtype=torch.float32,
-        #                            device=self.device)
-
         nonterminal = continuation_probs[-1:]
 
         return prob, idx, tree_idx, state, action, R, next_state, nonterminal
