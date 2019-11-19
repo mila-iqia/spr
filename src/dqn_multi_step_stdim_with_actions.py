@@ -35,16 +35,53 @@ class FILM(nn.Module):
         super().__init__()
         self.input_dim = input_dim
         self.cond_dim = cond_dim
-        self.layernorm = nn.LayerNorm(input_dim, elementwise_affine=False) \
-            if layernorm else nn.Identity()
         self.conditioning = nn.Linear(cond_dim, input_dim*2)
+        self.layernorm = layernorm
 
     def forward(self, input, cond):
         conditioning = self.conditioning(cond)
         gamma = conditioning[..., :self.input_dim]
         beta = conditioning[..., self.input_dim:]
+        if self.layernorm:
+            input = F.layer_norm(input, input.shape[1:])
 
-        return self.layernorm(input)*gamma + beta
+        while len(input.shape) > len(beta.shape):
+            beta = beta.unsqueeze(-1)
+            gamma = gamma.unsqueeze(-1)
+
+        return input*gamma + beta
+
+
+class ConvolutionalPredictionModule(nn.Module):
+    def __init__(self, state_dim, num_actions, layernorm=False, layers=3,
+                 h_size=-1):
+        super().__init__()
+        if h_size <= 0:
+            h_size = 4*state_dim
+        self.convert_actions = lambda a: F.one_hot(a, num_classes=num_actions)
+        self.films = nn.ModuleList()
+        self.films.append(FILM(state_dim*4, num_actions, layernorm=layernorm))
+        for layer in range(layers - 1):
+            self.films.append(FILM(h_size, num_actions, layernorm=layernorm))
+
+        network_layers = [nn.Conv2d(4*state_dim, h_size, kernel_size=3,
+                                    padding=1),
+                          nn.ReLU()]
+        for i in range(layers - 2):
+            network_layers.append(nn.Conv2d(h_size, h_size, kernel_size=3,
+                                            padding=1))
+            network_layers.append(nn.ReLU())
+        network_layers.append(nn.Conv2d(h_size, state_dim, kernel_size=3,
+                                        padding=1))
+        self.network = nn.Sequential(*network_layers)
+
+    def forward(self, states, actions):
+        actions = self.convert_actions(actions).float()
+        current = states
+        for i, film in enumerate(self.films):
+            current = film(current, actions)
+            current = self.network[i*2:i*2+2](current)
+        return current
 
 
 class FILMPredictionModule(nn.Module):
@@ -172,6 +209,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.epochs = config['epochs']
         self.batch_size = config['batch_size']
         self.global_loss = config['global_loss']
+        self.local_loss = config['local_loss']
         self.bilinear_global_loss = config['bilinear_global_loss']
         self.noncontrastive_global_loss = config['noncontrastive_global_loss']
         self.noncontrastive_loss_weight = config['noncontrastive_loss_weight']
@@ -180,7 +218,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.online_agent_training = config["online_agent_training"]
 
         self.device = device
-        self.classifier = nn.Linear(self.encoder.hidden_size, 64).to(device)
+        self.classifier = nn.Linear(self.encoder.hidden_size, self.encoder.f5_size).to(device)
         self.global_classifier = nn.Linear(self.encoder.hidden_size,
                                            self.encoder.hidden_size).to(device)
         self.params = list(self.encoder.parameters())
@@ -190,6 +228,21 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.target_encoder = copy.deepcopy(self.encoder)
         self.target_update = self.config["target_update"]
         self.steps = 0
+
+        if self.local_loss:
+            self.local_prediction_module = ConvolutionalPredictionModule(
+                self.encoder.f5_size,
+                config["num_actions"],
+                layernorm=config["layernorm"],
+                layers=config["prediction_layers"],
+                h_size=config["prediction_hidden"]
+            )
+            self.local_classifier = nn.Linear(self.encoder.f5_size,
+                                              self.encoder.f5_size).to(device)
+            self.params += list(self.local_prediction_module.parameters())
+            self.params += list(self.local_classifier.parameters())
+            self.local_prediction_module.to(device)
+            self.local_classifier.to(device)
 
         if config["film"]:
             self.prediction_module = FILMPredictionModule(self.encoder.hidden_size,
@@ -273,6 +326,48 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
     def update_target_net(self):
         self.steps = 0
         self.target_encoder.load_state_dict(self.encoder.state_dict())
+
+    def nce_per_location(self, f_x1, f_x2):
+        '''
+        Compute InfoNCE cost with source features in f_x1 and target features in
+        f_x2. We assume one source feature vector per location per item in batch
+        and one target feature vector per location per item in batch. There are
+        n_batch items, n_locs locations, and n_rkhs dimensions per vector.
+        -- note: we can predict x1->x2 and x2->x1 in parallel "for free"
+
+        For the positive nce pair (f_x1[i, :, l], f_x2[i, :, l]), which comes from
+        batch item i at spatial location l, we will use the target feature vectors
+        f_x2[j, :, l] as negative samples, for all j != i.
+
+        Input:
+          f_x1 : (n_batch, n_rkhs, n_locs)  -- n_locs source vectors per item
+          f_x2 : (n_batch, n_rkhs, n_locs)  -- n_locs target vectors per item
+        Output:
+          loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
+        '''
+        n_batch = f_x1.size(0)
+        n_rkhs = f_x1.size(1)
+        n_locs = f_x1.size(2)
+        # reshaping for big matrix multiply
+        f_x1 = f_x1.permute(2, 0, 1)  # (n_locs, n_batch, n_rkhs)
+        f_x2 = f_x2.permute(2, 1, 0)  # (n_locs, n_rkhs, n_batch)
+        # compute dot(f_glb[i, :, l], f_lcl[j, :, l]) for all i, j, l
+        # -- after matmul: raw_scores[l, i, j] = dot(f_x1[i, :, l], f_x2[j, :, l])
+        raw_scores = torch.matmul(f_x1, f_x2)  # (n_locs, n_batch, n_batch)
+        # We get NCE log softmax by normalizing over dim 1 or 2 of raw_scores...
+        # -- normalizing over dim 1 gives scores for predicting x2->x1
+        # -- normalizing over dim 2 gives scores for predicting x1->x2
+        lsmax_x1_to_x2 = -F.log_softmax(raw_scores, dim=2)  # (n_locs, n_batch, n_batch)
+        lsmax_x2_to_x1 = -F.log_softmax(raw_scores, dim=1)  # (n_locs, n_batch, n_batch)
+        # make a mask for picking out the NCE scores for positive pairs
+        pos_mask = torch.eye(n_batch, dtype=f_x1.dtype, device=f_x1.device)
+        pos_mask = pos_mask.unsqueeze(dim=0)
+        # use masked sums to select NCE scores for positive pairs
+        loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=2)  # (n_locs, n_batch)
+        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)  # (n_locs, n_batch)
+        # combine forwards/backwards prediction costs (or whatever)
+        loss_nce = 0.5 * (loss_nce_x1_to_x2 + loss_nce_x2_to_x1)
+        return loss_nce
 
     def nce_with_negs_from_same_loc(self, f_glb, f_lcl):
         '''
@@ -423,6 +518,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         trackers["epoch_rew_loss"] = 0
         trackers["epoch_done_loss"] = 0
         trackers["epoch_global_loss"] = 0
+        trackers["epoch_local_local_loss"] = 0
         trackers["rew_acc"] = 0
         trackers["epoch_loss"] = 0
         trackers["online_dqn_loss"] = 0
@@ -517,6 +613,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         f_t_target_stack = self.target_encoder(x_t, fmaps=False).view(init_shape[0], -1)
         f_t = f_t_maps['f5']
         f_t = f_t.unsqueeze(1).view(init_shape[0], 4, *f_t.shape[1:])[:, -1]
+        f_t = f_t.flatten(1, 2).transpose(-1, -2)
         f_t_stack = f_t_maps["out"].view(init_shape[0], 4, -1)
         f_t_global = f_t_stack[:, -1]
 
@@ -595,6 +692,21 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
                 self.update_cos_sim_trackers(i, cos_sim, step_sd_loss.mean(), mode)
 
+        if self.local_loss:
+            f5_stack = f_t_prev_maps['f5'].unsqueeze(1).reshape(init_shape[0], 4, *f_t_prev_maps['f5'].shape[1:]).permute(0, 1, 4, 2, 3)
+            f5_current = f5_stack[:, -1]
+            f5_stack = f5_stack.flatten(1, 2)
+            for i in range(actions.shape[1]):
+                a_i = actions[:, i]
+                f5_current = self.local_prediction_module(f5_stack, a_i) + f5_current
+
+            f5_current = f5_current.flatten(2, 3).permute(0, 2, 1)
+            predictions = self.local_classifier(f5_current).permute(0, 2, 1)
+            local_local_loss = self.nce_per_location(predictions, f_t).mean(0)
+            trackers["epoch_local_local_loss"] += local_local_loss.mean().detach().item()
+        else:
+            local_local_loss = 0
+
         f_t_pred = f_t_current
         # Loss 1: Global at time t, f5 patches at time t-1
         done_preds = self.done_module(current_stack, a_i)
@@ -602,7 +714,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         done_preds = done_preds.argmax(dim=-1)
         self.update_done_trackers(done, done_preds, mode=mode)
         predictions = self.classifier(f_t_pred)
-        f_t = f_t.flatten(1, 2).transpose(-1, -2)
         loss1 = self.nce_with_negs_from_same_loc(predictions, f_t).mean(-1)
 
         if self.global_loss or self.bilinear_global_loss:
@@ -621,6 +732,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         self.optimizer.zero_grad()
         base_loss = (loss1 +
                      loss2 +
+                     local_local_loss +
                      reward_loss*self.reward_loss_weight +
                      done_loss.mean()*self.reward_loss_weight)
         if self.noncontrastive_global_loss:
@@ -723,6 +835,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         cosine_sims, cosine_sim, sd_losses, sd_loss,\
         done_acc, done_recall, done_prec = self.summarize_trackers(prefix)
         local_loss = trackers["epoch_local_loss"] / iterations
+        local_local_loss = trackers["epoch_local_local_loss"] / iterations
         reward_loss = trackers["epoch_rew_loss"] / iterations
         done_loss = trackers["epoch_done_loss"] / iterations
         global_loss = trackers["epoch_global_loss"] / iterations
@@ -732,11 +845,12 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         pred_norm = trackers["pred_representation_norm"] / iterations
         self.reset_trackers(prefix)
         print(
-            "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Rew. Loss: {:.3f}, Done Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Pred. cos. sim: {:.3f}, Rew. acc: {:.3f}, Done acc.: {:.3f}, DQN Loss: {:.3f} {}".format(
+            "{} Epoch: {}, Epoch Loss: {:.3f}, Global-Local Loss: {:.3f}, Local-Local Loss: {:.3f}, Rew. Loss: {:.3f}, Done Loss: {:.3f}, Global Loss: {:.3f}, Dynamics Error: {:.3f}, Pred. cos. sim: {:.3f}, Rew. acc: {:.3f}, Done acc.: {:.3f}, DQN Loss: {:.3f} {}".format(
                 prefix.capitalize(),
                 self.epochs_till_now,
                 epoch_loss,
                 local_loss,
+                local_local_loss,
                 reward_loss,
                 done_loss,
                 global_loss,
@@ -781,6 +895,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
 
         self.wandb.log({prefix + ' loss': epoch_loss,
                         prefix + ' local loss': local_loss,
+                        prefix + ' local-local loss': local_local_loss,
                         prefix + " Reward Loss": reward_loss,
                         prefix + " Done Loss": done_loss,
                         prefix + ' global loss': global_loss,
