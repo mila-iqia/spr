@@ -666,9 +666,11 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             reward_preds = reward_preds.argmax(dim=-1)
             self.update_reward_trackers(i, r_i.detach(), reward_preds.detach(), mode)
 
+            f_t_old = f_t_current
             f_t_current = self.prediction_module(current_stack, a_i) + f_t_current
             if self.bilinear_global_loss:
                 f_t_current = self.global_classifier(f_t_current)
+            # f_t_current = f_t_current*torch.norm(f_t_old, -1, keepdim=True)/torch.norm(f_t_current, -1, keepdim=True)
             current_stack = torch.cat([current_stack[:, self.encoder.hidden_size:],
                                        f_t_current], -1)
 
@@ -699,6 +701,7 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
             for i in range(actions.shape[1]):
                 a_i = actions[:, i]
                 f5_current = self.local_prediction_module(f5_stack, a_i) + f5_current
+                f5_stack = torch.cat([f5_stack[:, f5_current.shape[1]:], f5_current], 1)
 
             f5_current = f5_current.flatten(2, 3).permute(0, 2, 1)
             predictions = self.local_classifier(f5_current).permute(0, 2, 1)
@@ -812,7 +815,6 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
         else:
             rewards = Categorical(logits=reward_predictions).sample().float() - 1
             nonterminals = Categorical(logits=nonterminal_predictions).sample().float()
-
         return new_states, rewards, nonterminals
 
     def log_results(self,
@@ -871,8 +873,8 @@ class MultiStepActionInfoNCESpatioTemporalTrainer(Trainer):
                 pred_norm,
                 true_norm))
 
-        for i in range(self.maximum_length - 1):
-            jump = i + 1
+        for i in range(self.maximum_length):
+            jump = i
             if verbose_print:
                 print("At {} jumps: Pos. Recall: {:.3f}, Pos. Prec.: {:.3f}, Zero Recall: {:.3f}, Zero Prec.: {:.3f}, Rew. Acc.: {:.3f}, Cosine sim: {:.3f}, L2 error: {:.3f}".format(
                     jump,

@@ -167,7 +167,7 @@ def train_policy(args):
             for k in range(args.rollout_length):
                 z = torch.stack(list(state_deque))
                 z = z.view(N, H, -1).view(N, -1)  # take a second look at this later
-                actions = dqn.act(z, batch=True)
+                actions = dqn.act_e_greedy(z, epsilon=args.counterfactual_eps, batch=True)
                 with torch.no_grad():
                     next_z, rewards, nonterminal = forward_model.predict(z, actions, mean_rew=True)
 

@@ -72,8 +72,14 @@ class Agent():
             return (self.online_net(state.unsqueeze(0)) * self.support).sum(2).argmax(1).item()
 
     # Acts with an ε-greedy policy (used for evaluation only)
-    def act_e_greedy(self, state, epsilon=0.001):  # High ε can reduce evaluation scores drastically
-        return np.random.randint(0, self.action_space) if np.random.random() < epsilon else self.act(state)
+    def act_e_greedy(self, state, epsilon=0.001, batch=False):  # High ε can reduce evaluation scores drastically
+        if batch:
+            actions = self.act(state, batch)
+            random_actions = np.random.randint(0, self.action_space, size=state.shape[0])
+            use_random = np.random.random(size=state[0]) < epsilon
+            return np.where(use_random, random_actions, actions)
+        else:
+            return np.random.randint(0, self.action_space) if np.random.random() < epsilon else self.act(state, batch)
 
     def act_with_planner(self, state, planner, length=2, shots=100, epsilon=0.001):
         """
