@@ -1,8 +1,12 @@
+import collections
+
 from torch import nn
 import torch
 from torch.nn import functional as F
 from src.mcts_memory import ReplayMemory
 import numpy as np
+
+NetworkOutput = collections.namedtuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 
 class Worker(object):
     """
@@ -368,12 +372,16 @@ class MCTSModel(nn.Module):
     def encode(self, images, actions):
         return self.encoder(images, actions)
 
+    def initial_inference(self, obs):
+        policy_logits = self.policy_model(obs)
+        return NetworkOutput(None, 0, policy_logits, 0)
+
     def forward(self, state, action):
         next_state, reward = self.dynamics_model(state, action)
         policy = self.policy_model(next_state)
         value = self.value_model(next_state)
 
-        return next_state, reward, policy, value
+        return NetworkOutput(next_state, reward, policy, value)
 
 
 class TransitionModel(nn.Module):
