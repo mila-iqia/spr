@@ -129,12 +129,13 @@ class MCTS():
             (child.visit_count, action) for action, child in node.children.items()
         ]
         visit_counts = torch.tensor([visit_counts[0] for _ in visit_counts])
-        t = self.visit_softmax_temperature(training_steps=self.network.training_steps)
+        t = self.visit_softmax_temperature()
         m = Categorical(logits=F.log_softmax(visit_counts / t))
         action = m.sample()
         return action
 
-    def visit_softmax_temperature(self, training_steps):
+    def visit_softmax_temperature(self, training_steps=0):
+        # TODO: Change the temperature schedule
         if training_steps < 500e3:
             return 1.0
         elif training_steps < 750e3:
