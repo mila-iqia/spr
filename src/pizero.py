@@ -117,7 +117,7 @@ class MCTS():
         return prior_score + value_score
 
     def backpropagate(self, search_path: List[Node], value: float):
-        for node in search_path:
+        for node in reversed(search_path):
             node.value_sum += value
             node.visit_count += 1
             self.min_max_stats.update(node.value())
