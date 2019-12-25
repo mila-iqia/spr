@@ -1,5 +1,9 @@
 from src.model_trainer import WorkerPolicy
 from src.pizero import PiZero
+from src.utils import get_argparser
+
+import torch
+import wandb
 
 
 def run_pizero(args):
@@ -20,5 +24,16 @@ def run_pizero(args):
 
 
 if __name__ == '__main__':
-    args = None  # TODO: create a separate argparser
+    wandb.init()
+    args = get_argparser().parse_args()
+    tags = []
+    wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags, config=vars(args))
+
+    if torch.cuda.is_available() and not args.disable_cuda:
+        args.device = torch.device('cuda')
+        torch.cuda.manual_seed(args.seed)
+        torch.backends.cudnn.enabled = args.enable_cudnn
+    else:
+        args.device = torch.device('cpu')
+
     run_pizero(args)

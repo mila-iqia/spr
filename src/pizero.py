@@ -54,8 +54,9 @@ class Node(object):
 class PiZero():
     def __init__(self, args):
         self.args = args
+        self.args.pb_c_base = 19652
+        self.args.pb_c_init = 1.25
         self.env = Env(args)
-        self.replay_buffer = ReplayMemory(args, args.replay_capacity)
         self.network = MCTSModel(args)
         self.mcts = MCTS(args, self.env, self.network)
 
