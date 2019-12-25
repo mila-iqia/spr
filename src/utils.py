@@ -15,180 +15,23 @@ import matplotlib.pyplot as plt
 import io
 from PIL import Image
 
-train_encoder_methods = ["infonce-stdim"]
-
 
 def get_argparser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--pretraining-steps', type=int, default=100000,
-                        help='Number of steps to pretrain representations (default: 100000)')
-    parser.add_argument('--method', type=str, default='infonce-stdim',
-                        choices=train_encoder_methods,
-                        help='Method to use for training representations (default: infonce-stdim)')
-    parser.add_argument('--encoder-lr', type=float, default=3e-4,
-                        help='Learning Rate foe learning representations (default: 5e-4)')
-    parser.add_argument('--epochs', type=int, default=20,
-                        help='Number of epochs for  (default: 20)')
-    parser.add_argument('--pretrain-epochs', type=int, default=20,
-                        help='Number of epochs to pretrain model and encoder for (default: 20 (same as --epochs)).')
-    parser.add_argument('--cuda-id', type=int, default=0,
-                        help='CUDA device index')
+    parser.add_argument('--total-env-steps', type=int, default=100000,
+                        help='Total number to env steps to train (default: 100000)')
+    parser.add_argument('--buffer-size', type=int, default=100000)
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
-    parser.add_argument('--encoder-type', type=str, default="Nature", choices=["Impala", "Nature"],
-                        help='Encoder type (Impala or Nature)')
-    parser.add_argument('--feature-size', type=int, default=256,
-                        help='Size of features')
-
-    # Integrated Model Args
-    parser.add_argument('--detached-model', action="store_false", dest="integrated_model",
-                        default=True, help='Use a model separate from the encoder.')
-    parser.add_argument('--reward-layers', type=int, default=3,
-                        help='Number of layers for reward model.')
-    parser.add_argument('--prediction-layers', type=int, default=3,
-                        help='Number of layers for forward prediction model.')
-    parser.add_argument('--reward-hidden', type=int, default=-1,
-                        help='Hidden size for reward model.  -1 to use 4*state_dim')
-    parser.add_argument('--prediction-hidden', type=int, default=-1,
-                        help='Hidden size for forward prediction model.  -1 to use 4*state_dim')
-    parser.add_argument('--multi-step-training', action="store_true",
-                        default=False, help='Train an integrated model over multiple jumps')
-    parser.add_argument('--max-jump-length', type=int, default=1,
-                        help='Maximum number of steps to use in multi-step training.')
-    parser.add_argument('--visualization_jumps', type=int, default=30,
-                        help='Maximum number of steps in visualizing multi-step performance.')
-    parser.add_argument('--min-jump-length', type=int, default=1,
-                        help='Minimum number of steps to use in multi-step training.')
-    parser.add_argument('--framestack-infomax', action="store_true",
-                        default=False, help='Use a framestack in the infomax (integrated model only).')
-    parser.add_argument('--global-loss', action="store_true", default=False,
-                        help='Use a global L2 loss in addition to the standard local-global loss.')
-    parser.add_argument('--local-loss', action="store_true", default=False,
-                        help='Use a local-local loss in addition to global-global and global-local.')
-    parser.add_argument('--nofilm', action="store_false", default=True, dest="film",
-                        help='Use FILM instead of an outer product to integrate actions')
-    parser.add_argument('--nolayernorm', action="store_false", default=True,
-                        dest="layernorm",
-                        help='Use layernorm with FILM.')
-    parser.add_argument('--no-bilinear-global-loss', action="store_false", default=True,
-                        dest="bilinear_global_loss",
-                        help='Use a global bilinear loss in addition to the standard local-global loss.')
-    parser.add_argument('--detach-target', action="store_true", default=False,
-                        help='Detach the target representation.')
-    parser.add_argument('--load', type=str, default="",
-                        help='Model file to load in.  Blank for none.')
-    parser.add_argument('--no-class-weighting', action="store_true", default=False,
-                        help="Don't reweight reward classes.")
-    parser.add_argument('--no-noncontrastive-global-loss', action="store_false", default=True,
-                        dest="noncontrastive_global_loss",
-                        help='Use a global L2 loss in addition to the standard local-global loss.')
-    parser.add_argument('--dense-supervision', action="store_true", default=False,
-                        help='Evaluate L2 and cosine similarity at each jump.')
-    parser.add_argument("--noncontrastive-loss-weight", default=10.0, type=float,
-                        help="Weight for noncontrastive global loss in shared loss.")
-    parser.add_argument("--hard-neg-factor", type=int, default=0,
-                        help="How many hard negative action samples to use.")
-    parser.add_argument("--counterfactual-eps", type=float, default=0.5,
-                        help="Probability of taking a random action during a model rollout.")
-    parser.add_argument("--dropout-prob", type=float, default=0.0,
-                        help="How much dropout to use in the model and reward predictor.")
-    parser.add_argument('--online-agent-training', action="store_true",
-                        default=False, help='Train agent on real data alongside integrated model.')
-    parser.add_argument('--real-data-indicator', action="store_true", default=False,
-                        help="Mark real and fake data with binary flag for DQN.")
-    parser.add_argument('--probe-lr', type=float, default=3e-4)
-    parser.add_argument('--model-priority-exponent', type=float, default=0., metavar='ω',
-                        help='Prioritised experience replay exponent (originally denoted α)')
-    parser.add_argument('--model-priority-weight', type=float, default=1.0, metavar='β',
-                        help='Initial prioritised experience replay importance sampling weight')
-    parser.add_argument('--real-buffer-capacity', type=int, default=int(4e6),
-                        help='Size of the replay buffer for transitions')
-    parser.add_argument('--val-episodes', type=int, default=1,
-                        help='How many val episodes to use at once')
-    parser.add_argument('--val-buffer-capacity', type=int, default=int(5e4),
-                        help='How many validation steps to use at once')
-    parser.add_argument('--update-val-every', type=int, default=10,
-                        help='How often to update the validation set, in epochs.')
-    parser.add_argument('--check-val-every', type=int, default=100,
-                        help='How often to update the validation set.')
-    parser.add_argument("--model-updates-per-step", type=int, default=20)
-    parser.add_argument("--planning-horizon", type=int, default=0)
-    parser.add_argument("--test-planning-horizon", type=int, default=20)
-    parser.add_argument("--planning-shots", type=int, default=100)
-    parser.add_argument("--patience", type=int, default=100)
-    parser.add_argument("--end-with-relu", action='store_true', default=False)
-    parser.add_argument("--wandb-proj", type=str, default="awm")
-    parser.add_argument("--name", type=str, default="", help="Name for run in wandb.")
-    parser.add_argument("--num_rew_evals", type=int, default=10)
-    parser.add_argument("--collect-mode", type=str, choices=["random_agent", "atari_zoo", "pretrained_ppo"],
-                        default="random_agent")
-    parser.add_argument('--mean-rew', action="store_true", default=False,
-                        help="Use the expectation of reward and termination rather than sampling.")
-    parser.add_argument('--use-dones', action="store_true", default=False,
-                        help="Use predicted terminations in sampling")
-
-    # MBPO Args
-    parser.add_argument("--total_steps", type=int, default=100000)
-    parser.add_argument('--fake-buffer-capacity', type=int, default=int(4e6),
-                        help='Size of the replay buffer for rollout transitions')
-    parser.add_argument("--rollout_length", type=int, default=1)
-    parser.add_argument("--num_model_rollouts", type=int, default=400)
-    parser.add_argument("--env_steps_per_epoch", type=int, default=1000)
-    parser.add_argument("--updates_per_step", type=int, default=20)
-    parser.add_argument("--initial_exp_steps", type=int, default=5000)
-    parser.add_argument('--forward-hidden-size', type=int, default=512, help='Hidden Size for the Forward Model MLP')
-    parser.add_argument('--sd_loss_coeff', type=int, default=10, help='Coefficient for the dynamics loss')
-    parser.add_argument("--reward-loss-weight", default=10.0, type=float,
-                        help="Weight for reward in shared loss.")
-    parser.add_argument("--dqn-loss-weight", default=1.0, type=float,
-                        help="Weight for dqn when doing online training.")
-    # Rainbow Args
-    parser.add_argument('--id', type=str, default='default', help='Experiment ID')
-    parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
     parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')
-    parser.add_argument('--T-max', type=int, default=int(50e6), metavar='STEPS',
-                        help='Number of training steps (4x number of frames)')
-    parser.add_argument('--max-episode-length', type=int, default=int(108e3), metavar='LENGTH',
-                        help='Max episode length in game frames (0 to disable)')
-    parser.add_argument('--history-length', type=int, default=4, metavar='T',
-                        help='Number of consecutive states processed')
-    parser.add_argument('--architecture', type=str, default='canonical', choices=['canonical', 'data-efficient'],
-                        metavar='ARCH', help='Network architecture')
-    parser.add_argument('--hidden-size', type=int, default=256, metavar='SIZE', help='Network hidden size')
-    parser.add_argument('--noisy-std', type=float, default=0.1, metavar='σ',
-                        help='Initial standard deviation of noisy linear layers')
-    parser.add_argument('--atoms', type=int, default=51, metavar='C', help='Discretised size of value distribution')
-    parser.add_argument('--V-min', type=float, default=-10, metavar='V', help='Minimum of value distribution support')
-    parser.add_argument('--V-max', type=float, default=10, metavar='V', help='Maximum of value distribution support')
-    parser.add_argument('--model', type=str, metavar='PARAMS', help='Pretrained model (state dict)')
-    parser.add_argument('--memory-capacity', type=int, default=int(1e6), metavar='CAPACITY',
-                        help='Experience replay memory capacity')
-    parser.add_argument('--replay-frequency', type=int, default=4, metavar='k',
-                        help='Frequency of sampling from memory')
-    parser.add_argument('--priority-exponent', type=float, default=0., metavar='ω',
-                        help='Prioritised experience replay exponent (originally denoted α)')
-    parser.add_argument('--priority-weight', type=float, default=1.0, metavar='β',
-                        help='Initial prioritised experience replay importance sampling weight')
-    parser.add_argument('--multi-step', type=int, default=1, metavar='n', help='Number of steps for multi-step return')
-    parser.add_argument('--discount', type=float, default=0.99, metavar='γ', help='Discount factor')
-    parser.add_argument('--target-update', type=int, default=int(1e3), metavar='τ',
-                        help='Number of steps after which to update target network')
-    parser.add_argument('--reward-clip', type=int, default=1, metavar='VALUE', help='Reward clipping (0 to disable)')
-    parser.add_argument('--learning-rate', type=float, default=0.0001, metavar='η', help='Learning rate')
-    parser.add_argument('--adam-eps', type=float, default=1.5e-4, metavar='ε', help='Adam epsilon')
-    parser.add_argument('--batch-size', type=int, default=32, metavar='SIZE', help='Batch size')
-    parser.add_argument('--learn-start', type=int, default=int(20e3), metavar='STEPS',
-                        help='Number of steps before starting training')
-    parser.add_argument('--evaluate', action='store_true', help='Evaluate only')
-    parser.add_argument('--evaluation-interval', type=int, default=1000, metavar='STEPS',
-                        help='Number of training steps between evaluations')
-    parser.add_argument('--evaluation-episodes', type=int, default=5, metavar='N',
-                        help='Number of evaluation episodes to average over')
-    parser.add_argument('--evaluation-size', type=int, default=500, metavar='N',
-                        help='Number of transitions to use for validating Q')
-    parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
-    parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
-    parser.add_argument('--video', action='store_true', help='Record video (testing only)')
+    parser.add_argument('--frame-stack', type=int, default=4, metavar='T',
+                        help='Number of consecutive frames stacked to form an observation')
+    parser.add_argument('--discount', type=float, default=0.99)
+
+    # MCTS arguments
+    parser.add_argument('--num-simulations', type=int, default=50)
+
+    parser.add_argument('--wandb-proj', type=str, default='pizero')
 
     return parser
 
@@ -276,47 +119,6 @@ class EarlyStopping(object):
         save_dir = self.wandb.run.dir
         torch.save(model.state_dict(), save_dir + "/" + self.name + ".pt")
         self.val_acc_max = val_acc
-
-
-class Cutout(object):
-    """Randomly mask out one or more patches from an image.
-    Args:
-        n_holes (int): Number of patches to cut out of each image.
-        length (int): The length (in pixels) of each square patch.
-    """
-
-    def __init__(self, n_holes, length):
-        self.n_holes = n_holes
-        self.length = length
-
-    def __call__(self, img):
-        """
-        Args:
-            img (Tensor): Tensor image of size (C, H, W).
-        Returns:
-            Tensor: Image with n_holes of dimension length x length cut out of it.
-        """
-        h = img.size(1)
-        w = img.size(2)
-
-        mask = np.ones((h, w), np.float32)
-
-        for n in range(self.n_holes):
-            y = np.random.randint(h)
-            x = np.random.randint(w)
-
-            y1 = np.clip(y - self.length // 2, 0, h)
-            y2 = np.clip(y + self.length // 2, 0, h)
-            x1 = np.clip(x - self.length // 2, 0, w)
-            x2 = np.clip(x + self.length // 2, 0, w)
-
-            mask[y1: y2, x1: x2] = 0.
-
-        mask = torch.from_numpy(mask)
-        mask = mask.expand_as(img)
-        img = img * mask
-
-        return img
 
 
 # Simple ISO 8601 timestamped logger
