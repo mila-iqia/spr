@@ -59,9 +59,6 @@ class PiZero():
         self.network = MCTSModel(args)
         self.mcts = MCTS(args, self.env, self.network)
 
-    def train(self):
-        pass
-
 
 class MCTS():
     def __init__(self, args, env, network):
