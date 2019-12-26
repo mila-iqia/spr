@@ -27,9 +27,17 @@ def get_argparser():
     parser.add_argument('--frame-stack', type=int, default=4, metavar='T',
                         help='Number of consecutive frames stacked to form an observation')
     parser.add_argument('--discount', type=float, default=0.99)
+    parser.add_argument('--evaluation-episodes', type=int, default=10,
+                        help='Number of episodes to average over when evaluating')
 
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=50)
+
+    # PiZero arguments
+    parser.add_argument('--training-interval', type=int, default=200,
+                        help='Perform training after every {training-interval} env steps ')
+    parser.add_argument('--evaluation-interval', type=int, default=5000,
+                        help='Evaluate after every {evaluation-interval} env steps')
 
     parser.add_argument('--wandb-proj', type=str, default='pizero')
 
@@ -160,52 +168,3 @@ def save_to_pil():
     im = Image.open(buf)
     im.load()
     return im
-
-
-class appendabledict(defaultdict):
-    def __init__(self, type_=list, *args, **kwargs):
-        self.type_ = type_
-        super().__init__(type_, *args, **kwargs)
-
-    #     def map_(self, func):
-    #         for k, v in self.items():
-    #             self.__setitem__(k, func(v))
-
-    def subslice(self, slice_):
-        """indexes every value in the dict according to a specified slice
-
-        Parameters
-        ----------
-        slice : int or slice type
-            An indexing slice , e.g., ``slice(2, 20, 2)`` or ``2``.
-
-
-        Returns
-        -------
-        sliced_dict : dict (not appendabledict type!)
-            A dictionary with each value from this object's dictionary, but the value is sliced according to slice_
-            e.g. if this dictionary has {a:[1,2,3,4], b:[5,6,7,8]}, then self.subslice(2) returns {a:3,b:7}
-                 self.subslice(slice(1,3)) returns {a:[2,3], b:[6,7]}
-
-         """
-        sliced_dict = {}
-        for k, v in self.items():
-            sliced_dict[k] = v[slice_]
-        return sliced_dict
-
-    def append_update(self, other_dict):
-        """appends current dict's values with values from other_dict
-
-        Parameters
-        ----------
-        other_dict : dict
-            A dictionary that you want to append to this dictionary
-
-
-        Returns
-        -------
-        Nothing. The side effect is this dict's values change
-
-         """
-        for k, v in other_dict.items():
-            self.__getitem__(k).append(v)
