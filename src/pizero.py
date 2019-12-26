@@ -60,6 +60,31 @@ class PiZero():
         self.network = MCTSModel(args)
         self.mcts = MCTS(args, self.env, self.network)
 
+    def evaluate(self):
+        env = Env(self.args)
+        env.eval()
+        T_rewards, T_Qs = [], []
+
+        # Test performance over several episodes
+        done = True
+        for _ in range(self.args.evaluation_episodes):
+            while True:
+                if done:
+                    state, reward_sum, done = env.reset(), 0, False
+
+                root = self.mcts.run(state)
+                action = self.mcts.select_action(root)
+                state, reward, done = env.step(action)  # Step
+                reward_sum += reward
+
+                if done:
+                    T_rewards.append(reward_sum)
+                    break
+        env.close()
+
+        avg_reward = sum(T_rewards) / len(T_rewards)
+        return avg_reward
+
 
 class MCTS():
     def __init__(self, args, env, network):
@@ -87,6 +112,7 @@ class MCTS():
                 network_output = self.network(parent.hidden_state, action)
             self.expand_node(node, network_output)
             self.backpropagate(search_path, network_output.value)
+        return root
 
     def expand_node(self, node, network_output):
         node.hidden_state = network_output.hidden_state

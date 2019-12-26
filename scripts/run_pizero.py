@@ -13,14 +13,20 @@ def run_pizero(args):
     training_worker = WorkerPolicy(args, mcts)
 
     while env_steps < args.total_env_steps:
-        mcts.run(obs)
-        action = mcts.select_action()
+        root = mcts.run(obs)
+        action = mcts.select_action(root)
         next_obs, reward, done = env.step(action)
         training_worker.buffer.append(obs, action, next_obs, reward, not done)
 
         if env_steps % args.training_interval == 0:
             training_worker.train()
+
+        if env_steps % args.evaluation_interval == 0:
+            avg_reward = pizero.evaluate()
+            wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
+
         obs = next_obs
+        env_steps += 1
 
 
 if __name__ == '__main__':
