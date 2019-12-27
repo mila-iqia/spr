@@ -9,6 +9,7 @@ from statistics import mean
 
 NetworkOutput = collections.namedtuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 
+
 class Worker(object):
     """
         Abstract class for worker instantiations.
@@ -388,8 +389,8 @@ class TransitionModel(nn.Module):
                   nn.BatchNorm2d(hidden_size)]
         for _ in range(blocks):
             layers.append(ResidualBlock(hidden_size, hidden_size))
-        layers.extend([Conv2dSame(hidden_size, channels),
-                      nn.Relu()])
+        layers.extend([Conv2dSame(hidden_size, channels, 3),
+                      nn.ReLU()])
 
         self.action_embedding = nn.Embedding(num_actions, latent_size*action_dim)
 
@@ -452,8 +453,8 @@ class FiLMTransitionModel(nn.Module):
         layers.append(nn.BatchNorm2d(hidden_size))
         for _ in range(blocks):
             layers.append(FiLMResidualBlock(hidden_size, hidden_size, cond_size))
-        layers.append(Conv2dSame(hidden_size, output_size),
-                      nn.Relu())
+        layers.extend([Conv2dSame(hidden_size, output_size, 3),
+                      nn.ReLU()])
 
         self.network = nn.Sequential(*layers)
         self.reward_predictor = ValueNetwork(output_size)
@@ -532,12 +533,12 @@ class RepNet(nn.Module):
             self.input_size += framestack
         layers = nn.ModuleList()
         hidden_size = 128
-        layers.append(nn.Conv2d(self.input_size, hidden_size, stride=2, padding=0))
+        layers.append(nn.Conv2d(self.input_size, hidden_size, kernel_size=3, stride=2, padding=0))
         layers.append(nn.ReLU())
         layers.append(nn.BatchNorm2d(hidden_size))
         for _ in range(2):
             layers.append(ResidualBlock(hidden_size, hidden_size))
-        layers.append(nn.Conv2d(hidden_size, hidden_size * 2, stride=2, padding=0))
+        layers.append(nn.Conv2d(hidden_size, hidden_size * 2, kernel_size=3, stride=2, padding=0))
         hidden_size = hidden_size * 2
         layers.append(nn.ReLU())
         layers.append(nn.BatchNorm2d(hidden_size))
