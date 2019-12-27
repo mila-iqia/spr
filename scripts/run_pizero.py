@@ -1,4 +1,4 @@
-from src.model_trainer import WorkerPolicy
+from src.model_trainer import TrainingWorker
 from src.pizero import PiZero
 from src.utils import get_argparser
 
@@ -10,7 +10,7 @@ def run_pizero(args):
     pizero = PiZero(args)
     env, mcts = pizero.env, pizero.mcts
     obs, env_steps = env.reset(), 0
-    training_worker = WorkerPolicy(args, mcts)
+    training_worker = TrainingWorker(args, mcts)
 
     while env_steps < args.total_env_steps:
         root = mcts.run(obs)
@@ -20,6 +20,7 @@ def run_pizero(args):
 
         if env_steps % args.training_interval == 0:
             training_worker.train()
+            training_worker.log_results()
 
         if env_steps % args.evaluation_interval == 0:
             avg_reward = pizero.evaluate()
