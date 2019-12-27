@@ -24,7 +24,7 @@ def get_argparser():
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
     parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')
-    parser.add_argument('--frame-stack', type=int, default=4, metavar='T',
+    parser.add_argument('--framestack', type=int, default=4, metavar='T',
                         help='Number of consecutive frames stacked to form an observation')
     parser.add_argument('--discount', type=float, default=0.99)
     parser.add_argument('--evaluation-episodes', type=int, default=10,
@@ -36,6 +36,8 @@ def get_argparser():
     # PiZero arguments
     parser.add_argument('--training-interval', type=int, default=200,
                         help='Perform training after every {training-interval} env steps ')
+    parser.add_argument('--batch-size', type=int, default=64,
+                        help='Batch size to use during training')
     parser.add_argument('--evaluation-interval', type=int, default=5000,
                         help='Evaluate after every {evaluation-interval} env steps')
 

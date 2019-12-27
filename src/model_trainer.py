@@ -5,6 +5,7 @@ import torch
 from torch.nn import functional as F
 from src.mcts_memory import ReplayMemory
 import numpy as np
+from statistics import mean
 
 NetworkOutput = collections.namedtuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 
@@ -41,13 +42,14 @@ class Worker(object):
         raise NotImplementedError
 
 
-class WorkerPolicy(Worker):
+class TrainingWorker(Worker):
     def __init__(self, args, model):
         super().__init__(args)
-        self.dqn = nn.DataParallel(model)
+        self.model = nn.DataParallel(model)
         self.buffer = ReplayMemory(args, args.buffer_size)
         self.maximum_length = args.max_jump_length
         self.nce = nn.DataParallel(LocalNCE())
+        self.epochs_till_now = 0
 
     def prepare_start(self):
         pass
@@ -129,7 +131,7 @@ class WorkerPolicy(Worker):
                epoch_losses, value_errors, reward_errors
 
     def log_results(self,
-                    prefix="",
+                    prefix='train',
                     verbose_print=True,):
 
         if prefix == "train":
@@ -198,7 +200,7 @@ class WorkerPolicy(Worker):
         """
 
         indices, states, actions, \
-        rewards, policies, values, weights = self.buffer.sample()
+        rewards, policies, values, weights = self.buffer.sample(self.args.batch_size)
 
         initial_states = states[:, :self.args.framestack]
         initial_states = torch.flatten(initial_states, 1, 2)
@@ -212,19 +214,9 @@ class WorkerPolicy(Worker):
         target_images = target_images.view(states.shape[0], len(states)-self.args.framestack, *target_images.shape[2:])
         target_images = target_images.flatten(2, 3).transpose(0, 1)
 
-        pred_values = []
-        pred_rewards = []
-        pred_policies = []
-        value_loss = 0
-        policy_loss = 0
-        reward_loss = 0
-        contrastive_loss = 0
-
-        reward_losses = []
-        value_losses = []
-        policy_losses = []
-        contrastive_losses = []
-        value_targets = []
+        pred_values, pred_rewards, pred_policies = [], [], []
+        value_loss, policy_loss, reward_loss, contrastive_loss = 0., 0., 0., 0.
+        reward_losses, value_losses, policy_losses, contrastive_losses, value_targets = [], [], [], [], []
 
         for i in range(self.maximum_length):
             action = actions[:, self.args.framestack + i]
@@ -242,13 +234,13 @@ class WorkerPolicy(Worker):
             pred_values.append(inverse_tranform(from_categorical(pred_value, logits=True)))
             pred_policies.append(pred_policy)
 
-            pred_value = nn.LogSoftmax(pred_value, -1)
-            pred_reward = nn.LogSoftmax(pred_reward, -1)
-            pred_policy = nn.LogSoftmax(pred_policy, -1)
+            pred_value = F.log_softmax(pred_value, -1)
+            pred_reward = F.log_softmax(pred_reward, -1)
+            pred_policy = F.log_softmax(pred_policy, -1)
 
-            current_reward_loss = reward_target@pred_reward
-            current_value_loss = value_target[i]@pred_value
-            current_policy_loss = policies[i]@pred_policy
+            current_reward_loss = reward_target @ pred_reward
+            current_value_loss = value_target[i] @ pred_value
+            current_policy_loss = policies[i] @ pred_policy
 
             reward_losses.append(current_reward_loss.detach().cpu().item())
             value_losses.append(current_value_loss.detach().cpu().item())
@@ -267,10 +259,10 @@ class WorkerPolicy(Worker):
             contrastive_losses.append(current_contrastive_loss)
             contrastive_loss = contrastive_loss + current_contrastive_loss
 
-        loss = weights * (value_loss*self.args.value_loss_weight +
-                          policy_loss*self.args.policy_loss_weight +
-                          reward_loss*self.args.reward_loss_weight +
-                          contrastive_loss*self.args.contrastive_reward_weight)
+        loss = weights * (value_loss * self.args.value_loss_weight +
+                          policy_loss * self.args.policy_loss_weight +
+                          reward_loss * self.args.reward_loss_weight +
+                          contrastive_loss * self.args.contrastive_reward_weight)
 
         value_errors = []
         reward_errors = []
@@ -290,13 +282,10 @@ class WorkerPolicy(Worker):
             loss.backward()
             self.model.optimizer.step()
 
-        return loss.mean().cpu().detach().item(), \
-               reward_losses.mean().cpu().detach().item(), \
-               contrastive_losses.mean().cpu().detach().item(), \
-               policy_losses.mean().cpu().detach().item(), \
-               value_losses.mean().cpu().detach().item(), \
-               value_errors.mean().cpu().detach().item(), \
-               reward_errors.mean().cpu().detach().item()
+        self.epochs_till_now += 1
+
+        return loss.mean().cpu().detach().item(), mean(reward_losses), mean(contrastive_losses), \
+               mean(policy_losses), mean(value_losses), mean(value_errors), mean(reward_errors)
 
 
 class LocalNCE(nn.Module):
@@ -399,8 +388,8 @@ class TransitionModel(nn.Module):
                   nn.BatchNorm2d(hidden_size)]
         for _ in range(blocks):
             layers.append(ResidualBlock(hidden_size, hidden_size))
-        layers.append(Conv2dSame(hidden_size, channels),
-                      nn.Relu())
+        layers.extend([Conv2dSame(hidden_size, channels),
+                      nn.Relu()])
 
         self.action_embedding = nn.Embedding(num_actions, latent_size*action_dim)
 
