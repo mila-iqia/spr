@@ -36,8 +36,12 @@ def get_argparser():
     # PiZero arguments
     parser.add_argument('--training-interval', type=int, default=200,
                         help='Perform training after every {training-interval} env steps ')
-    parser.add_argument('--batch-size', type=int, default=64,
-                        help='Batch size to use during training')
+    parser.add_argument('--batch-size', type=int, default=64, help='Batch size to use during training')
+    parser.add_argument('--multistep', type=int, default=1, help='n-step for bootstrapping')
+    parser.add_argument('--value-loss-weight', type=float, default=1.)
+    parser.add_argument('--policy-loss-weight', type=float, default=1.)
+    parser.add_argument('--reward-loss-weight', type=float, default=1.)
+    parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
     parser.add_argument('--evaluation-interval', type=int, default=5000,
                         help='Evaluate after every {evaluation-interval} env steps')
 
