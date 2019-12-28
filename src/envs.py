@@ -22,8 +22,8 @@ class Env():
         self.actions = dict([i, e] for i, e in zip(range(len(actions)), actions))
         self.lives = 0  # Life counter (used in DeepMind training)
         self.life_termination = False  # Used to check if resetting only from loss of life
-        self.window = args.history_length  # Number of frames to concatenate
-        self.state_buffer = deque([], maxlen=args.history_length)
+        self.window = args.framestack  # Number of frames to concatenate
+        self.state_buffer = deque([], maxlen=args.framestack)
         self.training = True  # Consistent with model training mode
 
     def _get_state(self):

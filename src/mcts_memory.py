@@ -5,9 +5,8 @@ import numpy as np
 import torch
 
 Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'value', 'policy', 'nonterminal'))
-blank_latent_trans = Transition(0, torch.zeros(256, dtype=torch.float32), None, 0, False)
-blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0, False)
-blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0, False)
+blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0, 0, 0, False)  # TODO: Set appropriate default policy value
+blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0, 0, 0, False)
 
 
 # Segment tree data structure where parent node values are sum/max of children node values
@@ -77,10 +76,10 @@ class ReplayMemory:
                  priority_weight=None, no_overshoot=False):
         self.device = args.device
         self.capacity = capacity
-        self.history = args.history_length
+        self.history = args.framestack
         self.discount = args.discount
         self.images = images
-        self.n = args.multi_step
+        self.n = args.multistep
         self.priority_weight = priority_weight if priority_weight is not None else args.priority_weight  # Initial importance sampling weight β, annealed to 1 over course of training
         self.priority_exponent = priority_exponent if priority_exponent is not None else args.priority_exponent
         self.t = 0  # Internal episode timestep counter
