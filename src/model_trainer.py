@@ -46,10 +46,10 @@ class Worker(object):
 class TrainingWorker(Worker):
     def __init__(self, args, model):
         super().__init__(args)
-        self.model = nn.DataParallel(model)
+        self.model = model
         self.buffer = ReplayMemory(args, args.buffer_size)
         self.maximum_length = args.max_jump_length
-        self.nce = nn.DataParallel(LocalNCE())
+        self.nce = LocalNCE()
         self.epochs_till_now = 0
 
     def prepare_start(self):
@@ -470,7 +470,7 @@ class FiLMTransitionModel(nn.Module):
 
 class FiLMResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, cond_size):
-        super(ResidualBlock, self).__init__()
+        super().__init__()
         self.film = ConvFiLM(out_channels, cond_size, bn=True)
         self.block = nn.Sequential(
             Conv2dSame(in_channels, out_channels, 3),
@@ -491,7 +491,7 @@ class FiLMResidualBlock(nn.Module):
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super(ResidualBlock, self).__init__()
+        super().__init__()
         self.block = nn.Sequential(
             Conv2dSame(in_channels, out_channels, 3),
             nn.ReLU(),
