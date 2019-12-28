@@ -200,8 +200,7 @@ class TrainingWorker(Worker):
         :return: Updated weights for prioritized experience replay.
         """
 
-        indices, states, actions, \
-        rewards, policies, values, weights = self.buffer.sample(self.args.batch_size)
+        indices, states, actions, rewards, policies, values, weights = self.buffer.sample(self.args.batch_size)
 
         initial_states = states[:, :self.args.framestack]
         initial_states = torch.flatten(initial_states, 1, 2)
@@ -229,7 +228,7 @@ class TrainingWorker(Worker):
             value_target = value_target + self.args.discount ** self.args.multistep * values[self.args.framestack + self.args.multistep]
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
-            reward_target = to_categorical(torch.transform(rewards[i]))
+            reward_target = to_categorical(transform(rewards[i]))
 
             pred_rewards.append(inverse_tranform(from_categorical(pred_reward, logits=True)))
             pred_values.append(inverse_tranform(from_categorical(pred_value, logits=True)))
@@ -257,16 +256,15 @@ class TrainingWorker(Worker):
                 current_targets = target_images[i]
 
             current_contrastive_loss = self.model.nce(current_state, current_targets)
-            contrastive_losses.append(current_contrastive_loss)
+            contrastive_losses.append(current_contrastive_loss.detach().cpu().item())
             contrastive_loss = contrastive_loss + current_contrastive_loss
 
         loss = weights * (value_loss * self.args.value_loss_weight +
                           policy_loss * self.args.policy_loss_weight +
                           reward_loss * self.args.reward_loss_weight +
-                          contrastive_loss * self.args.contrastive_reward_weight)
+                          contrastive_loss * self.args.contrastive_loss_weight)
 
-        value_errors = []
-        reward_errors = []
+        value_errors, reward_errors = [], []
 
         for i, (value, pred_value) in enumerate(zip(values, pred_values)):
             error = torch.abs(value - pred_value)
@@ -277,7 +275,7 @@ class TrainingWorker(Worker):
             error = torch.abs(reward - pred_reward)
             reward_errors.append(error.mean().detach().cpu().item())
 
-        loss = loss/self.args.rollout_length
+        loss = loss/self.maximum_length
         if step:
             self.model.optimizer.zero_grad()
             loss.backward()
