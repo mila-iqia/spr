@@ -17,7 +17,7 @@ KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
 class MinMaxStats(object):
     """A class that holds the min-max values of the tree."""
 
-    def __init__(self, known_bounds: Optional[KnownBounds]):
+    def __init__(self, known_bounds=None):
         self.maximum = known_bounds.max if known_bounds else -MAXIMUM_FLOAT_VALUE
         self.minimum = known_bounds.min if known_bounds else MAXIMUM_FLOAT_VALUE
 
@@ -57,7 +57,7 @@ class PiZero():
         self.args.pb_c_base = 19652
         self.args.pb_c_init = 1.25
         self.env = Env(args)
-        self.network = MCTSModel(args)
+        self.network = MCTSModel(args, self.env.action_space())
         self.mcts = MCTS(args, self.env, self.network)
 
     def evaluate(self):

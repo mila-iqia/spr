@@ -26,6 +26,8 @@ def get_argparser():
     parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')
     parser.add_argument('--framestack', type=int, default=4, metavar='T',
                         help='Number of consecutive frames stacked to form an observation')
+    parser.add_argument('--max-episode-length', type=int, default=int(108e3), metavar='LENGTH',
+                        help='Max episode length in game frames (0 to disable)')
     parser.add_argument('--discount', type=float, default=0.99)
     parser.add_argument('--evaluation-episodes', type=int, default=10,
                         help='Number of episodes to average over when evaluating')
@@ -37,11 +39,20 @@ def get_argparser():
     parser.add_argument('--training-interval', type=int, default=200,
                         help='Perform training after every {training-interval} env steps ')
     parser.add_argument('--batch-size', type=int, default=64, help='Batch size to use during training')
+    parser.add_argument('--learning-rate', type=float, default=0.0000625, metavar='η', help='Learning rate')
+    parser.add_argument('--adam-eps', type=float, default=1.5e-4, metavar='ε', help='Adam epsilon')
+    parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
     parser.add_argument('--multistep', type=int, default=1, help='n-step for bootstrapping')
+    parser.add_argument('--priority-exponent', type=float, default=0.5, metavar='ω',
+                        help='Prioritised experience replay exponent (originally denoted α)')
+    parser.add_argument('--priority-weight', type=float, default=0.4, metavar='β',
+                        help='Initial prioritised experience replay importance sampling weight')
+    parser.add_argument('--max-jump-length', type=int, default=5, help='')
     parser.add_argument('--value-loss-weight', type=float, default=1.)
     parser.add_argument('--policy-loss-weight', type=float, default=1.)
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
     parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
+    parser.add_argument('--film', action='store_true')
     parser.add_argument('--evaluation-interval', type=int, default=5000,
                         help='Evaluate after every {evaluation-interval} env steps')
 
