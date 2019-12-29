@@ -347,7 +347,7 @@ class MCTSModel(nn.Module):
             self.dynamics_model = TransitionModel(args.hidden_size, num_actions)
         self.value_model = ValueNetwork(args.hidden_size)
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
-        self.encoder = RepNet(args.framestack, actions=False)
+        self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         self.target_encoder = RepNet(1, actions=False)
 
         params = list(self.dynamics_model.parameters()) + \
@@ -361,7 +361,7 @@ class MCTSModel(nn.Module):
         return self.encoder(images, actions)
 
     def initial_inference(self, obs):
-        policy_logits = self.policy_model(self.encoder(obs))
+        policy_logits = self.policy_model(self.encoder(obs.unsqueeze(0)))
         return NetworkOutput(None, 0, policy_logits, 0)
 
     def forward(self, state, action):
@@ -523,20 +523,20 @@ class Conv2dSame(torch.nn.Module):
 
 
 class RepNet(nn.Module):
-    def __init__(self, framestack=32, gs=False, actions=True):
+    def __init__(self, framestack=32, grayscale=False, actions=True):
         super().__init__()
-        self.input_channels = framestack * (1 if gs else 3)
+        self.input_channels = framestack * (1 if grayscale else 3)
         self.actions = actions
         if self.actions:
             self.input_channels += framestack
         layers = nn.ModuleList()
         hidden_channels = 128
-        layers.append(nn.Conv2d(self.input_channels, hidden_channels, kernel_size=3, stride=2, padding=0))
+        layers.append(nn.Conv2d(self.input_channels, hidden_channels, kernel_size=3, stride=2, padding=1))
         layers.append(nn.ReLU())
         layers.append(nn.BatchNorm2d(hidden_channels))
         for _ in range(2):
             layers.append(ResidualBlock(hidden_channels, hidden_channels))
-        layers.append(nn.Conv2d(hidden_channels, hidden_channels * 2, kernel_size=3, stride=2, padding=0))
+        layers.append(nn.Conv2d(hidden_channels, hidden_channels * 2, kernel_size=3, stride=2, padding=1))
         hidden_channels = hidden_channels * 2
         layers.append(nn.ReLU())
         layers.append(nn.BatchNorm2d(hidden_channels))
