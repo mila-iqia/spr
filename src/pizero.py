@@ -109,7 +109,7 @@ class MCTS():
             # hidden state given an action and the previous hidden state.
             parent = search_path[-2]
             with torch.no_grad():
-                network_output = self.network(parent.hidden_state, torch.tensor(action))
+                network_output = self.network.inference(parent.hidden_state, torch.tensor(action))
             self.expand_node(node, network_output)
             self.backpropagate(search_path, network_output.value)
         return root
@@ -152,10 +152,10 @@ class MCTS():
         visit_counts = [
             (child.visit_count, action) for action, child in node.children.items()
         ]
-        visit_counts = torch.tensor([visit_counts[0] for _ in visit_counts])
+        visit_counts = torch.tensor([x[0] for x in visit_counts])
         t = self.visit_softmax_temperature()
         m = Categorical(logits=F.log_softmax(visit_counts / t))
-        action = m.sample()
+        action = m.sample().item()
         return action
 
     def visit_softmax_temperature(self, training_steps=0):

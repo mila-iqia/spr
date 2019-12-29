@@ -230,8 +230,8 @@ class TrainingWorker(Worker):
             value_target = to_categorical(transform(value_target))
             reward_target = to_categorical(transform(rewards[i]))
 
-            pred_rewards.append(inverse_tranform(from_categorical(pred_reward, logits=True)))
-            pred_values.append(inverse_tranform(from_categorical(pred_value, logits=True)))
+            pred_rewards.append(inverse_transform(from_categorical(pred_reward, logits=True)))
+            pred_values.append(inverse_transform(from_categorical(pred_value, logits=True)))
             pred_policies.append(pred_policy)
 
             pred_value = F.log_softmax(pred_value, -1)
@@ -363,14 +363,22 @@ class MCTSModel(nn.Module):
     def initial_inference(self, obs):
         hidden_state = self.encoder(obs.unsqueeze(0))
         policy_logits = self.policy_model(hidden_state)
+        # TODO: Are zeroes the right initilization here?
         return NetworkOutput(hidden_state, 0, policy_logits, 0)
 
-    def forward(self, state, action):
-        next_state, reward = self.dynamics_model(state, action)
-        policy = self.policy_model(next_state)
-        value = self.value_model(next_state)
+    def inference(self, state, action):
+        next_state, reward_logits, policy_logits, value_logits = self.forward(state, action)
+        value = inverse_transform(from_categorical(value_logits, logits=True))
+        reward = inverse_transform(from_categorical(reward_logits, logits=True))
 
-        return NetworkOutput(next_state, reward, policy, value)
+        return NetworkOutput(next_state, reward, policy_logits, value)
+
+    def forward(self, state, action):
+        next_state, reward_logits = self.dynamics_model(state, action)
+        policy_logits = self.policy_model(next_state)
+        value_logits = self.value_model(next_state)
+
+        return next_state, reward_logits, policy_logits, value_logits
 
 
 class TransitionModel(nn.Module):
@@ -564,7 +572,7 @@ def transform(value, eps=0.001):
     return value
 
 
-def inverse_tranform(value, eps=0.001):
+def inverse_transform(value, eps=0.001):
     return torch.sign(value) * eps ** -2 * 2 * (1 + 2 * eps + 2 * eps * torch.abs(value) - torch.sqrt(
         1 + 4 * eps + 4 * eps ** 2 + 4 * eps * torch.abs(value)))
 
