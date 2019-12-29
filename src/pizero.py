@@ -109,15 +109,15 @@ class MCTS():
             # hidden state given an action and the previous hidden state.
             parent = search_path[-2]
             with torch.no_grad():
-                network_output = self.network(parent.hidden_state, action)
+                network_output = self.network(parent.hidden_state, torch.tensor(action))
             self.expand_node(node, network_output)
             self.backpropagate(search_path, network_output.value)
         return root
 
     def expand_node(self, node, network_output):
-        node.hidden_state = network_output.hidden_state
+        node.hidden_state = network_output.next_state
         node.reward = network_output.reward
-        policy = {a: math.exp(network_output.policy_logits[a]) for a in self.env.legal_actions}
+        policy = {a: math.exp(network_output.policy_logits.squeeze()[a]) for a in range(self.env.action_space())}
         policy_sum = sum(policy.values())
         for action, p in policy.items():
             node.children[action] = Node(p / policy_sum)
