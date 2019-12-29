@@ -361,8 +361,9 @@ class MCTSModel(nn.Module):
         return self.encoder(images, actions)
 
     def initial_inference(self, obs):
-        policy_logits = self.policy_model(self.encoder(obs.unsqueeze(0)))
-        return NetworkOutput(None, 0, policy_logits, 0)
+        hidden_state = self.encoder(obs.unsqueeze(0))
+        policy_logits = self.policy_model(hidden_state)
+        return NetworkOutput(hidden_state, 0, policy_logits, 0)
 
     def forward(self, state, action):
         next_state, reward = self.dynamics_model(state, action)
@@ -433,9 +434,9 @@ class ConvFiLM(nn.Module):
 
 
 def renormalize(tensor, first_dim=1):
-    flat_tensor = tensor.view(tensor.shape[:first_dim], -1)
-    max = torch.max(flat_tensor, first_dim, keepdim=True)
-    min = torch.min(flat_tensor, first_dim, keepdim=True)
+    flat_tensor = tensor.view(*tensor.shape[:first_dim], -1)
+    max = torch.max(flat_tensor, first_dim, keepdim=True).values
+    min = torch.min(flat_tensor, first_dim, keepdim=True).values
     flat_tensor = (flat_tensor - min)/(max - min)
 
     return flat_tensor.view(*tensor.shape)
