@@ -154,9 +154,9 @@ class MCTS():
         ]
         visit_counts = torch.tensor([x[0] for x in visit_counts])
         t = self.visit_softmax_temperature()
-        m = Categorical(logits=F.log_softmax(visit_counts / t))
-        action = m.sample().item()
-        return action
+        policy = Categorical(logits=F.log_softmax(visit_counts / t))
+        action = policy.sample().item()
+        return action, policy
 
     def visit_softmax_temperature(self, training_steps=0):
         # TODO: Change the temperature schedule

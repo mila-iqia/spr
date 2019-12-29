@@ -89,14 +89,14 @@ class ReplayMemory:
             capacity)  # Store transitions in a wrap-around cyclic buffer within a sum tree for querying priorities
 
     # Adds state and action at time t, reward and terminal at time t + 1
-    def append(self, state, action, reward, terminal, timestep=None,
+    def append(self, state, action, reward, value, policy, terminal, timestep=None,
                init_priority=None):
         state = state[-1].to(device=torch.device('cpu'))
         if timestep is None:
             timestep = self.t
         if init_priority is None:
             init_priority = self.transitions.max
-        self.transitions.append(Transition(timestep, state, action, reward, 1 - terminal),
+        self.transitions.append(Transition(timestep, state, action, reward, value, policy, 1 - terminal),
                                 init_priority)  # Store new transition with maximum priority
         self.t = 0 if terminal is True else timestep + 1  # Start new episodes with t = 0
         # if terminal > 0:
