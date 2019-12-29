@@ -14,11 +14,12 @@ def run_pizero(args):
 
     while env_steps < args.total_env_steps:
         root = mcts.run(obs)
-        action = mcts.select_action(root)
+        action, policy = mcts.select_action(root)
         next_obs, reward, done = env.step(action)
-        training_worker.buffer.append(obs, action, next_obs, reward, not done)
+        training_worker.buffer.append(obs, action, reward, root.value(), policy, not done)
 
-        if env_steps % args.training_interval == 0:
+        # TODO: Train only after replay buffer reaches a certain capacity?
+        if env_steps % args.training_interval == 0 and env_steps > 0:
             training_worker.train()
             training_worker.log_results()
 
