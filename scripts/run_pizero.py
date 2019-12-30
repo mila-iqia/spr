@@ -25,6 +25,7 @@ def run_pizero(args):
 
         if env_steps % args.evaluation_interval == 0:
             avg_reward = pizero.evaluate()
+            print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
             wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
         obs = next_obs
