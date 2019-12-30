@@ -33,7 +33,6 @@ def run_pizero(args):
 
 
 if __name__ == '__main__':
-    wandb.init()
     args = get_argparser().parse_args()
     tags = []
     wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags, config=vars(args))
