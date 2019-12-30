@@ -10,7 +10,7 @@ def run_pizero(args):
     pizero = PiZero(args)
     env, mcts = pizero.env, pizero.mcts
     obs, env_steps = env.reset(), 0
-    training_worker = TrainingWorker(args, mcts)
+    training_worker = TrainingWorker(args, model=pizero.network)
 
     while env_steps < args.total_env_steps:
         root = mcts.run(obs)
