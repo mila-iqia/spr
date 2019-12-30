@@ -4,3 +4,4 @@ wandb
 opencv-python
 scikit-learn
 plotly
+recordclass

@@ -3,8 +3,9 @@ from __future__ import division
 from collections import namedtuple
 import numpy as np
 import torch
+from recordclass import recordclass
 
-Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'value', 'policy', 'nonterminal'))
+Transition = recordclass('Transition', ('timestep', 'state', 'action', 'reward', 'value', 'policy', 'nonterminal'))
 blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0, 0, 0, False)  # TODO: Set appropriate default policy value
 blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0, 0, 0, False)
 
