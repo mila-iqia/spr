@@ -37,10 +37,10 @@ if __name__ == '__main__':
     tags = []
     wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags, config=vars(args))
 
-    if torch.cuda.is_available() and not args.disable_cuda:
+    if torch.cuda.is_available():
         args.device = torch.device('cuda')
         torch.cuda.manual_seed(args.seed)
-        torch.backends.cudnn.enabled = args.enable_cudnn
+        torch.backends.cudnn.enabled = True
     else:
         args.device = torch.device('cpu')
 

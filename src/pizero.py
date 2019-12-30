@@ -58,6 +58,7 @@ class PiZero():
         self.args.pb_c_init = 1.25
         self.env = Env(args)
         self.network = MCTSModel(args, self.env.action_space())
+        self.network.to(self.args.device)
         self.mcts = MCTS(args, self.env, self.network)
 
     def evaluate(self):
@@ -73,7 +74,7 @@ class PiZero():
                     state, reward_sum, done = env.reset(), 0, False
 
                 root = self.mcts.run(state)
-                action = self.mcts.select_action(root)
+                action, policy = self.mcts.select_action(root)
                 state, reward, done = env.step(action)  # Step
                 reward_sum += reward
 
@@ -95,6 +96,7 @@ class MCTS():
 
     def run(self, obs):
         root = Node(0)
+        obs = obs.to(self.args.device)
         root.hidden_state = obs
         self.expand_node(root, network_output=self.network.initial_inference(obs))
         for _ in range(self.args.num_simulations):
@@ -109,7 +111,8 @@ class MCTS():
             # hidden state given an action and the previous hidden state.
             parent = search_path[-2]
             with torch.no_grad():
-                network_output = self.network.inference(parent.hidden_state, torch.tensor(action))
+                action = torch.tensor(action, device=self.args.device)
+                network_output = self.network.inference(parent.hidden_state, action)
             self.expand_node(node, network_output)
             self.backpropagate(search_path, network_output.value)
         return root
@@ -152,7 +155,7 @@ class MCTS():
         visit_counts = [
             (child.visit_count, action) for action, child in node.children.items()
         ]
-        visit_counts = torch.tensor([x[0] for x in visit_counts])
+        visit_counts = torch.tensor([x[0] for x in visit_counts], dtype=torch.float32)
         t = self.visit_softmax_temperature()
         policy = Categorical(logits=F.log_softmax(visit_counts / t))
         action = policy.sample().item()
