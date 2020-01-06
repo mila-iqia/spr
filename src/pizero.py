@@ -73,6 +73,7 @@ class PiZero():
                 if done:
                     state, reward_sum, done = env.reset(), 0, False
 
+                state = state.permute(0, 3, 1, 2)
                 root = self.mcts.run(state)
                 action, policy = self.mcts.select_action(root)
                 state, reward, done = env.step(action)  # Step
