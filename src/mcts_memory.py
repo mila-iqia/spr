@@ -74,7 +74,7 @@ class SegmentTree():
 
 class ReplayMemory:
     def __init__(self, args, capacity, images=False, priority_exponent=None,
-                 priority_weight=None, no_overshoot=False):
+                 priority_weight=None, no_overshoot=False, no_segments=True):
         self.device = args.device
         self.capacity = capacity
         self.history = args.framestack
@@ -88,6 +88,7 @@ class ReplayMemory:
         self.patience = 10  # How often to try sampling from a segment before choosing a different one.
         self.transitions = SegmentTree(
             capacity)  # Store transitions in a wrap-around cyclic buffer within a sum tree for querying priorities
+        self.no_segments = no_segments
 
     # Adds state and action at time t, reward and terminal at time t + 1
     def append(self, state, action, reward, value, policy, terminal, timestep=None,
@@ -119,6 +120,8 @@ class ReplayMemory:
             if transition[t - 1].nonterminal:
                 transition[t] = self.transitions.get(idx - self.history + 1 + t)
             else:
+                # If we're terminal, just repeat the previous transition with
+                # reward and value set to 0.
                 transition[t] = transition[t - 1]  # If prev (next) frame is terminal
                 transition[t].reward = 0
                 transition[t].value = 0
@@ -127,6 +130,9 @@ class ReplayMemory:
     def _sample_segment_with_intermediates(self, segment, i, n, batch_size):
         valid = False
         count = 0
+        if self.no_segments:
+            i = np.random.randint(0, batch_size)
+
         while not valid:
             sample = np.random.uniform(i * segment,
                                        (i + 1) * segment)  # Uniformly sample an element from within a segment
@@ -144,13 +150,13 @@ class ReplayMemory:
         # Retrieve all required transition data (from t - h to t + n)
         transition = self._get_transition(idx, n)
         # Discrete action to be used as index
-        nonterminals = torch.tensor([t.nonterminal for t in transition[self.history - 1:]],
-                                    dtype=torch.float32,
-                                    device=self.device)
+        # nonterminals = torch.tensor([t.nonterminal for t in transition[self.history - 1:]],
+        #                             dtype=torch.float32,
+        #                             device=self.device)
 
         all_rewards = [trans.reward for trans in transition[self.history-1:-1]]
-        all_actions = [trans.action for trans in transition[self.history-1:-1]]
-        all_states = [trans.state for trans in transition[self.history-1:-1]]
+        all_actions = [trans.action for trans in transition]
+        all_states = [trans.state for trans in transition]
         all_policies = [trans.policy for trans in transition[self.history-1:-1]]
         all_values = [trans.value for trans in transition[self.history-1:-1]]
 
