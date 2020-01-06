@@ -36,8 +36,12 @@ class Env():
         return torch.tensor(state, dtype=torch.float32, device=self.device).div_(255)
 
     def _reset_buffer(self):
+        if self.grayscale:
+            blank = torch.zeros(96, 96, 1, device=self.device)
+        else:
+            blank = torch.zeros(96, 96, 3, device=self.device)
         for _ in range(self.window):
-            self.state_buffer.append(torch.zeros(96, 96, device=self.device))
+            self.state_buffer.append(blank)
 
     def reset(self):
         if self.life_termination:
@@ -60,7 +64,11 @@ class Env():
 
     def step(self, action):
         # Repeat action 4 times, max pool over last 2 frames
-        frame_buffer = torch.zeros(2, 96, 96, device=self.device)
+        if self.grayscale:
+            channels = 1
+        else:
+            channels = 3
+        frame_buffer = torch.zeros(2, 96, 96, channels, device=self.device)
         reward, done = 0, False
         for t in range(4):
             reward += self.ale.act(self.actions.get(action))

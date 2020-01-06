@@ -361,7 +361,10 @@ class MCTSModel(nn.Module):
         return self.encoder(images, actions)
 
     def initial_inference(self, obs):
-        hidden_state = self.encoder(obs.unsqueeze(0))
+        if len(obs.shape) < 5:
+            obs = obs.unsqueeze(0)
+        obs = obs.flatten(1, 2)
+        hidden_state = self.encoder(obs)
         policy_logits = self.policy_model(hidden_state)
         # TODO: Are zeroes the right initilization here?
         return NetworkOutput(hidden_state, 0, policy_logits, 0)
