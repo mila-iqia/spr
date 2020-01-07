@@ -71,7 +71,6 @@ class SegmentTree():
     def total(self):
         return self.sum_tree[0]
 
-
 class ReplayMemory:
     def __init__(self, args, capacity, n=None, images=False, priority_exponent=None,
                  priority_weight=None, no_overshoot=False, no_segments=True):
@@ -118,6 +117,7 @@ class ReplayMemory:
                 transition[t].action = 0  # Pretend we did a no-op.
             else:
                 transition[t] = self.transitions.get(idx - self.history + 1 + t)
+
         for t in range(self.history, self.history + n):  # e.g. 4 5 6
             if transition[t - 1].nonterminal:
                 transition[t] = self.transitions.get(idx - self.history + 1 + t)
@@ -125,8 +125,8 @@ class ReplayMemory:
                 # If we're terminal, just repeat the previous transition with
                 # reward and value set to 0.
                 transition[t] = transition[t - 1]  # If prev (next) frame is terminal
-                transition[t].reward = 0
-                transition[t].value = 0
+                transition[t].reward = 0.
+                transition[t].value = 0.
         return transition
 
     def _sample_segment_with_intermediates(self, segment, i, n, batch_size):
