@@ -6,8 +6,8 @@ import torch
 from recordclass import recordclass
 
 Transition = recordclass('Transition', ('timestep', 'state', 'action', 'reward', 'value', 'policy', 'nonterminal'))
-blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0, 0, 0, False)  # TODO: Set appropriate default policy value
-blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0, 0, 0, False)
+blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)  # TODO: Set appropriate default policy value
+blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)
 
 
 # Segment tree data structure where parent node values are sum/max of children node values
@@ -73,14 +73,18 @@ class SegmentTree():
 
 
 class ReplayMemory:
-    def __init__(self, args, capacity, images=False, priority_exponent=None,
+    def __init__(self, args, capacity, n=None, images=False, priority_exponent=None,
                  priority_weight=None, no_overshoot=False, no_segments=True):
         self.device = args.device
         self.capacity = capacity
         self.history = args.framestack
         self.discount = args.discount
         self.images = images
-        self.n = args.multistep
+        if not n:
+            self.n = args.multistep
+        else:
+            self.n = n
+
         self.priority_weight = priority_weight if priority_weight is not None else args.priority_weight  # Initial importance sampling weight β, annealed to 1 over course of training
         self.priority_exponent = priority_exponent if priority_exponent is not None else args.priority_exponent
         self.t = 0  # Internal episode timestep counter
@@ -101,8 +105,6 @@ class ReplayMemory:
         self.transitions.append(Transition(timestep, state, action, reward, value, policy, 1 - terminal),
                                 init_priority)  # Store new transition with maximum priority
         self.t = 0 if terminal is True else timestep + 1  # Start new episodes with t = 0
-        # if terminal > 0:
-        #     print(terminal, terminal is True)
 
     # Returns a transition with blank states where appropriate
     def _get_transition(self, idx, n=None):
@@ -150,14 +152,12 @@ class ReplayMemory:
         # Retrieve all required transition data (from t - h to t + n)
         transition = self._get_transition(idx, n)
         # Discrete action to be used as index
-        # nonterminals = torch.tensor([t.nonterminal for t in transition[self.history - 1:]],
-        #                             dtype=torch.float32,
-        #                             device=self.device)
 
         all_rewards = [trans.reward for trans in transition[self.history-1:-1]]
         all_actions = [trans.action for trans in transition]
         all_states = [trans.state for trans in transition]
         all_policies = [trans.policy for trans in transition[self.history-1:-1]]
+        all_policies = torch.stack(all_policies, 0)
         all_values = [trans.value for trans in transition[self.history-1:-1]]
 
         return prob, idx, tree_idx, all_states, all_actions, all_rewards,\
@@ -177,7 +177,9 @@ class ReplayMemory:
                                device=self.device)  # Normalise by max importance-sampling weight from batch
 
         all_actions = torch.tensor(all_actions, device=self.device).long()
-        all_rewards = torch.tensor(all_rewards, device=self.device).long()
+        all_rewards = torch.tensor(all_rewards, device=self.device)
+        all_values = torch.tensor(all_values, device=self.device)
+        all_policies = torch.stack(all_policies, 0).to(self.device)
         all_states = [torch.stack(l, 0) for l in all_states]
         all_states = torch.stack(all_states).to(self.device)
 

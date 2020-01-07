@@ -47,8 +47,9 @@ class TrainingWorker(Worker):
     def __init__(self, args, model):
         super().__init__(args)
         self.model = model
-        self.buffer = ReplayMemory(args, args.buffer_size)
-        self.maximum_length = args.max_jump_length
+        self.buffer = ReplayMemory(args, args.buffer_size, n=args.multistep+args.jumps)
+        self.maximum_length = args.jumps
+        self.multistep = args.multistep
         self.nce = LocalNCE()
         self.epochs_till_now = 0
 
@@ -209,26 +210,29 @@ class TrainingWorker(Worker):
 
         current_state = self.model.encode(initial_states, initial_actions)
 
-        target_images = states[:, self.args.framestack:].view(-1, *states.shape[2:])
+        target_images = states[:, self.args.framestack:self.args.framestack+self.maximum_length]
+        target_images = target_images.reshape(-1, *states.shape[2:])
         target_images = self.model.target_encoder(target_images)
-        target_images = target_images.view(states.shape[0], len(states)-self.args.framestack, *target_images.shape[2:])
+        target_images = target_images.view(states.shape[0], -1, *target_images.shape[2:])
         target_images = target_images.flatten(2, 3).transpose(0, 1)
 
         pred_values, pred_rewards, pred_policies = [], [], []
         value_loss, policy_loss, reward_loss, contrastive_loss = 0., 0., 0., 0.
         reward_losses, value_losses, policy_losses, contrastive_losses, value_targets = [], [], [], [], []
 
+        discounts = torch.ones_like(rewards)[:, :self.multistep]*self.args.discount
+        discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[None, :].float()
+
         for i in range(self.maximum_length):
             action = actions[:, self.args.framestack + i]
             current_state, pred_reward, pred_value, pred_policy = self.model(current_state, action)
 
-            value_target = torch.tensor(
-                [sum(self.args.discount ** i * rewards[self.args.framestack + i] for i in range(self.args.multistep))],
-                dtype=torch.float32, device=values.device)
-            value_target = value_target + self.args.discount ** self.args.multistep * values[self.args.framestack + self.args.multistep]
+            value_target = torch.sum(discounts*rewards[:, i:i+self.multistep], -1)
+            value_target = value_target + self.args.discount ** self.multistep \
+                           * values[:, self.multistep]
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
-            reward_target = to_categorical(transform(rewards[i]))
+            reward_target = to_categorical(transform(rewards[:, i]))
 
             pred_rewards.append(inverse_transform(from_categorical(pred_reward, logits=True)))
             pred_values.append(inverse_transform(from_categorical(pred_value, logits=True)))
@@ -239,8 +243,8 @@ class TrainingWorker(Worker):
             pred_policy = F.log_softmax(pred_policy, -1)
 
             current_reward_loss = reward_target @ pred_reward
-            current_value_loss = value_target[i] @ pred_value
-            current_policy_loss = policies[i] @ pred_policy
+            current_value_loss = value_target[:, i] @ pred_value
+            current_policy_loss = policies[:, i] @ pred_policy
 
             reward_losses.append(current_reward_loss.detach().cpu().item())
             value_losses.append(current_value_loss.detach().cpu().item())
@@ -253,7 +257,7 @@ class TrainingWorker(Worker):
             if self.args.use_all_targets:
                 current_targets = target_images.roll(i, 0).flatten(0, 1)
             else:
-                current_targets = target_images[i]
+                current_targets = target_images[:, i]
 
             current_contrastive_loss = self.model.nce(current_state, current_targets)
             contrastive_losses.append(current_contrastive_loss.detach().cpu().item())
@@ -348,7 +352,7 @@ class MCTSModel(nn.Module):
         self.value_model = ValueNetwork(args.hidden_size)
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
-        self.target_encoder = RepNet(1, actions=False)
+        self.target_encoder = RepNet(1, grayscale=args.grayscale, actions=False)
 
         params = list(self.dynamics_model.parameters()) + \
             list(self.value_model.parameters()) +\
