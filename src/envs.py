@@ -33,7 +33,10 @@ class Env():
         else:
             obs = self.ale.getScreenRGB()
         state = cv2.resize(obs, (96, 96), interpolation=cv2.INTER_LINEAR)
-        return torch.tensor(state, dtype=torch.float32, device=self.device).div_(255)
+        state = torch.tensor(state, dtype=torch.float32, device=self.device).div_(255)
+        if len(state.shape) == 2:
+            state = state.unsqueeze(-1)
+        return state
 
     def _reset_buffer(self):
         if self.grayscale:

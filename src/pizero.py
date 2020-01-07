@@ -51,7 +51,7 @@ class Node(object):
         return self.value_sum / self.visit_count
 
 
-class PiZero():
+class PiZero:
     def __init__(self, args):
         self.args = args
         self.args.pb_c_base = 19652
@@ -88,7 +88,7 @@ class PiZero():
         return avg_reward
 
 
-class MCTS():
+class MCTS:
     def __init__(self, args, env, network):
         self.args = args
         self.env = env
@@ -100,7 +100,7 @@ class MCTS():
         obs = obs.to(self.args.device)
         root.hidden_state = obs
         self.expand_node(root, network_output=self.network.initial_inference(obs))
-        for _ in range(self.args.num_simulations):
+        for s in range(self.args.num_simulations):
             node = root
             search_path = [node]
 
@@ -117,6 +117,46 @@ class MCTS():
             self.expand_node(node, network_output)
             self.backpropagate(search_path, network_output.value)
         return root
+
+    def batched_run(self, obs_tensor):
+        roots = []
+        obs_tensor = obs_tensor.to(self.args.device)
+        for i in range(obs_tensor.shape[0]):
+            root = Node(0)
+            root.hidden_state = obs_tensor[i]
+            roots.append(root)
+
+        for s in range(self.args.num_simulations):
+            nodes = []
+            search_paths = []
+            for i in range(obs_tensor.shape[0]):
+                node = roots[i]
+                search_path = [node]
+
+                actions = []
+                hidden_states = []
+
+                while node.expanded():
+                    action, node = self.select_child(node)
+                    search_path.append(node)
+
+                # Inside the search tree we use the dynamics function to obtain the next
+                # hidden state given an action and the previous hidden state.
+                parent = search_path[-2]
+                actions.append(action)
+                hidden_states.append(parent.hidden_state)
+                nodes.append(node)
+                search_paths.append(search_path)
+
+            with torch.no_grad():
+                actions = torch.stack(actions, 0).to(self.args.device)
+                hidden_states = torch.stack(hidden_states, 0).to(self.args.device)
+                network_output = self.network.inference(hidden_states, actions)
+
+            for i in range(obs_tensor.shape[0]):
+                self.expand_node(nodes[i], network_output[i])
+                self.backpropagate(search_paths[i], network_output[i].value)
+        return roots
 
     def expand_node(self, node, network_output):
         node.hidden_state = network_output.next_state
@@ -158,7 +198,7 @@ class MCTS():
         ]
         visit_counts = torch.tensor([x[0] for x in visit_counts], dtype=torch.float32)
         t = self.visit_softmax_temperature()
-        policy = Categorical(logits=F.log_softmax(visit_counts / t))
+        policy = Categorical(logits=F.log_softmax(visit_counts / t, dim=-1))
         action = policy.sample().item()
         return action, policy
 
