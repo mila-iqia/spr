@@ -6,6 +6,7 @@ from torch.nn import functional as F
 from src.mcts_memory import ReplayMemory
 import numpy as np
 from statistics import mean
+import wandb
 
 NetworkOutput = collections.namedtuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 
@@ -50,8 +51,14 @@ class TrainingWorker(Worker):
         self.buffer = ReplayMemory(args, args.buffer_size, n=args.multistep+args.jumps)
         self.maximum_length = args.jumps
         self.multistep = args.multistep
+        self.use_all_targets = args.use_all_targets
         self.nce = LocalNCE()
         self.epochs_till_now = 0
+
+        self.train_trackers = dict()
+        self.val_trackers = dict()
+        self.reset_trackers("train")
+        self.reset_trackers("val")
 
     def prepare_start(self):
         pass
@@ -69,13 +76,13 @@ class TrainingWorker(Worker):
             trackers = self.train_trackers
         else:
             trackers = self.val_trackers
-        trackers["epoch_loss"] = np.zeros(self.maximum_length)
-        trackers["value_loss"] = np.zeros(self.maximum_length)
-        trackers["policy_loss"] = np.zeros(self.maximum_length)
-        trackers["reward_loss"] = np.zeros(self.maximum_length)
-        trackers["local_loss"] = np.zeros(self.maximum_length)
-        trackers["value_error"] = np.zeros(self.maximum_length)
-        trackers["reward_error"] = np.zeros(self.maximum_length)
+        trackers["epoch_losses"] = np.zeros(self.maximum_length)
+        trackers["value_losses"] = np.zeros(self.maximum_length)
+        trackers["policy_losses"] = np.zeros(self.maximum_length)
+        trackers["reward_losses"] = np.zeros(self.maximum_length)
+        trackers["local_losses"] = np.zeros(self.maximum_length)
+        trackers["value_errors"] = np.zeros(self.maximum_length)
+        trackers["reward_errors"] = np.zeros(self.maximum_length)
         trackers["iterations"] = 0
 
     def step(self):
@@ -89,7 +96,8 @@ class TrainingWorker(Worker):
                              value_errors,
                              reward_errors)
 
-    def update_trackers(self, reward_losses,
+    def update_trackers(self,
+                        reward_losses,
                         local_losses,
                         policy_losses,
                         value_losses,
@@ -157,9 +165,9 @@ class TrainingWorker(Worker):
                 np.mean(local_losses),
                 np.mean(reward_losses),
                 np.mean(policy_losses),
-                np.mean(value_losses)),
+                np.mean(value_losses),
                 np.mean(reward_errors),
-                np.mean(value_errors))
+                np.mean(value_errors)))
 
         for i in range(self.maximum_length):
             jump = i
@@ -176,23 +184,23 @@ class TrainingWorker(Worker):
                         reward_errors[i],
                         value_errors[i]))
 
-            self.wandb.log({prefix + 'Jump {} loss'.format(jump): epoch_losses[i],
-                            prefix + 'Jump {} local loss'.format(jump): local_losses[i],
-                            prefix + "Jump {} Reward Loss".format(jump): reward_losses[i],
-                            prefix + 'Jump {} Value Loss'.format(jump): value_losses[i],
-                            prefix + "Jump {} Reward Error".format(jump): reward_errors[i],
-                            prefix + "Jump {} Policy loss".format(jump): policy_losses[i],
-                            prefix + "Jump {} Value Error".format(jump): value_errors[i],
-                            'FM epoch': self.epochs_till_now})
+            wandb.log({prefix + 'Jump {} loss'.format(jump): epoch_losses[i],
+                       prefix + 'Jump {} local loss'.format(jump): local_losses[i],
+                       prefix + "Jump {} Reward Loss".format(jump): reward_losses[i],
+                       prefix + 'Jump {} Value Loss'.format(jump): value_losses[i],
+                       prefix + "Jump {} Reward Error".format(jump): reward_errors[i],
+                       prefix + "Jump {} Policy loss".format(jump): policy_losses[i],
+                       prefix + "Jump {} Value Error".format(jump): value_errors[i],
+                       'FM epoch': self.epochs_till_now})
 
-        self.wandb.log({prefix + ' loss': np.mean(epoch_losses),
-                        prefix + ' local loss': np.mean(local_losses),
-                        prefix + " Reward Loss": np.mean(reward_losses),
-                        prefix + ' Value Loss': np.mean(value_losses),
-                        prefix + " Reward Error": np.mean(reward_errors),
-                        prefix + " Policy loss": np.mean(policy_losses),
-                        prefix + " Value Error": np.mean(value_errors),
-                        'FM epoch': self.epochs_till_now})
+        wandb.log({prefix + ' loss': np.mean(epoch_losses),
+                   prefix + ' local loss': np.mean(local_losses),
+                   prefix + " Reward Loss": np.mean(reward_losses),
+                   prefix + ' Value Loss': np.mean(value_losses),
+                   prefix + " Reward Error": np.mean(reward_errors),
+                   prefix + " Policy loss": np.mean(policy_losses),
+                   prefix + " Value Error": np.mean(value_errors),
+                   'FM epoch': self.epochs_till_now})
 
     def train(self, step=True):
         """
@@ -213,19 +221,23 @@ class TrainingWorker(Worker):
         target_images = states[:, self.args.framestack:self.args.framestack+self.maximum_length]
         target_images = target_images.reshape(-1, *states.shape[2:])
         target_images = self.model.target_encoder(target_images)
-        target_images = target_images.view(states.shape[0], -1, *target_images.shape[2:])
-        target_images = target_images.flatten(2, 3).transpose(0, 1)
+
+        # Get into the shape used by the NCE code.
+        target_images = target_images.view(states.shape[0], -1, *target_images.shape[1:])
+        target_images = target_images.flatten(3, 4).permute(3, 0, 1, 2)
 
         pred_values, pred_rewards, pred_policies = [], [], []
-        value_loss, policy_loss, reward_loss, contrastive_loss = 0., 0., 0., 0.
-        reward_losses, value_losses, policy_losses, contrastive_losses, value_targets = [], [], [], [], []
+        loss = 0.
+        reward_losses, value_losses, policy_losses, nce_losses, total_losses, value_targets = [], [], [], [], [], []
 
         discounts = torch.ones_like(rewards)[:, :self.multistep]*self.args.discount
         discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[None, :].float()
 
+        value_errors, reward_errors = [], []
+
         for i in range(self.maximum_length):
             action = actions[:, self.args.framestack + i]
-            current_state, pred_reward, pred_value, pred_policy = self.model(current_state, action)
+            current_state, pred_reward, pred_policy, pred_value = self.model(current_state, action)
 
             value_target = torch.sum(discounts*rewards[:, i:i+self.multistep], -1)
             value_target = value_target + self.args.discount ** self.multistep \
@@ -238,48 +250,44 @@ class TrainingWorker(Worker):
             pred_values.append(inverse_transform(from_categorical(pred_value, logits=True)))
             pred_policies.append(pred_policy)
 
+            value_errors.append(torch.abs(pred_values[-1] - values[:, i]).detach().cpu().numpy())
+            reward_errors.append(torch.abs(pred_rewards[-1] - rewards[:, i]).detach().cpu().numpy())
+
             pred_value = F.log_softmax(pred_value, -1)
             pred_reward = F.log_softmax(pred_reward, -1)
             pred_policy = F.log_softmax(pred_policy, -1)
 
-            current_reward_loss = reward_target @ pred_reward
-            current_value_loss = value_target[:, i] @ pred_value
-            current_policy_loss = policies[:, i] @ pred_policy
+            current_reward_loss = -torch.sum(reward_target * pred_reward, -1).mean()
+            current_value_loss = -torch.sum(value_target * pred_value, -1).mean()
+            current_policy_loss = -torch.sum(policies[:, i] * pred_policy, -1).mean()
 
             reward_losses.append(current_reward_loss.detach().cpu().item())
             value_losses.append(current_value_loss.detach().cpu().item())
             policy_losses.append(current_policy_loss.detach().cpu().item())
 
-            reward_loss = reward_loss + current_reward_loss
-            value_loss = value_loss + current_value_loss
-            policy_loss = policy_loss + current_policy_loss
-
-            if self.args.use_all_targets:
-                current_targets = target_images.roll(i, 0).flatten(0, 1)
+            if self.use_all_targets:
+                current_targets = target_images.roll(-i, 2).flatten(1, 2)
             else:
-                current_targets = target_images[:, i]
+                current_targets = target_images[:, :, i]
 
-            current_contrastive_loss = self.model.nce(current_state, current_targets)
-            contrastive_losses.append(current_contrastive_loss.detach().cpu().item())
-            contrastive_loss = contrastive_loss + current_contrastive_loss
+            nce_input = current_state.flatten(2, 3).permute(2, 0, 1)
+            current_nce_loss = self.nce(nce_input, current_targets).mean()
+            nce_losses.append(current_nce_loss.detach().cpu().item())
 
-        loss = weights * (value_loss * self.args.value_loss_weight +
-                          policy_loss * self.args.policy_loss_weight +
-                          reward_loss * self.args.reward_loss_weight +
-                          contrastive_loss * self.args.contrastive_loss_weight)
+            current_loss = current_value_loss*self.args.value_loss_weight + \
+                           current_policy_loss*self.args.policy_loss_weight + \
+                           current_reward_loss*self.args.reward_loss_weight + \
+                           current_nce_loss*self.args.contrastive_loss_weight
+            current_loss = (current_loss * weights).mean()
+            total_losses.append(current_loss.detach().cpu().item())
+            loss = loss + current_loss
 
-        value_errors, reward_errors = [], []
+        self.buffer.update_priorities(indices, value_errors[0])
 
-        for i, (value, pred_value) in enumerate(zip(values, pred_values)):
-            error = torch.abs(value - pred_value)
-            value_errors.append(error.mean().detach().cpu().item())
-            self.buffer.update_priorities(indices+i, error)
+        value_errors = np.mean(value_errors, -1)
+        reward_errors = np.mean(reward_errors, -1)
 
-        for i, (reward, pred_reward) in enumerate(zip(rewards, pred_rewards)):
-            error = torch.abs(reward - pred_reward)
-            reward_errors.append(error.mean().detach().cpu().item())
-
-        loss = loss/self.maximum_length
+        loss = loss.mean()/self.maximum_length
         if step:
             self.model.optimizer.zero_grad()
             loss.backward()
@@ -287,8 +295,8 @@ class TrainingWorker(Worker):
 
         self.epochs_till_now += 1
 
-        return loss.mean().cpu().detach().item(), mean(reward_losses), mean(contrastive_losses), \
-               mean(policy_losses), mean(value_losses), mean(value_errors), mean(reward_errors)
+        return reward_losses, nce_losses, policy_losses, value_losses, \
+               total_losses, value_errors, reward_errors
 
 
 class LocalNCE(nn.Module):
@@ -296,7 +304,7 @@ class LocalNCE(nn.Module):
         super().__init__()
 
     def forward(self, f_x1, f_x2):
-        '''
+        """
         Compute InfoNCE cost with source features in f_x1 and target features in
         f_x2. We assume one source feature vector per location per item in batch
         and one target feature vector per location per item in batch. There are
@@ -312,7 +320,7 @@ class LocalNCE(nn.Module):
           f_x2 : (n_locs, n_batch, n_rkhs)  -- n_locs target vectors per item.  Negative samples.
         Output:
           loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
-        '''
+        """
         n_batch = f_x1.size(1)
         neg_batch = f_x2.size(1)
         # reshaping for big matrix multiply
@@ -336,7 +344,7 @@ class LocalNCE(nn.Module):
         pos_mask = pos_mask.unsqueeze(dim=0)
         # use masked sums to select NCE scores for positive pairs
         loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=2)  # (n_locs, n_batch)
-        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)  # (n_locs, n_batch)
+        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)[:, :n_batch]  # (n_locs, n_batch)
         # combine forwards/backwards prediction costs (or whatever)
         loss_nce = 0.5 * (loss_nce_x1_to_x2 + loss_nce_x2_to_x1)
         return loss_nce
@@ -538,6 +546,56 @@ class Conv2dSame(torch.nn.Module):
         return self.net(x)
 
 
+class ValueNetwork(nn.Module):
+    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300):
+        super().__init__()
+        self.hidden_size = hidden_size
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+                  nn.ReLU(),
+                  nn.BatchNorm2d(hidden_size),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*hidden_size, 256),
+                  nn.ReLU(),
+                  nn.Linear(256, limit*2 + 1)]
+        self.network = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x):
+        return self.network(x)
+
+
+class PolicyNetwork(nn.Module):
+    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
+        super().__init__()
+        self.hidden_size = hidden_size
+        layers = [Conv2dSame(input_channels, hidden_size, 3),
+                  nn.ReLU(),
+                  nn.BatchNorm2d(hidden_size),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*hidden_size, num_actions)]
+        self.network = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x):
+        return self.network(x)
+
+
+class RewardNetwork(nn.Module):
+    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
+        super().__init__()
+        self.hidden_size = hidden_size
+        layers = [Conv2dSame(input_channels, hidden_size, 3),
+                  nn.ReLU(),
+                  nn.BatchNorm2d(hidden_size),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*hidden_size, num_actions)]
+        self.network = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x):
+        return self.network(x)
+
+
 class RepNet(nn.Module):
     def __init__(self, framestack=32, grayscale=False, actions=True):
         super().__init__()
@@ -601,53 +659,3 @@ def from_categorical(distribution, limit=300, logits=True):
         distribution = torch.softmax(distribution, -1)
     weights = torch.arange(-limit, limit + 1, device=distribution.device).float()
     return distribution @ weights
-
-
-class ValueNetwork(nn.Module):
-    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300):
-        super().__init__()
-        self.hidden_size = hidden_size
-        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
-                  nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size),
-                  nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, 256),
-                  nn.ReLU(),
-                  nn.Linear(256, limit*2 + 1)]
-        self.network = nn.Sequential(*layers)
-        self.train()
-
-    def forward(self, x):
-        return self.network(x)
-
-
-class PolicyNetwork(nn.Module):
-    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
-        super().__init__()
-        self.hidden_size = hidden_size
-        layers = [Conv2dSame(input_channels, hidden_size, 3),
-                  nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size),
-                  nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, num_actions)]
-        self.network = nn.Sequential(*layers)
-        self.train()
-
-    def forward(self, x):
-        return self.network(x)
-
-
-class RewardNetwork(nn.Module):
-    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
-        super().__init__()
-        self.hidden_size = hidden_size
-        layers = [Conv2dSame(input_channels, hidden_size, 3),
-                  nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size),
-                  nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, num_actions)]
-        self.network = nn.Sequential(*layers)
-        self.train()
-
-    def forward(self, x):
-        return self.network(x)
