@@ -278,6 +278,7 @@ class TrainingWorker(Worker):
                            current_policy_loss*self.args.policy_loss_weight + \
                            current_reward_loss*self.args.reward_loss_weight + \
                            current_nce_loss*self.args.contrastive_loss_weight
+
             current_loss = (current_loss * weights).mean()
             total_losses.append(current_loss.detach().cpu().item())
             loss = loss + current_loss
