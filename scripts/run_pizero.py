@@ -21,8 +21,7 @@ def run_pizero(args):
         training_worker.buffer.append(obs, action, float(reward), root.value(), policy.probs, done)
 
         # TODO: Train only after replay buffer reaches a certain capacity?
-        print("Done at {}".format(env_steps))
-        if env_steps % args.training_interval == 0 and env_steps > 0:
+        if env_steps % args.training_interval == 0 and env_steps > 100:
             training_worker.step()
             training_worker.log_results()
 
