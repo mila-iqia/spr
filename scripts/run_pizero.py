@@ -9,16 +9,23 @@ import wandb
 def run_pizero(args):
     pizero = PiZero(args)
     env, mcts = pizero.env, pizero.mcts
-    obs, env_steps = env.reset(), 0
-    obs = obs.permute(0, 3, 1, 2)
+    obs, env_steps = torch.from_numpy(env.reset()), 0
     training_worker = TrainingWorker(args, model=pizero.network)
 
     while env_steps < args.total_env_steps:
-        root = mcts.run(obs)
-        action, policy = mcts.select_action(root)
-        next_obs, reward, done = env.step(action)
-        next_obs = next_obs.permute(0, 3, 1, 2)
-        training_worker.buffer.append(obs, action, float(reward), root.value(), policy.probs, done)
+        # Run MCTS for the vectorized observation
+        roots = mcts.batched_run(obs)
+        actions, policies = [], []
+        for root in roots:
+            # Select action for each obs
+            action, policy = mcts.select_action(root)
+            actions.append(action)
+            policies.append(policy)
+        next_obs, reward, done, _ = env.step(actions)
+        next_obs = torch.from_numpy(next_obs)
+
+        # TODO: Make the buffer work with batch examples
+        # training_worker.buffer.append(obs, action, float(reward), root.value(), policy.probs, done)
 
         # TODO: Train only after replay buffer reaches a certain capacity?
         if env_steps % args.training_interval == 0 and env_steps > 100:

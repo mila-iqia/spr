@@ -380,14 +380,14 @@ class MCTSModel(nn.Module):
         hidden_state = self.encoder(obs)
         policy_logits = self.policy_model(hidden_state)
         # TODO: Are zeroes the right initilization here?
-        return NetworkOutput(hidden_state, 0, policy_logits, 0)
+        return [NetworkOutput(hidden_state[i], 0, policy_logits[i], 0) for i in range(obs.shape[0])]
 
     def inference(self, state, action):
         next_state, reward_logits, policy_logits, value_logits = self.forward(state, action)
         value = inverse_transform(from_categorical(value_logits, logits=True))
         reward = inverse_transform(from_categorical(reward_logits, logits=True))
 
-        return NetworkOutput(next_state, reward, policy_logits, value)
+        return [NetworkOutput(next_state[i], reward[i], policy_logits[i], value[i]) for i in range(state.shape[0])]
 
     def forward(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)
