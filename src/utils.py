@@ -30,7 +30,7 @@ def get_argparser():
     parser.add_argument('--max-episode-length', type=int, default=int(108e3), metavar='LENGTH',
                         help='Max episode length in game frames (0 to disable)')
     parser.add_argument('--discount', type=float, default=0.99)
-    parser.add_argument('--evaluation-episodes', type=int, default=10,
+    parser.add_argument('--evaluation-episodes', type=int, default=5,
                         help='Number of episodes to average over when evaluating')
 
     # MCTS arguments

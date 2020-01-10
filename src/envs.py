@@ -6,9 +6,10 @@ import cv2
 from .ram_annotations import atari_dict
 
 import torch
+import gym
 
 
-class Env():
+class AtariEnv(gym.core.Env):
     def __init__(self, args):
         self.device = args.device
         self.ale = atari_py.ALEInterface()
@@ -26,6 +27,9 @@ class Env():
         self.state_buffer = deque([], maxlen=args.framestack)
         self.training = True  # Consistent with model training mode
         self.grayscale = args.grayscale
+        channels = 1 if self.grayscale else 3
+        self.observation_space = gym.spaces.Box(low=-float('inf'), high=float('inf'), shape=(args.framestack, channels, 96, 96))
+        self.action_space = gym.spaces.Discrete(len(self.actions))
 
     def _get_state(self):
         if self.grayscale:
@@ -63,7 +67,7 @@ class Env():
         observation = self._get_state()
         self.state_buffer.append(observation)
         self.lives = self.ale.lives()
-        return torch.stack(list(self.state_buffer), 0)
+        return torch.stack(list(self.state_buffer), 0).permute(0, 3, 1, 2)
 
     def step(self, action):
         # Repeat action 4 times, max pool over last 2 frames
@@ -92,7 +96,7 @@ class Env():
                 done = True
             self.lives = lives
         # Return state, reward, done
-        return torch.stack(list(self.state_buffer), 0), reward, done
+        return torch.stack(list(self.state_buffer), 0).permute(0, 3, 1, 2), reward, done, {}
 
     # Uses loss of life as terminal signal
     def train(self):
@@ -118,7 +122,7 @@ class Env():
         return self.ale.getScreenRGB2()
 
 
-class AARIEnv(Env):
+class AARIEnv(AtariEnv):
     def __init__(self, args):
         super().__init__(args)
         self.env_name = args.game

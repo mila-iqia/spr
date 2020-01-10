@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import torch
 from torch.distributions import Categorical
 
-from src.envs import Env
+import gym
 from src.mcts_memory import ReplayMemory
 from src.model_trainer import MCTSModel
 
@@ -56,13 +56,13 @@ class PiZero:
         self.args = args
         self.args.pb_c_base = 19652
         self.args.pb_c_init = 1.25
-        self.env = Env(args)
-        self.network = MCTSModel(args, self.env.action_space())
+        self.env = gym.vector.make('atari-v0', num_envs=8, args=args)
+        self.network = MCTSModel(args, self.env.action_space[0].n)
         self.network.to(self.args.device)
         self.mcts = MCTS(args, self.env, self.network)
 
     def evaluate(self):
-        env = Env(self.args)
+        env = gym.make('atari-v0', args=self.args)
         env.eval()
         T_rewards, T_Qs = [], []
 
@@ -73,7 +73,6 @@ class PiZero:
                 if done:
                     state, reward_sum, done = env.reset(), 0, False
 
-                state = state.permute(0, 3, 1, 2)
                 root = self.mcts.run(state)
                 action, policy = self.mcts.select_action(root)
                 state, reward, done = env.step(action)  # Step
@@ -121,20 +120,19 @@ class MCTS:
     def batched_run(self, obs_tensor):
         roots = []
         obs_tensor = obs_tensor.to(self.args.device)
+        network_output = self.network.initial_inference(obs_tensor)
+
         for i in range(obs_tensor.shape[0]):
             root = Node(0)
             root.hidden_state = obs_tensor[i]
+            self.expand_node(root, network_output[i])
             roots.append(root)
 
         for s in range(self.args.num_simulations):
-            nodes = []
-            search_paths = []
+            nodes, search_paths, actions, hidden_states = [], [], [], []
             for i in range(obs_tensor.shape[0]):
                 node = roots[i]
                 search_path = [node]
-
-                actions = []
-                hidden_states = []
 
                 while node.expanded():
                     action, node = self.select_child(node)
@@ -143,7 +141,7 @@ class MCTS:
                 # Inside the search tree we use the dynamics function to obtain the next
                 # hidden state given an action and the previous hidden state.
                 parent = search_path[-2]
-                actions.append(action)
+                actions.append(torch.tensor(action))
                 hidden_states.append(parent.hidden_state)
                 nodes.append(node)
                 search_paths.append(search_path)
@@ -161,7 +159,7 @@ class MCTS:
     def expand_node(self, node, network_output):
         node.hidden_state = network_output.next_state
         node.reward = network_output.reward
-        policy = {a: math.exp(network_output.policy_logits.squeeze()[a]) for a in range(self.env.action_space())}
+        policy = {a: math.exp(network_output.policy_logits.squeeze()[a]) for a in range(self.env.action_space[0].n)}
         policy_sum = sum(policy.values())
         for action, p in policy.items():
             node.children[action] = Node(p / policy_sum)
