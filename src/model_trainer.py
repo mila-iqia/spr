@@ -251,7 +251,7 @@ class TrainingWorker(Worker):
         all_observation, all_action, all_reward, return_, done, done_n, _, \
         is_weights, policy_logits, values = self.buffer.sample_batch(self.args.batch_size)
 
-        initial_states = all_observation[:self.args.framestack, :]
+        initial_states = states[:self.args.framestack, :]
         initial_states = torch.flatten(initial_states, 1, 2)
 
         initial_actions = actions[:, :self.args.framestack]
