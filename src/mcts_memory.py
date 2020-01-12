@@ -5,9 +5,63 @@ import numpy as np
 import torch
 from recordclass import recordclass
 
+from rlpyt.replays.non_sequence.frame import AsyncPrioritizedReplayFrameBuffer
+from rlpyt.replays.sequence.n_step import SamplesFromReplay
+from rlpyt.replays.sequence.frame import AsyncPrioritizedSequenceReplayFrameBuffer
+from rlpyt.utils.buffer import torchify_buffer
+from rlpyt.utils.collections import namedarraytuple
+from rlpyt.utils.misc import extract_sequences
+
 Transition = recordclass('Transition', ('timestep', 'state', 'action', 'reward', 'value', 'policy', 'nonterminal'))
 blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)  # TODO: Set appropriate default policy value
 blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)
+
+SamplesFromReplayPriExt = namedarraytuple("SamplesFromReplayPriExt",
+                                       SamplesFromReplay._fields + ("is_weights", "policy_logits", "values"))
+EPS = 1e-6
+
+
+class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequenceReplayFrameBuffer):
+    """
+    Extends AsyncPrioritizedSequenceReplayFrameBuffer to return policy_logits and values too during sampling.
+    """
+    def sample_batch(self, batch_B):
+        (T_idxs, B_idxs), priorities = self.priority_tree.sample(
+            batch_B, unique=self.unique)
+        if self.rnn_state_interval > 1:
+            T_idxs = T_idxs * self.rnn_state_interval
+        batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
+        is_weights = (1. / priorities) ** self.beta
+        is_weights /= max(is_weights)  # Normalize.
+        is_weights = torchify_buffer(is_weights).float()
+
+        policy_logits = extract_sequences(self.samples.policy_logits, T_idxs, B_idxs, self.batch_T)
+        values = extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T)
+        return SamplesFromReplayPriExt(*batch, is_weights=is_weights, policy_logits=policy_logits, values=values)
+
+
+class LocalBuffer:
+    """
+    Helper class to store locally a single [num_timesteps (T), num_envs (B)] segment
+    """
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.observations, self.actions, self.rewards, self.dones = [], [], [], []
+        self.policy_logits, self.values = [], []
+
+    def append(self, vec_obs, vec_a, vec_r, vec_d, vec_pl, vec_v):
+        self.observations.append(vec_obs)
+        self.actions.append(vec_a)
+        self.rewards.append(vec_r)
+        self.dones.append(vec_d)
+        self.policy_logits.append(vec_pl)
+        self.values.append(vec_v)
+
+    def stack(self):
+        return [torch.stack(x) for x in [self.observations, self.actions, self.rewards, self.dones,
+                                         self.policy_logits, self.values]]
 
 
 # Segment tree data structure where parent node values are sum/max of children node values

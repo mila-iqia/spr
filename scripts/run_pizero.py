@@ -1,3 +1,4 @@
+from src.mcts_memory import LocalBuffer
 from src.model_trainer import TrainingWorker
 from src.pizero import PiZero
 from src.utils import get_argparser
@@ -11,23 +12,29 @@ def run_pizero(args):
     env, mcts = pizero.env, pizero.mcts
     obs, env_steps = torch.from_numpy(env.reset()), 0
     training_worker = TrainingWorker(args, model=pizero.network)
+    local_buf = LocalBuffer()
 
     while env_steps < args.total_env_steps:
         # Run MCTS for the vectorized observation
         roots = mcts.batched_run(obs)
-        actions, policies = [], []
+        actions, policy_logits, values = [], [], []
         for root in roots:
             # Select action for each obs
-            action, policy = mcts.select_action(root)
+            action, p_logit = mcts.select_action(root)
             actions.append(action)
-            policies.append(policy)
+            policy_logits.append(p_logit)
+            values.append(root.value())
         next_obs, reward, done, _ = env.step(actions)
         next_obs = torch.from_numpy(next_obs)
 
-        # TODO: Make the buffer work with batch examples
-        # training_worker.buffer.append(obs, action, float(reward), root.value(), policy.probs, done)
+        local_buf.append(obs, torch.tensor(actions), torch.from_numpy(reward), torch.from_numpy(done),
+                         torch.stack(policy_logits), torch.stack(values))
 
-        # TODO: Train only after replay buffer reaches a certain capacity?
+        if env_steps % args.jumps == 0 and env_steps > 0:
+            samples_to_buffer = training_worker.samples_to_buffer(*local_buf.stack())
+            training_worker.buffer.append_samples(samples_to_buffer)
+            local_buf.clear()
+
         if env_steps % args.training_interval == 0 and env_steps > 100:
             training_worker.step()
             training_worker.log_results()

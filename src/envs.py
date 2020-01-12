@@ -3,10 +3,12 @@ from collections import deque
 import random
 import atari_py
 import cv2
+
 from .ram_annotations import atari_dict
 
 import torch
 import gym
+import numpy as np
 
 
 class AtariEnv(gym.core.Env):
@@ -152,5 +154,34 @@ def ram2label(game_name, ram):
     else:
         assert False, "{} is not currently supported by AARI. It's either not an Atari game or we don't have the ram annotations yet!".format(game_name)
     return label_dict
+
+
+def get_example_outputs(args):
+    """Do this in a sub-process to avoid setup conflict in master/workers (e.g.
+    MKL)."""
+    env = AtariEnv(args)
+    examples = {}
+    o = env.reset()
+    a = env.action_space.sample()
+    o, r, d, env_info = env.step(a)
+    r = np.asarray(r, dtype="float32")  # Must match torch float dtype here.
+    # agent.reset()
+    # agent_inputs = torchify_buffer(AgentInputs(o, a, r))
+    # a, agent_info = agent.step(*agent_inputs)
+    # if "prev_rnn_state" in agent_info:
+    #     # Agent leaves B dimension in, strip it: [B,N,H] --> [N,H]
+    #     agent_info = agent_info._replace(prev_rnn_state=agent_info.prev_rnn_state[0])
+    examples["observation"] = o
+    examples["reward"] = r
+    examples["done"] = d
+    examples["env_info"] = env_info
+    examples["action"] = a  # OK to put torch tensor here, could numpify.
+    examples["policy_logits"] = torch.tensor([0. for _ in range(env.action_space.n)])
+    examples['value'] = 0.
+    # examples["agent_info"] = agent_info
+    env.close()
+
+    return examples
+
 
 
