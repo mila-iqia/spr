@@ -20,6 +20,7 @@ def get_argparser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--total-env-steps', type=int, default=100000,
                         help='Total number to env steps to train (default: 100000)')
+    parser.add_argument('--num-envs', type=int, default=4, help='Number of parallel envs to run')
     parser.add_argument('--buffer-size', type=int, default=100000)
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')

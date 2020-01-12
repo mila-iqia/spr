@@ -3,12 +3,17 @@ import collections
 from torch import nn
 import torch
 from torch.nn import functional as F
-from src.mcts_memory import ReplayMemory
+
+from rlpyt.utils.collections import namedarraytuple
+from src.envs import get_example_outputs
+from src.mcts_memory import ReplayMemory, AsyncPrioritizedSequenceReplayFrameBufferExtended
 import numpy as np
 from statistics import mean
 import wandb
 
 NetworkOutput = collections.namedtuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
+SamplesToBuffer = namedarraytuple("SamplesToBuffer",
+                                  ["observation", "action", "reward", "done", "policy_logits", "value"])
 
 
 class Worker(object):
@@ -48,7 +53,7 @@ class TrainingWorker(Worker):
     def __init__(self, args, model):
         super().__init__(args)
         self.model = model
-        self.buffer = ReplayMemory(args, args.buffer_size, n=args.multistep+args.jumps)
+        self.initialize_replay_buffer()
         self.maximum_length = args.jumps
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
@@ -59,6 +64,40 @@ class TrainingWorker(Worker):
         self.val_trackers = dict()
         self.reset_trackers("train")
         self.reset_trackers("val")
+
+    def initialize_replay_buffer(self):
+        examples = get_example_outputs(self.args)
+        example_to_buffer = SamplesToBuffer(
+            observation=examples["observation"],
+            action=examples["action"],
+            reward=examples["reward"],
+            done=examples["done"],
+            policy_logits=examples['policy_logits'],
+            value=examples['value']
+        )
+        replay_kwargs = dict(
+            example=example_to_buffer,
+            size=self.args.buffer_size,
+            B=self.args.num_envs,
+            batch_T=self.args.jumps,
+            rnn_state_interval=0,
+            discount=self.args.discount,
+            n_step_return=self.args.multistep,
+            alpha=self.args.priority_exponent,
+            beta=self.args.priority_weight,
+            default_priority=1
+        )
+        self.buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
+
+    def samples_to_buffer(self, observation, action, reward, done, policy_logits, value):
+        return SamplesToBuffer(
+            observation=observation,
+            action=action,
+            reward=reward,
+            done=done,
+            policy_logits=policy_logits,
+            value=value
+        )
 
     def prepare_start(self):
         pass
@@ -209,9 +248,10 @@ class TrainingWorker(Worker):
         :return: Updated weights for prioritized experience replay.
         """
 
-        indices, states, actions, rewards, policies, values, weights = self.buffer.sample(self.args.batch_size)
+        all_observation, all_action, all_reward, return_, done, done_n, _, \
+        is_weights, policy_logits, values = self.buffer.sample_batch(self.args.batch_size)
 
-        initial_states = states[:, :self.args.framestack]
+        initial_states = all_observation[:self.args.framestack, :]
         initial_states = torch.flatten(initial_states, 1, 2)
 
         initial_actions = actions[:, :self.args.framestack]
