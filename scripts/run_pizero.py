@@ -17,18 +17,22 @@ def run_pizero(args):
     while env_steps < args.total_env_steps:
         # Run MCTS for the vectorized observation
         roots = mcts.batched_run(obs)
-        actions, policy_logits, values = [], [], []
+        actions, policy_probs, values = [], [], []
         for root in roots:
             # Select action for each obs
             action, p_logit = mcts.select_action(root)
             actions.append(action)
-            policy_logits.append(p_logit)
+            policy_probs.append(p_logit.probs)
             values.append(root.value())
         next_obs, reward, done, _ = env.step(actions)
         next_obs = torch.from_numpy(next_obs)
 
-        local_buf.append(obs, torch.tensor(actions), torch.from_numpy(reward), torch.from_numpy(done),
-                         torch.stack(policy_logits), torch.stack(values))
+        local_buf.append(obs,
+                         torch.tensor(actions).float(),
+                         torch.from_numpy(reward).float(),
+                         torch.from_numpy(done).float(),
+                         torch.stack(policy_probs).float(),
+                         torch.stack(values).float().cpu())
 
         if env_steps % args.jumps == 0 and env_steps > 0:
             samples_to_buffer = training_worker.samples_to_buffer(*local_buf.stack())

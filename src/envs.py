@@ -6,7 +6,7 @@ import cv2
 
 from .ram_annotations import atari_dict
 
-import torch
+# import torch
 import gym
 import numpy as np
 
@@ -38,17 +38,16 @@ class AtariEnv(gym.core.Env):
             obs = self.ale.getScreenGrayscale()
         else:
             obs = self.ale.getScreenRGB()
-        state = cv2.resize(obs, (96, 96), interpolation=cv2.INTER_LINEAR)
-        state = torch.tensor(state, dtype=torch.float32, device=self.device).div_(255)
+        state = cv2.resize(obs, (96, 96), interpolation=cv2.INTER_LINEAR)/255.
         if len(state.shape) == 2:
-            state = state.unsqueeze(-1)
+            state = state[..., None]
         return state
 
     def _reset_buffer(self):
         if self.grayscale:
-            blank = torch.zeros(96, 96, 1, device=self.device)
+            blank = np.zeros((96, 96, 1))
         else:
-            blank = torch.zeros(96, 96, 3, device=self.device)
+            blank = np.zeros((96, 96, 3))
         for _ in range(self.window):
             self.state_buffer.append(blank)
 
@@ -69,7 +68,7 @@ class AtariEnv(gym.core.Env):
         observation = self._get_state()
         self.state_buffer.append(observation)
         self.lives = self.ale.lives()
-        return torch.stack(list(self.state_buffer), 0).permute(0, 3, 1, 2)
+        return np.stack(list(self.state_buffer), 0).transpose(0, 3, 1, 2)
 
     def step(self, action):
         # Repeat action 4 times, max pool over last 2 frames
@@ -77,7 +76,7 @@ class AtariEnv(gym.core.Env):
             channels = 1
         else:
             channels = 3
-        frame_buffer = torch.zeros(2, 96, 96, channels, device=self.device)
+        frame_buffer = np.zeros((2, 96, 96, channels))
         reward, done = 0, False
         for t in range(4):
             reward += self.ale.act(self.actions.get(action))
@@ -88,7 +87,7 @@ class AtariEnv(gym.core.Env):
             done = self.ale.game_over()
             if done:
                 break
-        observation = frame_buffer.max(0)[0]
+        observation = frame_buffer.max(0)
         self.state_buffer.append(observation)
         # Detect loss of life as terminal in training mode
         if self.training:
@@ -98,7 +97,7 @@ class AtariEnv(gym.core.Env):
                 done = True
             self.lives = lives
         # Return state, reward, done
-        return torch.stack(list(self.state_buffer), 0).permute(0, 3, 1, 2), reward, done, {}
+        return np.stack(list(self.state_buffer), 0).transpose(0, 3, 1, 2), reward, done, {}
 
     # Uses loss of life as terminal signal
     def train(self):
@@ -176,7 +175,7 @@ def get_example_outputs(args):
     examples["done"] = d
     examples["env_info"] = env_info
     examples["action"] = a  # OK to put torch tensor here, could numpify.
-    examples["policy_logits"] = torch.tensor([0. for _ in range(env.action_space.n)])
+    examples["policy_probs"] = np.array([0. for _ in range(env.action_space.n)])
     examples['value'] = 0.
     # examples["agent_info"] = agent_info
     env.close()

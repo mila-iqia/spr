@@ -13,7 +13,7 @@ import wandb
 
 NetworkOutput = collections.namedtuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 SamplesToBuffer = namedarraytuple("SamplesToBuffer",
-                                  ["observation", "action", "reward", "done", "policy_logits", "value"])
+                                  ["observation", "action", "reward", "done", "policy_probs", "value"])
 
 
 class Worker(object):
@@ -72,30 +72,30 @@ class TrainingWorker(Worker):
             action=examples["action"],
             reward=examples["reward"],
             done=examples["done"],
-            policy_logits=examples['policy_logits'],
+            policy_probs=examples['policy_probs'],
             value=examples['value']
         )
         replay_kwargs = dict(
             example=example_to_buffer,
             size=self.args.buffer_size,
             B=self.args.num_envs,
-            batch_T=self.args.jumps,
+            batch_T=self.args.jumps+self.args.multistep, # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
             rnn_state_interval=0,
             discount=self.args.discount,
-            n_step_return=self.args.multistep,
+            n_step_return=1,
             alpha=self.args.priority_exponent,
             beta=self.args.priority_weight,
             default_priority=1
         )
         self.buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
 
-    def samples_to_buffer(self, observation, action, reward, done, policy_logits, value):
+    def samples_to_buffer(self, observation, action, reward, done, policy_probs, value):
         return SamplesToBuffer(
             observation=observation,
             action=action,
             reward=reward,
             done=done,
-            policy_logits=policy_logits,
+            policy_probs=policy_probs,
             value=value
         )
 
@@ -115,13 +115,13 @@ class TrainingWorker(Worker):
             trackers = self.train_trackers
         else:
             trackers = self.val_trackers
-        trackers["epoch_losses"] = np.zeros(self.maximum_length)
-        trackers["value_losses"] = np.zeros(self.maximum_length)
-        trackers["policy_losses"] = np.zeros(self.maximum_length)
-        trackers["reward_losses"] = np.zeros(self.maximum_length)
-        trackers["local_losses"] = np.zeros(self.maximum_length)
-        trackers["value_errors"] = np.zeros(self.maximum_length)
-        trackers["reward_errors"] = np.zeros(self.maximum_length)
+        trackers["epoch_losses"] = np.zeros(self.maximum_length+1)
+        trackers["value_losses"] = np.zeros(self.maximum_length+1)
+        trackers["policy_losses"] = np.zeros(self.maximum_length+1)
+        trackers["reward_losses"] = np.zeros(self.maximum_length+1)
+        trackers["local_losses"] = np.zeros(self.maximum_length+1)
+        trackers["value_errors"] = np.zeros(self.maximum_length+1)
+        trackers["reward_errors"] = np.zeros(self.maximum_length+1)
         trackers["iterations"] = 0
 
     def step(self):
@@ -208,7 +208,7 @@ class TrainingWorker(Worker):
                 np.mean(reward_errors),
                 np.mean(value_errors)))
 
-        for i in range(self.maximum_length):
+        for i in range(self.maximum_length + 1):
             jump = i
             if verbose_print:
                 print(
@@ -247,51 +247,73 @@ class TrainingWorker(Worker):
         :param step: whether or not to actually take a gradient step.
         :return: Updated weights for prioritized experience replay.
         """
+        with torch.no_grad():
+            states, actions, rewards, return_, done, done_n, unk, \
+            is_weights, policies, values = self.buffer.sample_batch(self.args.batch_size)
 
-        all_observation, all_action, all_reward, return_, done, done_n, _, \
-        is_weights, policy_logits, values = self.buffer.sample_batch(self.args.batch_size)
+            states = states.float().to(self.args.device)
+            actions = actions.long().to(self.args.device)
+            rewards = rewards.float().to(self.args.device)
+            policies = torch.from_numpy(policies).float().to(self.args.device)
+            values = torch.from_numpy(values).float().to(self.args.device)
+            initial_states = states[0]
+            initial_actions = actions[0]
+            is_weights = torch.tensor(is_weights, device=self.args.device, requires_grad=False)
 
-        initial_states = states[:self.args.framestack, :]
-        initial_states = torch.flatten(initial_states, 1, 2)
-
-        initial_actions = actions[:, :self.args.framestack]
-
-        current_state = self.model.encode(initial_states, initial_actions)
-
-        target_images = states[:, self.args.framestack:self.args.framestack+self.maximum_length]
-        target_images = target_images.reshape(-1, *states.shape[2:])
-        target_images = self.model.target_encoder(target_images)
+            target_images = states[:, :, 0].transpose(0, 1)
+            target_images = target_images.reshape(-1, *states.shape[-3:])
 
         # Get into the shape used by the NCE code.
-        target_images = target_images.view(states.shape[0], -1, *target_images.shape[1:])
-        target_images = target_images.flatten(3, 4).permute(3, 0, 1, 2)
+        if not self.args.no_nce:
+            target_images = self.model.target_encoder(target_images)
+            target_images = target_images.view(states.shape[1], -1, *target_images.shape[1:])
+            target_images = target_images.flatten(3, 4).permute(3, 0, 1, 2)
+
+        current_state, pred_reward,\
+        pred_policy, pred_value = self.model.initial_inference(initial_states,
+                                                               initial_actions,
+                                                               batch=True)
+
+        predictions = [(1.0, pred_reward, pred_policy, pred_value)]
+        pred_states = [current_state]
 
         pred_values, pred_rewards, pred_policies = [], [], []
-        loss = 0.
+        loss = torch.zeros(1, device=self.args.device)
         reward_losses, value_losses, policy_losses, nce_losses, total_losses, value_targets = [], [], [], [], [], []
 
-        discounts = torch.ones_like(rewards)[:, :self.multistep]*self.args.discount
-        discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[None, :].float()
+        discounts = torch.ones_like(rewards)[:self.multistep]*self.args.discount
+        discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[:, None].float()
 
         value_errors, reward_errors = [], []
 
         for i in range(self.maximum_length):
-            action = actions[:, self.args.framestack + i]
+            action = actions[i]
             current_state, pred_reward, pred_policy, pred_value = self.model(current_state, action)
 
-            value_target = torch.sum(discounts*rewards[:, i:i+self.multistep], -1)
+            current_state = ScaleGradient.apply(current_state, 0.5)
+
+            predictions.append((1. / self.maximum_length,
+                                pred_reward,
+                                pred_policy,
+                                pred_value))
+            pred_states.append(current_state)
+
+        for i, prediction in enumerate(predictions):
+
+            loss_scale, pred_reward, pred_policy, pred_value = prediction
+            value_target = torch.sum(discounts*rewards[i:i+self.multistep], 0)
             value_target = value_target + self.args.discount ** self.multistep \
-                           * values[:, self.multistep]
+                           * values[i+self.multistep]
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
-            reward_target = to_categorical(transform(rewards[:, i]))
+            reward_target = to_categorical(transform(rewards[i]))
 
             pred_rewards.append(inverse_transform(from_categorical(pred_reward, logits=True)))
             pred_values.append(inverse_transform(from_categorical(pred_value, logits=True)))
             pred_policies.append(pred_policy)
 
-            value_errors.append(torch.abs(pred_values[-1] - values[:, i]).detach().cpu().numpy())
-            reward_errors.append(torch.abs(pred_rewards[-1] - rewards[:, i]).detach().cpu().numpy())
+            value_errors.append(torch.abs(pred_values[-1] - values[i]).detach().cpu().numpy())
+            reward_errors.append(torch.abs(pred_rewards[-1] - rewards[i]).detach().cpu().numpy())
 
             pred_value = F.log_softmax(pred_value, -1)
             pred_reward = F.log_softmax(pred_reward, -1)
@@ -299,45 +321,49 @@ class TrainingWorker(Worker):
 
             current_reward_loss = -torch.sum(reward_target * pred_reward, -1).mean()
             current_value_loss = -torch.sum(value_target * pred_value, -1).mean()
-            current_policy_loss = -torch.sum(policies[:, i] * pred_policy, -1).mean()
+            current_policy_loss = -torch.sum(policies[i] * pred_policy, -1).mean()
 
             reward_losses.append(current_reward_loss.detach().cpu().item())
             value_losses.append(current_value_loss.detach().cpu().item())
             policy_losses.append(current_policy_loss.detach().cpu().item())
 
-            if self.use_all_targets:
-                current_targets = target_images.roll(-i, 2).flatten(1, 2)
+            if not self.args.no_nce:
+                if self.use_all_targets:
+                    current_targets = target_images.roll(-i, 2).flatten(1, 2)
+                else:
+                    current_targets = target_images[:, :, i]
+                nce_input = current_state.flatten(2, 3).permute(2, 0, 1)
+                current_nce_loss = self.nce(nce_input, current_targets).mean()
+                nce_losses.append(current_nce_loss.detach().cpu().item())
             else:
-                current_targets = target_images[:, :, i]
-
-            nce_input = current_state.flatten(2, 3).permute(2, 0, 1)
-            current_nce_loss = self.nce(nce_input, current_targets).mean()
-            nce_losses.append(current_nce_loss.detach().cpu().item())
+                current_nce_loss = 0
+                nce_losses.append(0)
 
             current_loss = current_value_loss*self.args.value_loss_weight + \
                            current_policy_loss*self.args.policy_loss_weight + \
                            current_reward_loss*self.args.reward_loss_weight + \
                            current_nce_loss*self.args.contrastive_loss_weight
 
-            current_loss = (current_loss * weights).mean()
+            current_loss = (current_loss * is_weights).mean()
             total_losses.append(current_loss.detach().cpu().item())
             loss = loss + current_loss
 
-        self.buffer.update_priorities(indices, value_errors[0])
+        self.buffer.update_batch_priorities(value_errors[0])
 
         value_errors = np.mean(value_errors, -1)
         reward_errors = np.mean(reward_errors, -1)
 
-        loss = loss.mean()/self.maximum_length
+        loss = loss.mean()
         if step:
             self.model.optimizer.zero_grad()
             loss.backward()
             self.model.optimizer.step()
+            self.model.scheduler.step()
 
         self.epochs_till_now += 1
 
-        return reward_losses, nce_losses, policy_losses, value_losses, \
-               total_losses, value_errors, reward_errors
+        return total_losses, reward_losses, nce_losses, policy_losses,\
+               value_losses, value_errors, reward_errors
 
 
 class LocalNCE(nn.Module):
@@ -401,26 +427,37 @@ class MCTSModel(nn.Module):
         self.value_model = ValueNetwork(args.hidden_size)
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
-        self.target_encoder = RepNet(1, grayscale=args.grayscale, actions=False)
+        self.target_encoder = SmallEncoder(args)
 
         params = list(self.dynamics_model.parameters()) + \
             list(self.value_model.parameters()) +\
             list(self.policy_model.parameters()) +\
             list(self.encoder.parameters()) +\
             list(self.target_encoder.parameters())
-        self.optimizer = torch.optim.Adam(params, lr=args.learning_rate, eps=args.adam_eps)
-
+        self.optimizer = torch.optim.SGD(params,
+                                         lr=args.learning_rate,
+                                         momentum=args.momentum,
+                                         weight_decay=args.weight_decay)
+        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
+                                                                args.lr_decay ** (1. / args.lr_decay_steps), )
     def encode(self, images, actions):
         return self.encoder(images, actions)
 
-    def initial_inference(self, obs):
+    def initial_inference(self, obs, actions=None, batch=False):
         if len(obs.shape) < 5:
             obs = obs.unsqueeze(0)
         obs = obs.flatten(1, 2)
-        hidden_state = self.encoder(obs)
+        hidden_state = self.encoder(obs, actions)
         policy_logits = self.policy_model(hidden_state)
         # TODO: Are zeroes the right initilization here?
-        return [NetworkOutput(hidden_state[i], 0, policy_logits[i], 0) for i in range(obs.shape[0])]
+        value_logits = self.value_model(hidden_state)
+        reward_logits = self.dynamics_model.reward_predictor(hidden_state)
+
+        if batch:
+            return hidden_state, reward_logits, policy_logits, value_logits
+        else:
+            return [NetworkOutput(hidden_state[i], reward_logits[i],
+                                  policy_logits[i], value_logits[i]) for i in range(obs.shape[0])]
 
     def inference(self, state, action):
         next_state, reward_logits, policy_logits, value_logits = self.forward(state, action)
@@ -436,6 +473,40 @@ class MCTSModel(nn.Module):
 
         return next_state, reward_logits, policy_logits, value_logits
 
+
+def init(module, weight_init, bias_init, gain=1):
+    weight_init(module.weight.data, gain=gain)
+    bias_init(module.bias.data)
+    return module
+
+class SmallEncoder(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.feature_size = args.hidden_size
+        self.input_channels = 1 if args.grayscale else 3
+        self.args = args
+        init_ = lambda m: init(m,
+                               nn.init.orthogonal_,
+                               lambda x: nn.init.constant_(x, 0),
+                               nn.init.calculate_gain('relu'))
+
+        self.main = nn.Sequential(
+            init_(nn.Conv2d(self.input_channels, 32, 8, stride=2, padding=3)),  # 48x48
+            nn.ReLU(),
+            nn.BatchNorm2d(32),
+            init_(nn.Conv2d(32, 64, 4, stride=2, padding=1)),  # 24x24
+            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            init_(nn.Conv2d(64, 128, 4, stride=2, padding=1)),  # 12 x 12
+            nn.ReLU(),
+            nn.BatchNorm2d(128),
+            init_(nn.Conv2d(128, self.feature_size, 4, stride=2, padding=1)),  # 6 x 6
+            nn.ReLU())
+        self.train()
+
+    def forward(self, inputs):
+        fmaps = self.main(inputs)
+        return fmaps
 
 class TransitionModel(nn.Module):
     def __init__(self,
@@ -700,3 +771,18 @@ def from_categorical(distribution, limit=300, logits=True):
         distribution = torch.softmax(distribution, -1)
     weights = torch.arange(-limit, limit + 1, device=distribution.device).float()
     return distribution @ weights
+
+
+class ScaleGradient(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, tensor, constant):
+        # ctx is a context object that can be used to stash information
+        # for backward computation
+        ctx.constant = constant
+        return tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # We return as many input gradients as there were arguments.
+        # Gradients of non-Tensor arguments to forward must be None.
+        return grad_output * ctx.constant, None
