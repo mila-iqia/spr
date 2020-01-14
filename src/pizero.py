@@ -56,7 +56,7 @@ class PiZero:
         self.args = args
         self.args.pb_c_base = 19652
         self.args.pb_c_init = 1.25
-        self.env = gym.vector.make('atari-v0', num_envs=8, args=args)
+        self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args)
         self.network = MCTSModel(args, self.env.action_space[0].n)
         self.network.to(self.args.device)
         self.mcts = MCTS(args, self.env, self.network)

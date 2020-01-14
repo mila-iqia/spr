@@ -17,9 +17,8 @@ blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0
 blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)
 
 SamplesFromReplayPriExt = namedarraytuple("SamplesFromReplayPriExt",
-                                       SamplesFromReplay._fields + ("is_weights", "policy_logits", "values"))
+                                       SamplesFromReplay._fields + ("is_weights", "policy_probs", "values"))
 EPS = 1e-6
-
 
 class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequenceReplayFrameBuffer):
     """
@@ -35,10 +34,22 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
         is_weights /= max(is_weights)  # Normalize.
         is_weights = torchify_buffer(is_weights).float()
 
-        policy_logits = extract_sequences(self.samples.policy_logits, T_idxs, B_idxs, self.batch_T)
-        values = extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T)
-        return SamplesFromReplayPriExt(*batch, is_weights=is_weights, policy_logits=policy_logits, values=values)
+        policy_probs = extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T + self.n_step_return)
+        values = extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T + self.n_step_return)
+        batch = SamplesFromReplayPriExt(*batch, is_weights=is_weights, policy_probs=policy_probs, values=values)
+        return self.sanitize_batch(batch)
 
+    def sanitize_batch(self, batch):
+        has_dones, inds = torch.max(batch.done, 0)
+        for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
+            if not has_done:
+                continue
+            batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
+            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
+            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
+            batch.all_reward[ind+1:, i] = 0
+            batch.values[ind+1:, i] = 0
+        return batch
 
 class LocalBuffer:
     """

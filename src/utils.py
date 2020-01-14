@@ -41,8 +41,11 @@ def get_argparser():
     parser.add_argument('--training-interval', type=int, default=200,
                         help='Perform training after every {training-interval} env steps ')
     parser.add_argument('--batch-size', type=int, default=64, help='Batch size to use during training')
-    parser.add_argument('--learning-rate', type=float, default=0.0000625, metavar='η', help='Learning rate')
-    parser.add_argument('--adam-eps', type=float, default=1.5e-4, metavar='ε', help='Adam epsilon')
+    parser.add_argument('--learning-rate', type=float, default=0.05, metavar='η', help='Learning rate')
+    parser.add_argument('--lr-decay-steps', type=float, default=350.e3, help='Learning rate decay time constant')
+    parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
+    parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
+    parser.add_argument('--weight-decay', type=float, default=1e-3, help='Weight decay regularization constant')
     parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
     parser.add_argument('--multistep', type=int, default=1, help='n-step for bootstrapping value targets')
     parser.add_argument('--priority-exponent', type=float, default=0.5, metavar='ω',
@@ -55,6 +58,7 @@ def get_argparser():
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
     parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
     parser.add_argument('--film', action='store_true')
+    parser.add_argument('--no-nce', action='store_true')
     parser.add_argument('--use-all-targets', action='store_true')
     parser.add_argument('--evaluation-interval', type=int, default=5000,
                         help='Evaluate after every {evaluation-interval} env steps')
