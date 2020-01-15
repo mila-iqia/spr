@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 import torch.nn.functional as F
 import torch
 from torch.distributions import Categorical
+import numpy as np
 
 import gym
 from src.mcts_memory import ReplayMemory
@@ -56,6 +57,8 @@ class PiZero:
         self.args = args
         self.args.pb_c_base = 19652
         self.args.pb_c_init = 1.25
+        self.args.root_exploration_fraction = 0.25
+        self.args.root_dirichlet_alpha = 0.25
         self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args)
         self.network = MCTSModel(args, self.env.action_space[0].n)
         self.network.to(self.args.device)
@@ -126,6 +129,7 @@ class MCTS:
             root = Node(0)
             root.hidden_state = obs_tensor[i]
             self.expand_node(root, network_output[i])
+            self.add_exploration_noise(root)
             roots.append(root)
 
         for s in range(self.args.num_simulations):
@@ -163,6 +167,15 @@ class MCTS:
         policy_sum = sum(policy.values())
         for action, p in policy.items():
             node.children[action] = Node(p / policy_sum)
+
+    # At the start of each search, we add dirichlet noise to the prior of the root
+    # to encourage the search to explore new actions.
+    def add_exploration_noise(self, node: Node):
+        actions = list(node.children.keys())
+        noise = np.random.dirichlet([self.args.root_dirichlet_alpha] * self.env.action_space[0].n)
+        frac = self.args.root_exploration_fraction
+        for a, n in zip(actions, noise):
+            node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
 
     # Select the child with the highest UCB score.
     def select_child(self, node: Node):
