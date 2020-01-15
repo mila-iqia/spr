@@ -41,7 +41,7 @@ def get_argparser():
     parser.add_argument('--training-interval', type=int, default=200,
                         help='Perform training after every {training-interval} env steps ')
     parser.add_argument('--batch-size', type=int, default=64, help='Batch size to use during training')
-    parser.add_argument('--learning-rate', type=float, default=0.05, metavar='η', help='Learning rate')
+    parser.add_argument('--learning-rate', type=float, default=0.005, metavar='η', help='Learning rate')
     parser.add_argument('--lr-decay-steps', type=float, default=350.e3, help='Learning rate decay time constant')
     parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
