@@ -49,7 +49,7 @@ def run_pizero(args):
             wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
         obs = next_obs
-        env_steps += 1
+        env_steps += args.num_envs
 
 
 def reanalyze(args, buffer):
