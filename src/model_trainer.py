@@ -258,7 +258,7 @@ class TrainingWorker(Worker):
             values = torch.from_numpy(values).float().to(self.args.device)
             initial_states = states[0]
             initial_actions = actions[0]
-            is_weights = torch.tensor(is_weights, device=self.args.device, requires_grad=False)
+            is_weights = is_weights.to(self.args.device)
 
             target_images = states[:, :, 0].transpose(0, 1)
             target_images = target_images.reshape(-1, *states.shape[-3:])
