@@ -55,6 +55,8 @@ def run_pizero(args):
             training_worker.log_results()
 
         if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
+            print('Env Steps: {}, Mean Reward: {}, Median Reward: {}'.format(env_steps, np.mean(episode_rewards),
+                                                                             np.median(episode_rewards)))
             wandb.log({'Mean Reward': np.mean(episode_rewards), 'Median Reward': np.median(episode_rewards),
                        'env_steps': env_steps})
 
