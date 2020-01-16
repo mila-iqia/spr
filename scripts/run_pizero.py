@@ -50,7 +50,7 @@ def run_pizero(args):
             training_worker.buffer.append_samples(samples_to_buffer)
             local_buf.clear()
 
-        if env_steps % args.training_interval == 0 and env_steps > 100:
+        if env_steps % args.training_interval == 0 and env_steps > 1000:
             training_worker.step()
             training_worker.log_results()
 
