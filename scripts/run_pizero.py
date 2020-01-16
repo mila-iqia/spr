@@ -18,6 +18,7 @@ def run_pizero(args):
     local_buf = LocalBuffer()
     eprets = np.zeros(args.num_envs, 'f')
     episode_rewards = deque(maxlen=10)
+    wandb.log({'env_steps': 0})
 
     while env_steps < args.total_env_steps:
         # Run MCTS for the vectorized observation
