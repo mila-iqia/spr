@@ -11,7 +11,7 @@ import numpy as np
 from statistics import mean
 import wandb
 
-NetworkOutput = collections.namedtuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
+NetworkOutput = namedarraytuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 SamplesToBuffer = namedarraytuple("SamplesToBuffer",
                                   ["observation", "action", "reward", "done", "policy_probs", "value"])
 
@@ -272,7 +272,7 @@ class TrainingWorker(Worker):
         current_state, pred_reward,\
         pred_policy, pred_value = self.model.initial_inference(initial_states,
                                                                initial_actions,
-                                                               batch=True)
+                                                               logits=True)
 
         predictions = [(1.0, pred_reward, pred_policy, pred_value)]
         pred_states = [current_state]
@@ -443,28 +443,28 @@ class MCTSModel(nn.Module):
     def encode(self, images, actions):
         return self.encoder(images, actions)
 
-    def initial_inference(self, obs, actions=None, batch=False):
+    def initial_inference(self, obs, actions=None, logits=False):
         if len(obs.shape) < 5:
             obs = obs.unsqueeze(0)
         obs = obs.flatten(1, 2)
         hidden_state = self.encoder(obs, actions)
         policy_logits = self.policy_model(hidden_state)
-        # TODO: Are zeroes the right initilization here?
         value_logits = self.value_model(hidden_state)
         reward_logits = self.dynamics_model.reward_predictor(hidden_state)
 
-        if batch:
-            return hidden_state, reward_logits, policy_logits, value_logits
-        else:
-            return [NetworkOutput(hidden_state[i], reward_logits[i],
-                                  policy_logits[i], value_logits[i]) for i in range(obs.shape[0])]
+        if logits:
+            return NetworkOutput(hidden_state, reward_logits, policy_logits, value_logits)
+
+        value = inverse_transform(from_categorical(value_logits, logits=True))
+        reward = inverse_transform(from_categorical(reward_logits, logits=True))
+        return NetworkOutput(hidden_state, reward, policy_logits, value)
 
     def inference(self, state, action):
         next_state, reward_logits, policy_logits, value_logits = self.forward(state, action)
         value = inverse_transform(from_categorical(value_logits, logits=True))
         reward = inverse_transform(from_categorical(reward_logits, logits=True))
 
-        return [NetworkOutput(next_state[i], reward[i], policy_logits[i], value[i]) for i in range(state.shape[0])]
+        return NetworkOutput(next_state, reward, policy_logits, value)
 
     def forward(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)

@@ -26,9 +26,9 @@ def run_pizero(args):
         actions, policy_probs, values = [], [], []
         for root in roots:
             # Select action for each obs
-            action, p_logit = mcts.select_action(root)
+            action, policy = mcts.select_action(root)
             actions.append(action)
-            policy_probs.append(p_logit.probs)
+            policy_probs.append(policy.probs)
             values.append(root.value())
         next_obs, reward, done, infos = env.step(actions)
         eprets += np.array(reward)
