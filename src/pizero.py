@@ -143,7 +143,7 @@ class MCTS:
                 search_path = [node]
 
                 while node.expanded():
-                    action, node = self.select_child(node)
+                    action, node = self.optimized_select_child(node, node.children.items())
                     search_path.append(node)
 
                 # Inside the search tree we use the dynamics function to obtain the next
@@ -199,11 +199,28 @@ class MCTS:
         value_score = self.min_max_stats.normalize(child.value())
         return prior_score + value_score
 
+    def optimized_select_child(self, parent, children):
+        pb_c = np.array([math.log((parent.visit_count + self.args.pb_c_base + 1) /
+                        self.args.pb_c_base) + self.args.pb_c_init] * len(children))
+        child_visit_counts, child_priors, child_values = zip(*[(child.visit_count, child.prior, child.value())
+                                                               for action, child in children])
+        child_visit_counts = np.array(child_visit_counts)
+        child_visit_counts += 1
+        pb_c *= math.sqrt(parent.visit_count)
+        pb_c = pb_c / child_visit_counts
+        prior_scores = pb_c * child_priors
+
+        value_scores = np.array([child.value() for action, child in children])
+        value_scores = self.min_max_stats.normalize(value_scores)
+        action_argmax = np.argmax(prior_scores + value_scores)
+        children = list(children)
+        return children[action_argmax][0], children[action_argmax][1]
+
     def backpropagate(self, search_path: List[Node], value: float):
         for node in reversed(search_path):
             node.value_sum += value
             node.visit_count += 1
-            self.min_max_stats.update(node.value())
+            self.min_max_stats.update(node.value().item())
 
             value = node.reward + self.args.discount * value
 
