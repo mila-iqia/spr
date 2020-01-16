@@ -7,8 +7,9 @@ from torch.distributions import Categorical
 import numpy as np
 
 import gym
-from src.mcts_memory import ReplayMemory
 from src.model_trainer import MCTSModel
+import time
+import wandb
 
 MAXIMUM_FLOAT_VALUE = float('inf')
 
@@ -167,10 +168,9 @@ class MCTS:
     def expand_node(self, node, network_output):
         node.hidden_state = network_output.next_state
         node.reward = network_output.reward
-        policy = {a: math.exp(network_output.policy_logits.squeeze()[a]) for a in range(self.env.action_space[0].n)}
-        policy_sum = sum(policy.values())
-        for action, p in policy.items():
-            node.children[action] = Node(p / policy_sum)
+        policy_probs = F.softmax(network_output.policy_logits, dim=-1)
+        for action in range(self.env.action_space[0].n):
+            node.children[action] = Node(policy_probs[action].item())
 
     # At the start of each search, we add dirichlet noise to the prior of the root
     # to encourage the search to explore new actions.
