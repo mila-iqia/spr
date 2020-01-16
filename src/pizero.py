@@ -65,25 +65,29 @@ class PiZero:
         self.mcts = MCTS(args, self.env, self.network)
 
     def evaluate(self):
-        env = gym.make('atari-v0', args=self.args)
-        env.eval()
+        num_envs = self.args.evaluation_episodes
+        env = gym.vector.make('atari-v0', num_envs=num_envs, asynchronous=False, args=self.args)
+        env.seed([self.args.seed] * num_envs)
+        for e in env.envs:
+            e.eval()
         T_rewards, T_Qs = [], []
+        dones, reward_sums, envs_done = [False] * num_envs, np.array([0.] * num_envs), 0
 
-        # Test performance over several episodes
-        done = True
-        for _ in range(self.args.evaluation_episodes):
-            while True:
-                if done:
-                    state, reward_sum, done = env.reset(), 0, False
-
-                root = self.mcts.run(state)
-                action, policy = self.mcts.select_action(root)
-                state, reward, done = env.step(action)  # Step
-                reward_sum += reward
-
-                if done:
-                    T_rewards.append(reward_sum)
-                    break
+        obs = torch.from_numpy(env.reset())
+        while envs_done < num_envs:
+            roots = self.mcts.batched_run(obs)
+            actions = []
+            for root in roots:
+                # Select action for each obs
+                action, p_logit = self.mcts.select_action(root)
+                actions.append(action)
+            next_obs, reward, done, _ = env.step(actions)
+            reward_sums += np.array(reward)
+            for i, d in enumerate(done):
+                if done[i] and not dones[i]:
+                    T_rewards.append(reward_sums[i])
+                    dones[i] = True
+                    envs_done += 1
         env.close()
 
         avg_reward = sum(T_rewards) / len(T_rewards)
