@@ -20,7 +20,7 @@ def get_argparser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--total-env-steps', type=int, default=100000,
                         help='Total number to env steps to train (default: 100000)')
-    parser.add_argument('--num-envs', type=int, default=4, help='Number of parallel envs to run')
+    parser.add_argument('--num-envs', type=int, default=8, help='Number of parallel envs to run')
     parser.add_argument('--buffer-size', type=int, default=100000)
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
@@ -60,8 +60,11 @@ def get_argparser():
     parser.add_argument('--film', action='store_true')
     parser.add_argument('--no-nce', action='store_true')
     parser.add_argument('--use-all-targets', action='store_true')
-    parser.add_argument('--evaluation-interval', type=int, default=5000,
+    parser.add_argument('--evaluation-interval', type=int, default=100000,
                         help='Evaluate after every {evaluation-interval} env steps')
+    parser.add_argument('--log-interval', type=int, default=4000,
+                        help='Evaluate after every {evaluation-interval} env steps')
+
 
     parser.add_argument('--wandb-proj', type=str, default='pizero')
 
