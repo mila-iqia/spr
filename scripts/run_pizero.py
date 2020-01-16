@@ -3,7 +3,7 @@ from collections import deque
 from src.mcts_memory import LocalBuffer
 from src.model_trainer import TrainingWorker
 from src.pizero import PiZero
-from src.utils import get_argparser
+from src.utils import get_args
 
 import torch
 import wandb
@@ -74,7 +74,7 @@ def reanalyze(args, buffer):
 
 
 if __name__ == '__main__':
-    args = get_argparser().parse_args()
+    args = get_args()
     tags = []
     wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags, config=vars(args))
 

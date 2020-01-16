@@ -16,7 +16,7 @@ import io
 from PIL import Image
 
 
-def get_argparser():
+def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--total-env-steps', type=int, default=100000,
                         help='Total number to env steps to train (default: 100000)')
@@ -65,10 +65,12 @@ def get_argparser():
     parser.add_argument('--log-interval', type=int, default=4000,
                         help='Evaluate after every {evaluation-interval} env steps')
 
-
     parser.add_argument('--wandb-proj', type=str, default='pizero')
 
-    return parser
+    args = parser.parse_args()
+    args.max_episode_length = int(108e3)
+
+    return args
 
 
 def set_seeds(seed):
