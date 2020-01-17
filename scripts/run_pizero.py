@@ -20,6 +20,7 @@ def run_pizero(args):
     episode_rewards = deque(maxlen=10)
     history_buffer = [[]]*args.num_envs
     write_heads = list(range(args.num_envs))
+    wandb.log({'env_steps': 0})
 
     while env_steps < args.total_env_steps:
         # Run MCTS for the vectorized observation
@@ -33,9 +34,9 @@ def run_pizero(args):
         actions, policy_probs, values = [], [], []
         for root in roots:
             # Select action for each obs
-            action, p_logit = mcts.select_action(root)
+            action, policy = mcts.select_action(root)
             actions.append(action)
-            policy_probs.append(p_logit.probs)
+            policy_probs.append(policy.probs)
             values.append(root.value())
         actions = actions[:args.num_envs] # Cut out any reanalyzed actions.
         next_obs, reward, done, infos = env.step(actions)
