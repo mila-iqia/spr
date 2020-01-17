@@ -18,10 +18,18 @@ def run_pizero(args):
     local_buf = LocalBuffer()
     eprets = np.zeros(args.num_envs, 'f')
     episode_rewards = deque(maxlen=10)
+    history_buffer = [[]]*args.num_envs
+    write_heads = list(range(args.num_envs))
 
     while env_steps < args.total_env_steps:
         # Run MCTS for the vectorized observation
+
+        if len(history_buffer) > args.num_envs and args.reanalyze:
+            new_samples = pizero.sample_for_reanalysis(history_buffer)
+            obs = torch.cat([obs, new_samples[0]], 0)
+
         roots = mcts.batched_run(obs)
+
         actions, policy_probs, values = [], [], []
         for root in roots:
             # Select action for each obs
@@ -29,14 +37,46 @@ def run_pizero(args):
             actions.append(action)
             policy_probs.append(p_logit.probs)
             values.append(root.value())
+        actions = actions[:args.num_envs] # Cut out any reanalyzed actions.
         next_obs, reward, done, infos = env.step(actions)
         eprets += np.array(reward)
-        for i in range(len(done)):
+        for i in range(args.num_envs):
             if done[i]:
                 episode_rewards.append(eprets[i])
                 wandb.log({'Episode Reward': eprets[i], 'env_steps': env_steps})
                 eprets[i] = 0
         next_obs = torch.from_numpy(next_obs)
+
+        if args.reanalyze:
+            # Still haven't concluded an episode
+            if len(history_buffer) <= args.num_envs:
+                # to preserve expectations for the buffer, just pad with
+                # the current examples
+                obs = torch.cat([obs]*5, 0)
+                actions = actions * 5
+                reward = np.concatenate([reward]*5, 0)
+                done = np.concatenate([done]*5, 0)
+                policy_probs = policy_probs * 5
+                values = values * 5
+
+            else:
+                # Add the reanalyzed transitions to the real data.
+                # Obs, policy_probs and values are already handled above.
+                actions = actions + new_samples[1]
+                reward = np.concatenate([reward, new_samples[2]], 0)
+                done = np.concatenate([done, new_samples[3]], 0)
+
+            for i in range(args.num_envs):
+                history_buffer[write_heads[i]].append((obs[i, -1],
+                                                       actions[i],
+                                                       reward[i],
+                                                       done[i],
+                                                       ))
+
+                # If this episode terminated, allocate a new slot.
+                if done[i]:
+                    history_buffer.append([])
+                    write_heads[i] = len(history_buffer) - 1
 
         local_buf.append(obs,
                          torch.tensor(actions).float(),
@@ -67,10 +107,6 @@ def run_pizero(args):
 
         obs = next_obs
         env_steps += args.num_envs
-
-
-def reanalyze(args, buffer):
-    pass
 
 
 if __name__ == '__main__':

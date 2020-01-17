@@ -53,6 +53,7 @@ class TrainingWorker(Worker):
     def __init__(self, args, model):
         super().__init__(args)
         self.model = model
+        self.args = args
         self.initialize_replay_buffer()
         self.maximum_length = args.jumps
         self.multistep = args.multistep
@@ -67,6 +68,9 @@ class TrainingWorker(Worker):
 
     def initialize_replay_buffer(self):
         examples = get_example_outputs(self.args)
+        batch_size = self.args.num_envs
+        if self.args.reanalyze:
+            batch_size *= 5
         example_to_buffer = SamplesToBuffer(
             observation=examples["observation"],
             action=examples["action"],
@@ -78,7 +82,7 @@ class TrainingWorker(Worker):
         replay_kwargs = dict(
             example=example_to_buffer,
             size=self.args.buffer_size,
-            B=self.args.num_envs,
+            B=batch_size,
             batch_T=self.args.jumps+self.args.multistep, # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
             rnn_state_interval=0,
             discount=self.args.discount,
@@ -125,6 +129,7 @@ class TrainingWorker(Worker):
         trackers["iterations"] = 0
 
     def step(self):
+
         total_losses, reward_losses,\
         contrastive_losses, policy_losses,\
         value_losses, value_errors,\
@@ -344,8 +349,8 @@ class TrainingWorker(Worker):
                            current_reward_loss*self.args.reward_loss_weight + \
                            current_nce_loss*self.args.contrastive_loss_weight
 
+            total_losses.append(current_loss.mean().detach().cpu().item())
             current_loss = (current_loss * is_weights).mean()
-            total_losses.append(current_loss.detach().cpu().item())
             loss = loss + current_loss
 
         self.buffer.update_batch_priorities(value_errors[0])
@@ -421,9 +426,13 @@ class MCTSModel(nn.Module):
     def __init__(self, args, num_actions):
         super().__init__()
         if args.film:
-            self.dynamics_model = FiLMTransitionModel(args.hidden_size, num_actions)
+            self.dynamics_model = FiLMTransitionModel(args.hidden_size,
+                                                      num_actions,
+                                                      args.dynamics_blocks)
         else:
-            self.dynamics_model = TransitionModel(args.hidden_size, num_actions)
+            self.dynamics_model = TransitionModel(args.hidden_size,
+                                                  num_actions,
+                                                  args.dynamics_blocks)
         self.value_model = ValueNetwork(args.hidden_size)
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
@@ -479,6 +488,7 @@ def init(module, weight_init, bias_init, gain=1):
     bias_init(module.bias.data)
     return module
 
+
 class SmallEncoder(nn.Module):
     def __init__(self, args):
         super().__init__()
@@ -507,6 +517,7 @@ class SmallEncoder(nn.Module):
     def forward(self, inputs):
         fmaps = self.main(inputs)
         return fmaps
+
 
 class TransitionModel(nn.Module):
     def __init__(self,
@@ -552,14 +563,19 @@ class TransitionModel(nn.Module):
 
 
 class ConvFiLM(nn.Module):
-    def __init__(self, input_dim, cond_dim, bn=False):
+    def __init__(self, input_dim, cond_dim, bn=False, one_hot=True):
         super().__init__()
+        if one_hot:
+            self.embedding = nn.Embedding(cond_dim, cond_dim)
+        else:
+            self.embedding = nn.Identity()
         self.input_dim = input_dim
         self.cond_dim = cond_dim
         self.conditioning = nn.Linear(cond_dim, input_dim * 2)
         self.bn = nn.BatchNorm2d(input_dim, affine=False) if bn else nn.Identity()
 
     def forward(self, input, cond):
+        cond = self.embedding(cond)
         conditioning = self.conditioning(cond)
         gamma = conditioning[..., :self.input_dim, None, None]
         beta = conditioning[..., self.input_dim:, None, None]
@@ -596,7 +612,7 @@ class FiLMTransitionModel(nn.Module):
 
     def forward(self, x, action):
         x = self.network[:3](x)
-        for resblock in self.network[3:-1]:
+        for resblock in self.network[3:-2]:
             x = resblock(x, action)
         next_state = self.network[-1](x)
         next_state = renormalize(next_state, 1)
@@ -677,22 +693,6 @@ class ValueNetwork(nn.Module):
 
 
 class PolicyNetwork(nn.Module):
-    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
-        super().__init__()
-        self.hidden_size = hidden_size
-        layers = [Conv2dSame(input_channels, hidden_size, 3),
-                  nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size),
-                  nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, num_actions)]
-        self.network = nn.Sequential(*layers)
-        self.train()
-
-    def forward(self, x):
-        return self.network(x)
-
-
-class RewardNetwork(nn.Module):
     def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
         super().__init__()
         self.hidden_size = hidden_size
