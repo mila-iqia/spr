@@ -47,6 +47,7 @@ def get_args():
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
     parser.add_argument('--weight-decay', type=float, default=1e-3, help='Weight decay regularization constant')
     parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
+    parser.add_argument('--dynamics-blocks', type=int, default=16, help='# of resblocks in dynamics model')
     parser.add_argument('--multistep', type=int, default=1, help='n-step for bootstrapping value targets')
     parser.add_argument('--priority-exponent', type=float, default=0.5, metavar='ω',
                         help='Prioritised experience replay exponent (originally denoted α)')
@@ -59,6 +60,7 @@ def get_args():
     parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
     parser.add_argument('--film', action='store_true')
     parser.add_argument('--no-nce', action='store_true')
+    parser.add_argument('--reanalyze', action='store_true')
     parser.add_argument('--use-all-targets', action='store_true')
     parser.add_argument('--evaluation-interval', type=int, default=100000,
                         help='Evaluate after every {evaluation-interval} env steps')

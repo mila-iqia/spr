@@ -47,9 +47,11 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
             batch.all_action[ind+1:, i] = batch.all_action[ind, i]
             batch.all_action[ind+1:, i] = batch.all_action[ind, i]
+            batch.policy_probs[ind+1:, i] = batch.policy_probs[ind, i]
             batch.all_reward[ind+1:, i] = 0
             batch.values[ind+1:, i] = 0
         return batch
+
 
 class LocalBuffer:
     """
