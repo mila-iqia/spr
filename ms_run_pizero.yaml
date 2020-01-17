@@ -1,0 +1,46 @@
+description: AWM
+
+target:
+  cluster: eu2
+  vc: msrlabs
+
+environment:
+  image: microsoft_pytorch:v1.2.0_gpu_cuda10.0_py36_release_gpuenv_hvd0.16.2
+  registry: phillyregistry.azurecr.io
+
+
+# azure storage configuration
+storage:
+  my_storage:
+    # Replace with the name of the Azure Storage Account you created.
+    #   If you followed the tutorial, this should be your_username
+    storage_account_name: ankdefault
+    # Specify a name of the container on your blob (ex. phillytools),
+    #   to store data, results and code. It will be created if it does not exist.
+    container_name: awmcontainer
+
+# data
+#   data upload is not required for this example
+
+search:
+  job_template:
+    name: awm
+    sku: G1
+    command:
+      - export PATH=$$PATH:~/.local/bin
+      - export LC_ALL=C.UTF-8
+      - export LANG=C.UTF-8
+      - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly recordclass pyprind psutil
+      - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
+      - pip install --user git+git://github.com/astooke/rlpyt
+      - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
+      - python -m scripts.run_pizero --grayscale --game {game} --use-all-targets --training-interval 32 --batch-size 128 {nce} --num-envs 16 --num-simulations 10 --total-env-steps 1000000 --reanalyze
+  type: grid
+  max_trials: 100
+  params:
+    - name: game
+      spec: discrete
+      values: ['alien', 'enduro', 'gravitar', 'space_invaders']
+    - name: nce
+      spec: discrete
+      values: ['--no-nce']
