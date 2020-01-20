@@ -9,18 +9,23 @@ To install the requirements, follow these steps:
 ```bash
 # PyTorch
 conda install pytorch torchvision -c pytorch
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
 
-# Other requirements
-pip install -r requirements.txt
-pip install git+git://github.com/mila-iqia/atari-representation-learning.git
+# Install requirements
+pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly recordclass pyprind psutil
+pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
+pip install --user git+git://github.com/astooke/rlpyt
+
+# Login to W&B
+wandb login {wandb_key}
 ```
 
 ## Usage:
-* Add the project directory to your `$PYTHONPATH`
 
-* Run the training script
+* Sample run script
 ```bash
-python -m scripts.train_all
+python -m scripts.run_pizero --grayscale --game alien --use-all-targets --training-interval 32 --num-envs 16
 ```
 
 ## References:

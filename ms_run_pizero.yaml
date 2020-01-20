@@ -34,13 +34,22 @@ search:
       - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
       - pip install --user git+git://github.com/astooke/rlpyt
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
-      - python -m scripts.run_pizero --grayscale --game {game} --use-all-targets --training-interval 32 --batch-size 128 {nce} --num-envs 16 --num-simulations 10 --total-env-steps 1000000 --reanalyze
+      - CUDA_LAUNCH_BLOCKING=1 python -m scripts.run_pizero --grayscale --game {game} --use-all-targets --training-interval 32 --batch-size 128 {nce} --num-envs {num_envs} --num-simulations 10 --total-env-steps 1000000 {reanalyze} {async}
   type: grid
   max_trials: 100
   params:
     - name: game
       spec: discrete
-      values: ['alien', 'enduro', 'gravitar', 'space_invaders']
+      values: ['alien']
     - name: nce
       spec: discrete
       values: ['--no-nce']
+    - name: async
+      spec: discrete
+      values: ['--async-env', '']
+    - name: num_envs
+      spec: discrete
+      values: [4, 8, 16, 32, 48]
+    - name: reanalyze
+      spec: discrete
+      values: ['--reanalyze', '']
