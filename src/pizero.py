@@ -11,7 +11,7 @@ from itertools import islice
 import gym
 from src.mcts_memory import Transition, blank_batch_trans
 from src.model_trainer import MCTSModel
-import time
+from time import time
 import wandb
 
 MAXIMUM_FLOAT_VALUE = float('inf')
@@ -75,7 +75,7 @@ class PiZero:
         self.args.pb_c_init = 1.25
         self.args.root_exploration_fraction = 0.25
         self.args.root_dirichlet_alpha = 0.25
-        self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args)
+        self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args, asynchronous=args.async_env)
         self.network = MCTSModel(args, self.env.action_space[0].n)
         self.network.to(self.args.device)
         self.mcts = MCTS(args, self.env, self.network)
@@ -174,9 +174,13 @@ class MCTS:
         return root
 
     def batched_run(self, obs_tensor):
+        mcts_start = time()
         roots = []
         obs_tensor = obs_tensor.to(self.args.device)
+        init_inference_start = time()
         network_output = self.network.initial_inference(obs_tensor)
+        init_inference_end = time()
+        total_select_child, total_create_tensor, total_inference, total_expand, total_backprop = 0, 0, 0, 0, 0
 
         for i in range(obs_tensor.shape[0]):
             root = Node(0)
@@ -192,25 +196,49 @@ class MCTS:
                 search_path = [node]
 
                 while node.expanded():
+                    select_child_start = time()
                     action, node = self.optimized_select_child(node, node.children.items())
+                    select_child_end = time()
+                    total_select_child += select_child_end - select_child_start
                     search_path.append(node)
 
                 # Inside the search tree we use the dynamics function to obtain the next
                 # hidden state given an action and the previous hidden state.
                 parent = search_path[-2]
+                create_action_tensor = time()
                 actions.append(torch.tensor(action))
+                end_action_tensor = time()
+                total_create_tensor += end_action_tensor - create_action_tensor
                 hidden_states.append(parent.hidden_state)
                 nodes.append(node)
                 search_paths.append(search_path)
 
             with torch.no_grad():
+                inference_start = time()
                 actions = torch.stack(actions, 0).to(self.args.device)
                 hidden_states = torch.stack(hidden_states, 0).to(self.args.device)
                 network_output = self.network.inference(hidden_states, actions)
+                inference_end = time()
+                total_inference += inference_end - inference_start
 
             for i in range(obs_tensor.shape[0]):
+                expand_start = time()
                 self.expand_node(nodes[i], network_output[i])
+                expand_end = time()
                 self.backpropagate(search_paths[i], network_output[i].value)
+                backprop_end = time()
+                total_expand += expand_end - expand_start
+                total_backprop += backprop_end - expand_end
+        mcts_end = time()
+        wandb.log({
+            'Initial Inference time': init_inference_end - init_inference_start,
+            'Select Child time': total_select_child,
+            'Create Tensor time': total_create_tensor,
+            'Total Inference time': total_inference,
+            'Expand Node time': total_expand,
+            'Backprop time': total_backprop,
+            'Total MCTS time': mcts_end - mcts_start
+        })
         return roots
 
     def expand_node(self, node, network_output):
