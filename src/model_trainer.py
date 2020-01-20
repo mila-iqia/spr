@@ -18,7 +18,7 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
 
 class TrainingWorker(object):
     def __init__(self, args, model):
-        super().__init__(args)
+        super().__init__()
         self.model = model
         self.args = args
         self.initialize_replay_buffer()
