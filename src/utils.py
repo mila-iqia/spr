@@ -49,9 +49,9 @@ def get_args():
     parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
     parser.add_argument('--dynamics-blocks', type=int, default=16, help='# of resblocks in dynamics model')
     parser.add_argument('--multistep', type=int, default=1, help='n-step for bootstrapping value targets')
-    parser.add_argument('--priority-exponent', type=float, default=0.5, metavar='ω',
+    parser.add_argument('--priority-exponent', type=float, default=1., metavar='ω',
                         help='Prioritised experience replay exponent (originally denoted α)')
-    parser.add_argument('--priority-weight', type=float, default=0.4, metavar='β',
+    parser.add_argument('--priority-weight', type=float, default=1., metavar='β',
                         help='Initial prioritised experience replay importance sampling weight')
     parser.add_argument('--jumps', type=int, default=5, help='')
     parser.add_argument('--value-loss-weight', type=float, default=1.)
