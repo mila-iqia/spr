@@ -18,7 +18,7 @@ from PIL import Image
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--total-env-steps', type=int, default=100000,
+    parser.add_argument('--total-env-steps', type=int, default=1000000,
                         help='Total number to env steps to train (default: 100000)')
     parser.add_argument('--num-envs', type=int, default=8, help='Number of parallel envs to run')
     parser.add_argument('--buffer-size', type=int, default=100000)
@@ -35,12 +35,12 @@ def get_args():
                         help='Number of episodes to average over when evaluating')
 
     # MCTS arguments
-    parser.add_argument('--num-simulations', type=int, default=50)
+    parser.add_argument('--num-simulations', type=int, default=10)
 
     # PiZero arguments
     parser.add_argument('--training-interval', type=int, default=200,
                         help='Perform training after every {training-interval} env steps ')
-    parser.add_argument('--batch-size', type=int, default=64, help='Batch size to use during training')
+    parser.add_argument('--batch-size', type=int, default=128, help='Batch size to use during training')
     parser.add_argument('--learning-rate', type=float, default=0.001, metavar='η', help='Learning rate')
     parser.add_argument('--lr-decay-steps', type=float, default=350.e3, help='Learning rate decay time constant')
     parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
