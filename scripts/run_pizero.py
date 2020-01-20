@@ -23,12 +23,11 @@ def run_pizero(args):
     wandb.log({'env_steps': 0})
 
     while env_steps < args.total_env_steps:
-        # Run MCTS for the vectorized observation
-
         if len(history_buffer) > args.num_envs and args.reanalyze:
             new_samples = pizero.sample_for_reanalysis(history_buffer)
-            obs = torch.cat([obs, new_samples[0]], 0)
+            obs = torch.cat([obs, new_samples[0]], 0)  # Append reanalyze candidates to new observations
 
+        # Run MCTS for the vectorized observation
         roots = mcts.batched_run(obs)
 
         actions, policy_probs, values = [], [], []
@@ -38,7 +37,7 @@ def run_pizero(args):
             actions.append(action)
             policy_probs.append(policy.probs)
             values.append(root.value())
-        actions = actions[:args.num_envs] # Cut out any reanalyzed actions.
+        actions = actions[:args.num_envs]  # Cut out any reanalyzed actions.
         next_obs, reward, done, infos = env.step(actions)
         eprets += np.array(reward)
         for i in range(args.num_envs):
@@ -87,12 +86,13 @@ def run_pizero(args):
                          torch.stack(values).float().cpu())
 
         if env_steps % args.jumps == 0 and env_steps > 0:
+            # Send transitions from the local buffer to the replay buffer
             samples_to_buffer = training_worker.samples_to_buffer(*local_buf.stack())
             training_worker.buffer.append_samples(samples_to_buffer)
             local_buf.clear()
 
-        if env_steps % args.training_interval == 0 and env_steps > 1000:
-            training_worker.step()
+        if env_steps % args.training_interval == 0 and env_steps > 400:
+            training_worker.step()  # TODO: Make this async, and add ability to take multiple steps here
             training_worker.log_results()
 
         if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
