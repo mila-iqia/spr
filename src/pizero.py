@@ -248,6 +248,7 @@ class MCTS:
         return prior_score + value_score
 
     def optimized_select_child(self, parent, children):
+        # TODO: Vectorize this
         pb_c = np.array([math.log((parent.visit_count + self.args.pb_c_base + 1) /
                         self.args.pb_c_base) + self.args.pb_c_init] * len(children))
         child_visit_counts, child_priors, child_values = zip(*[(child.visit_count, child.prior, child.value())
@@ -265,6 +266,8 @@ class MCTS:
         return children[action_argmax][0], children[action_argmax][1]
 
     def backpropagate(self, search_path: List[Node], value: float):
+        # TODO: Rename to backup
+        # TODO: Vectorize this using masking
         for node in reversed(search_path):
             node.value_sum += value
             node.visit_count += 1
