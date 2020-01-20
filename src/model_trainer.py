@@ -16,40 +16,7 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
                                   ["observation", "action", "reward", "done", "policy_probs", "value"])
 
 
-class Worker(object):
-    """
-        Abstract class for worker instantiations.
-    """
-    def __init__(self, args):
-        self.args = args
-
-    def __call__(self, worker_conn, queue_prev, queue, queue_next):
-        self.queue_prev = queue_prev
-        self.queue = queue
-        self.queue_next = queue_next
-
-        assert worker_conn.recv() == 'prepare to launch'
-        self.prepare_start()
-        worker_conn.send('worker ready')
-        while True:
-            self.pull()
-            self.step()
-            self.push()
-
-    def prepare_start(self):
-        raise NotImplementedError
-
-    def pull(self):
-        raise NotImplementedError
-
-    def step(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def push(self, *args, **kwargs):
-        raise NotImplementedError
-
-
-class TrainingWorker(Worker):
+class TrainingWorker(object):
     def __init__(self, args, model):
         super().__init__(args)
         self.model = model
@@ -102,17 +69,6 @@ class TrainingWorker(Worker):
             policy_probs=policy_probs,
             value=value
         )
-
-    def prepare_start(self):
-        pass
-
-    def pull(self):
-        new_transitions = self.queue_prev.get()
-        for transition in new_transitions:
-            self.buffer.append(*transition)
-
-    def push(self, parameters):
-        self.queue.push(self.model.state_dict())
 
     def reset_trackers(self, mode="train"):
         if mode == "train":
@@ -449,6 +405,7 @@ class MCTSModel(nn.Module):
                                          weight_decay=args.weight_decay)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
                                                                 args.lr_decay ** (1. / args.lr_decay_steps), )
+
     def encode(self, images, actions):
         return self.encoder(images, actions)
 
