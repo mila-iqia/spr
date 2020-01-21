@@ -36,10 +36,6 @@ def run_pizero(args):
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     while env_steps < args.total_env_steps:
-        print("Sample queue length:", sample_queue.qsize())
-        print("Reanalyze queue length:", reanalyze_queue.qsize())
-        print("Number of terminated eps: {}".format(total_episodes))
-        print()
         # reanalyze_worker.run(False)
         if total_episodes > 0 and args.reanalyze:
             new_samples = reanalyze_queue.get()
@@ -66,7 +62,9 @@ def run_pizero(args):
         for i in range(args.num_envs):
             if done[i]:
                 episode_rewards.append(eprets[i])
-                wandb.log({'Episode Reward': eprets[i], 'env_steps': env_steps})
+                wandb.log({'Episode Reward': eprets[i],
+                           'env_steps': env_steps,
+                           "Reanalyze queue length:": reanalyze_queue.qsize()})
                 eprets[i] = 0
         next_obs = torch.from_numpy(next_obs)
 
