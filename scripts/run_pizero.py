@@ -1,10 +1,11 @@
 from collections import deque
-
+from multiprocessing import Queue
 from src.mcts_memory import LocalBuffer
 from src.model_trainer import TrainingWorker
-from src.pizero import PiZero
+from src.pizero import PiZero, ReanalyzeWorker
 from src.utils import get_args
 
+import os
 import torch
 import wandb
 import numpy as np
@@ -14,21 +15,42 @@ def run_pizero(args):
     pizero = PiZero(args)
     env, mcts = pizero.env, pizero.mcts
     obs, env_steps = torch.from_numpy(env.reset()), 0
+
+    sample_queue = Queue()
+    reanalyze_queue = Queue()
+    reanalyze_worker = ReanalyzeWorker(args,
+                                       sample_queue,
+                                       reanalyze_queue,
+                                       obs.shape[2:])
+    reanalyze_worker.start()
     training_worker = TrainingWorker(args, model=pizero.network)
     local_buf = LocalBuffer()
     eprets = np.zeros(args.num_envs, 'f')
     episode_rewards = deque(maxlen=10)
-    history_buffer = [[]]*args.num_envs
-    write_heads = list(range(args.num_envs))
     wandb.log({'env_steps': 0})
 
+    total_episodes = 0
+    if args.profile:
+        import pprofile
+        prof = pprofile.Profile()
+        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
     while env_steps < args.total_env_steps:
-        if len(history_buffer) > args.num_envs and args.reanalyze:
-            new_samples = pizero.sample_for_reanalysis(history_buffer)
+        print("Sample queue length:", sample_queue.qsize())
+        print("Reanalyze queue length:", reanalyze_queue.qsize())
+        print("Number of terminated eps: {}".format(total_episodes))
+        print()
+        # reanalyze_worker.run(False)
+        if total_episodes > 0 and args.reanalyze:
+            new_samples = reanalyze_queue.get()
             obs = torch.cat([obs, new_samples[0]], 0)  # Append reanalyze candidates to new observations
 
         # Run MCTS for the vectorized observation
-        roots = mcts.batched_run(obs)
+        if args.profile:
+            with prof():
+                roots = mcts.batched_run(obs)
+        else:
+            roots = mcts.batched_run(obs)
 
         actions, policy_probs, values = [], [], []
         for root in roots:
@@ -40,6 +62,7 @@ def run_pizero(args):
         actions = actions[:args.num_envs]  # Cut out any reanalyzed actions.
         next_obs, reward, done, infos = env.step(actions)
         eprets += np.array(reward)
+
         for i in range(args.num_envs):
             if done[i]:
                 episode_rewards.append(eprets[i])
@@ -49,15 +72,19 @@ def run_pizero(args):
 
         if args.reanalyze:
             # Still haven't concluded an episode
-            if len(history_buffer) <= args.num_envs:
+            if total_episodes == 0:
                 # to preserve expectations for the buffer, just pad with
                 # the current examples
                 obs = torch.cat([obs]*5, 0)
-                actions = actions * 5
+                obs[args.num_envs:] = 0
+                actions = actions + [0]*(4*len(actions))
                 reward = np.concatenate([reward]*5, 0)
+                reward[args.num_envs:] = 0
                 done = np.concatenate([done]*5, 0)
+                done[args.num_envs:] = 0
                 policy_probs = policy_probs * 5
-                values = values * 5
+                done[args.num_envs:] = 0
+                values = values + [torch.zeros_like(values[0])]*(4*len(values))
 
             else:
                 # Add the reanalyzed transitions to the real data.
@@ -66,17 +93,12 @@ def run_pizero(args):
                 reward = np.concatenate([reward, new_samples[2]], 0)
                 done = np.concatenate([done, new_samples[3]], 0)
 
-            for i in range(args.num_envs):
-                history_buffer[write_heads[i]].append((obs[i, -1],
-                                                       actions[i],
-                                                       reward[i],
-                                                       done[i],
-                                                       ))
+            sample_queue.put(((obs[:args.num_envs, -1]*255).byte(),
+                               actions[:args.num_envs],
+                               reward[:args.num_envs],
+                               done[:args.num_envs]))
 
-                # If this episode terminated, allocate a new slot.
-                if done[i]:
-                    history_buffer.append([])
-                    write_heads[i] = len(history_buffer) - 1
+            total_episodes += np.sum(done[:args.num_envs])
 
         local_buf.append(obs,
                          torch.tensor(actions).float(),
@@ -109,11 +131,30 @@ def run_pizero(args):
         obs = next_obs
         env_steps += args.num_envs
 
+    if args.profile:
+        prof.dump_stats("profile.out")
+
 
 if __name__ == '__main__':
     args = get_args()
     tags = []
-    wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags, config=vars(args))
+    if len(args.name) == 0:
+        run = wandb.init(project=args.wandb_proj,
+                         entity="abs-world-models",
+                         tags=tags,
+                         config=vars(args))
+    else:
+        run = wandb.init(project=args.wandb_proj,
+                         name=args.name,
+                         entity="abs-world-models",
+                         tags=tags, config=vars(args))
+
+    if len(args.savedir) == 0:
+        dir = os.environ["SLURM_TMPDIR"]
+        args.savedir = "{}/{}".format(dir, run.id)
+        os.makedirs(args.savedir, exist_ok=True)
+
+    print("Saving episode data in {}".format(args.savedir))
 
     if torch.cuda.is_available():
         args.device = torch.device('cuda')
