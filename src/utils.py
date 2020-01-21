@@ -21,6 +21,7 @@ def get_args():
     parser.add_argument('--total-env-steps', type=int, default=1000000,
                         help='Total number to env steps to train (default: 100000)')
     parser.add_argument('--num-envs', type=int, default=8, help='Number of parallel envs to run')
+    parser.add_argument('--sync-envs', action='store_true')
     parser.add_argument('--buffer-size', type=int, default=100000)
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
@@ -59,6 +60,7 @@ def get_args():
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
     parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
     parser.add_argument('--film', action='store_true')
+    parser.add_argument('--profile', action='store_true')
     parser.add_argument('--no-nce', action='store_true')
     parser.add_argument('--reanalyze', action='store_true')
     parser.add_argument('--use-all-targets', action='store_true')
@@ -68,6 +70,8 @@ def get_args():
                         help='Evaluate after every {evaluation-interval} env steps')
 
     parser.add_argument('--wandb-proj', type=str, default='pizero')
+    parser.add_argument('--name', type=str, default='')
+    parser.add_argument('--savedir', type=str, default='')
 
     args = parser.parse_args()
     args.max_episode_length = int(108e3)

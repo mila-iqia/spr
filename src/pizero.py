@@ -7,28 +7,32 @@ import torch
 from torch.distributions import Categorical
 import numpy as np
 from itertools import islice
+import multiprocessing
 
 import gym
 from src.mcts_memory import Transition, blank_batch_trans
 from src.model_trainer import MCTSModel
 import time
 import wandb
+from recordclass import dataobject
 
 MAXIMUM_FLOAT_VALUE = float('inf')
 
 KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
 
 
-def window(seq, n=2):
-    "Returns a sliding window (of width n) over data from the iterable"
-    "   s -> (s0,s1,...s[n-1]), (s1,s2,...,sn), ...                   "
-    it = iter(seq)
-    result = tuple(islice(it, n))
-    if len(result) == n:
-        yield result
-    for elem in it:
-        result = result[1:] + (elem,)
-        yield result
+class ListEpisode(dataobject):
+    obs: list
+    actions: list
+    rewards: list
+    dones: list
+
+
+class NPEpisode(dataobject):
+    obs: np.ndarray
+    actions: np.ndarray
+    rewards: np.ndarray
+    dones: np.ndarray
 
 
 class MinMaxStats(object):
@@ -68,6 +72,111 @@ class Node(object):
         return self.value_sum / self.visit_count
 
 
+class ReanalyzeWorker(multiprocessing.Process):
+    def __init__(self, args, input_queue, output_queue, obs_shape):
+        super().__init__()
+        self.reanalyze_heads = 4*args.num_envs
+        self.current_write_episodes = [ListEpisode([], [], [], []) for _ in range(self.reanalyze_heads)]
+        self.current_read_episodes = []
+        self.tr_indices = np.zeros((self.reanalyze_heads,), dtype="int")
+        self.inqueue = input_queue
+        self.outqueue = output_queue
+        self.buffer = []
+        self.current_indices = []
+        self.directory = args.savedir
+        self.total_episodes = 0
+        self.obs_shape = obs_shape
+        self.args = args
+
+    def run(self, forever=True):
+        while True:
+            self.write_to_buffer()
+
+            # Don't reanalyze until we have data for it.
+            if self.total_episodes > 0 and self.outqueue.qsize() < 100:
+                new_samples = self.sample_for_reanalysis()
+                self.outqueue.put(new_samples)
+            if not forever:
+                return
+
+    def write_to_buffer(self):
+        while not self.inqueue.empty():
+            obs, action, reward, done = self.inqueue.get()
+
+            for i in range(self.args.num_envs):
+                episode = self.current_write_episodes[i]
+                episode.obs.append(obs[i])
+                episode.actions.append(action[i])
+                episode.rewards.append(reward[i])
+                episode.dones.append(done[i])
+
+                if done[i]:
+                    self.save_episode(episode)
+
+            self.current_write_episodes[i] = ListEpisode([], [], [], [])
+
+    def save_episode(self, episode):
+
+        obs = np.stack(episode.obs)
+        actions = np.array(episode.actions)
+        rewards = np.array(episode.rewards)
+        dones = np.array(episode.dones)
+
+        filename = self.directory + "/ep_{}.npz".format(self.total_episodes)
+        np.savez_compressed(file=filename, obs=obs, actions=actions,
+                            dones=dones, rewards=rewards)
+        self.total_episodes += 1
+        print("Saved episode {}".format(self.total_episodes))
+
+    def load_episode(self, index):
+        filename = self.directory + "/ep_{}.npz".format(index)
+        file = np.load(filename)
+        return NPEpisode(file["obs"], file["actions"],
+                         file["rewards"], file["dones"])
+
+    def sample_for_reanalysis(self):
+        """
+        :param buffer: list of lists of Transitions.  Each sublist is an episode.
+        :return: list of new transitions, representing a reanalyzed episode.
+        """
+        # We only want to reanalyze done episodes for now.
+
+        observations = np.zeros((self.reanalyze_heads,
+                                    self.args.framestack,
+                                    *self.obs_shape),
+                                   dtype=np.uint8)
+        actions = []
+        rewards = np.zeros(self.reanalyze_heads)
+        dones = np.zeros(self.reanalyze_heads)
+
+        for i in range(self.reanalyze_heads):
+            # Should only happen at initialization.
+            if i >= len(self.current_read_episodes):
+                new_ep = self.load_episode(np.random.randint(self.total_episodes))
+                self.current_read_episodes.append(new_ep)
+                self.tr_indices[i] = 0
+
+            episode = self.current_read_episodes[i]
+            ind = self.tr_indices[i]
+
+            bottom_ind = max(0, ind - self.args.framestack + 1)
+            start_point = self.args.framestack - (ind - bottom_ind + 1)
+            observations[i, start_point:] = episode.obs[bottom_ind:ind+1]
+            actions.append(episode.actions[ind])
+            rewards[i] = episode.rewards[ind]
+            dones[i] = episode.dones[ind]
+            self.tr_indices[i] += 1
+
+            # Check if we've finished the episode.
+            if self.tr_indices[i] >= episode.obs.shape[0]:
+                self.tr_indices[i] = 0
+                # Load in a random new episode
+                self.current_read_episodes[i] = self.load_episode(np.random.randint(self.total_episodes))
+
+        return torch.from_numpy(observations).float() / 255.,\
+               actions, rewards, dones
+
+
 class PiZero:
     def __init__(self, args):
         self.args = args
@@ -75,13 +184,11 @@ class PiZero:
         self.args.pb_c_init = 1.25
         self.args.root_exploration_fraction = 0.25
         self.args.root_dirichlet_alpha = 0.25
-        self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args)
+        self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
+                                   asynchronous=not args.sync_envs)
         self.network = MCTSModel(args, self.env.action_space[0].n)
         self.network.to(self.args.device)
         self.mcts = MCTS(args, self.env, self.network)
-        self.reanalyze_heads = 4*args.num_envs
-        self.ep_indices = np.zeros((self.reanalyze_heads,), dtype="int")
-        self.tr_indices = np.zeros((self.reanalyze_heads,), dtype="int")
 
     def evaluate(self):
         num_envs = self.args.evaluation_episodes
@@ -111,36 +218,6 @@ class PiZero:
 
         avg_reward = sum(T_rewards) / len(T_rewards)
         return avg_reward
-
-    def sample_for_reanalysis(self, buffer):
-        """
-        :param buffer: list of lists of Transitions.  Each sublist is an episode.
-        :return: list of new transitions, representing a reanalyzed episode.
-        """
-        # We only want to reanalyze done episodes for now.
-
-        observations = torch.zeros((self.reanalyze_heads,
-                                    self.args.framestack,
-                                    *buffer[0][0][0].shape))
-        actions = []
-        rewards = np.zeros(self.reanalyze_heads)
-        dones = np.zeros(self.reanalyze_heads)
-
-        for i, (ep_ind, tr_ind) in enumerate(zip(self.ep_indices,
-                                                 self.tr_indices)):
-            bottom_ind = max(0, tr_ind - self.args.framestack)
-            trans = buffer[ep_ind][bottom_ind:tr_ind+1]
-            obs = torch.stack([t[0] for t in trans], 0)
-            observations[i, self.args.framestack-tr_ind+bottom_ind-1:] = obs
-            action, reward, done = trans[-1][1:]
-            actions.append(action)
-            rewards[i] = reward
-            dones[i] = done
-            self.tr_indices[i] += 1
-            if len(buffer[ep_ind]) >= self.tr_indices[i]:
-                self.tr_indices[i] = 0
-                self.ep_indices[i] = np.random.randint(len(buffer))
-        return observations, actions, rewards, dones
 
 
 class MCTS:
