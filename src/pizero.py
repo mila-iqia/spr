@@ -126,7 +126,6 @@ class ReanalyzeWorker(multiprocessing.Process):
         np.savez_compressed(file=filename, obs=obs, actions=actions,
                             dones=dones, rewards=rewards)
         self.total_episodes += 1
-        print("Saved episode {}".format(self.total_episodes))
 
     def load_episode(self, index):
         filename = self.directory + "/ep_{}.npz".format(index)
