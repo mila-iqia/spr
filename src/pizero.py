@@ -8,6 +8,7 @@ from torch.distributions import Categorical
 import numpy as np
 from itertools import islice
 import multiprocessing
+import time
 
 import gym
 from src.mcts_memory import Transition, blank_batch_trans
@@ -96,6 +97,8 @@ class ReanalyzeWorker(multiprocessing.Process):
             if self.total_episodes > 0 and self.outqueue.qsize() < 100:
                 new_samples = self.sample_for_reanalysis()
                 self.outqueue.put(new_samples)
+            else:
+                time.sleep(0.1) # Don't just spin the processor
             if not forever:
                 return
 

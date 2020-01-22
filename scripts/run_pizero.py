@@ -36,7 +36,6 @@ def run_pizero(args):
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     while env_steps < args.total_env_steps:
-        # reanalyze_worker.run(False)
         if total_episodes > 0 and args.reanalyze:
             new_samples = reanalyze_queue.get()
             obs = torch.cat([obs, new_samples[0]], 0)  # Append reanalyze candidates to new observations
@@ -150,7 +149,7 @@ if __name__ == '__main__':
     if len(args.savedir) == 0:
         dir = os.environ["SLURM_TMPDIR"]
         args.savedir = "{}/{}".format(dir, run.id)
-        os.makedirs(args.savedir, exist_ok=True)
+    os.makedirs(args.savedir, exist_ok=True)
 
     print("Saving episode data in {}".format(args.savedir))
 
