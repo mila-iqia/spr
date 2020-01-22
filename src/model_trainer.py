@@ -293,7 +293,7 @@ class TrainingWorker(object):
                     current_targets = target_images.roll(-i, 2).flatten(1, 2)
                 else:
                     current_targets = target_images[:, :, i]
-                nce_input = current_state.flatten(2, 3).permute(2, 0, 1)
+                nce_input = pred_states[i].flatten(2, 3).permute(2, 0, 1)
                 current_nce_loss = self.nce(nce_input, current_targets).mean()
                 nce_losses.append(current_nce_loss.detach().cpu().item())
             else:
