@@ -23,7 +23,9 @@ def get_args():
     parser.add_argument('--num-envs', type=int, default=8, help='Number of parallel envs to run')
     parser.add_argument('--sync-envs', action='store_true')
     parser.add_argument('--buffer-size', type=int, default=100000)
-    parser.add_argument('--target-update-interval', type=int, default=1000)
+    parser.add_argument('--target-update-interval', type=int, default=1000,
+                        help="Number of gradient steps for each update to the "
+                             "target network.  <=0 to disable target network.")
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
     parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')

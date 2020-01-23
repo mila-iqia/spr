@@ -228,14 +228,14 @@ class MCTS:
         self.args = args
         self.env = env
         self.network = network
-        if args.target_update_interval == 0:
+        if args.target_update_interval <= 0:
             self.target_network = network
         else:
             self.target_network = copy.deepcopy(network)
         self.min_max_stats = MinMaxStats()
 
     def update_target(self):
-        if self.args.target_update_interval != 0:
+        if self.args.target_update_interval > 0:
             self.target_network.load_state_dict(self.network.state_dict())
 
     def run(self, obs):
