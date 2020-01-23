@@ -465,10 +465,17 @@ class MCTSModel(nn.Module):
             list(self.policy_model.parameters()) +\
             list(self.encoder.parameters()) +\
             list(self.target_encoder.parameters())
-        self.optimizer = torch.optim.SGD(params,
-                                         lr=args.learning_rate,
-                                         momentum=args.momentum,
-                                         weight_decay=args.weight_decay)
+
+        if args.optim == "adam":
+            self.optimizer = torch.optim.AdamW(params,
+                                               lr=args.learning_rate,
+                                               weight_decay=args.weight_decay,
+                                               eps=args.adam_eps)
+        elif args.optim == "sgd":
+            self.optimizer = torch.optim.SGD(params,
+                                             lr=args.learning_rate,
+                                             momentum=args.momentum,
+                                             weight_decay=args.weight_decay)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
                                                                 args.lr_decay ** (1. / args.lr_decay_steps), )
 
