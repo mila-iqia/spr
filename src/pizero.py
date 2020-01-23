@@ -9,6 +9,7 @@ import numpy as np
 from itertools import islice
 import multiprocessing
 import time
+import copy
 
 import gym
 from src.mcts_memory import Transition, blank_batch_trans
@@ -227,13 +228,21 @@ class MCTS:
         self.args = args
         self.env = env
         self.network = network
+        if args.target_update_interval == 0:
+            self.target_network = network
+        else:
+            self.target_network = copy.deepcopy(network)
         self.min_max_stats = MinMaxStats()
+
+    def update_target(self):
+        if self.args.target_update_interval != 0:
+            self.target_network.load_state_dict(self.network.state_dict())
 
     def run(self, obs):
         root = Node(0)
         obs = obs.to(self.args.device)
         root.hidden_state = obs
-        self.expand_node(root, network_output=self.network.initial_inference(obs))
+        self.expand_node(root, network_output=self.target_network.initial_inference(obs))
         for s in range(self.args.num_simulations):
             node = root
             search_path = [node]
@@ -247,7 +256,7 @@ class MCTS:
             parent = search_path[-2]
             with torch.no_grad():
                 action = torch.tensor(action, device=self.args.device)
-                network_output = self.network.inference(parent.hidden_state, action)
+                network_output = self.target_network.inference(parent.hidden_state, action)
             self.expand_node(node, network_output)
             self.backpropagate(search_path, network_output.value)
         return root
@@ -255,7 +264,7 @@ class MCTS:
     def batched_run(self, obs_tensor):
         roots = []
         obs_tensor = obs_tensor.to(self.args.device)
-        network_output = self.network.initial_inference(obs_tensor)
+        network_output = self.target_network.initial_inference(obs_tensor)
 
         for i in range(obs_tensor.shape[0]):
             root = Node(0)
@@ -285,7 +294,7 @@ class MCTS:
             with torch.no_grad():
                 actions = torch.stack(actions, 0).to(self.args.device)
                 hidden_states = torch.stack(hidden_states, 0).to(self.args.device)
-                network_output = self.network.inference(hidden_states, actions)
+                network_output = self.target_network.inference(hidden_states, actions)
 
             for i in range(obs_tensor.shape[0]):
                 self.expand_node(nodes[i], network_output[i])
