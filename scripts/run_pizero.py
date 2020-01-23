@@ -111,6 +111,8 @@ def run_pizero(args):
             local_buf.clear()
 
         if env_steps % args.training_interval == 0 and env_steps > 400:
+            if (env_steps // args.training_interval) % args.target_update_interval == 0:
+                mcts.update_target()
             training_worker.step()  # TODO: Make this async, and add ability to take multiple steps here
             training_worker.log_results()
 

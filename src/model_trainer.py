@@ -83,20 +83,30 @@ class TrainingWorker(object):
         trackers["nce_accs"] = np.zeros(self.maximum_length+1)
         trackers["value_errors"] = np.zeros(self.maximum_length+1)
         trackers["reward_errors"] = np.zeros(self.maximum_length+1)
+        trackers["mean_pred_values"] = np.zeros(self.maximum_length+1)
+        trackers["mean_pred_rewards"] = np.zeros(self.maximum_length+1)
+        trackers["mean_target_values"] = np.zeros(self.maximum_length+1)
+        trackers["mean_target_rewards"] = np.zeros(self.maximum_length+1)
         trackers["iterations"] = 0
 
     def step(self):
 
-        total_losses, reward_losses,\
-        nce_losses, nce_accs, policy_losses,\
-        value_losses, value_errors,\
-        reward_errors = self.train()
+        total_losses, reward_losses, nce_losses, nce_accs, policy_losses,\
+        value_losses, value_errors, reward_errors, mean_values, target_values,\
+        mean_rewards, target_rewards, = self.train()
 
-        self.update_trackers(reward_losses, nce_losses, nce_accs,
+        self.update_trackers(reward_losses,
+                             nce_losses,
+                             nce_accs,
                              policy_losses,
-                             value_losses, total_losses,
+                             value_losses,
+                             total_losses,
                              value_errors,
-                             reward_errors)
+                             reward_errors,
+                             mean_values,
+                             mean_rewards,
+                             target_values,
+                             target_rewards)
 
     def update_trackers(self,
                         reward_losses,
@@ -107,6 +117,10 @@ class TrainingWorker(object):
                         epoch_losses,
                         value_errors,
                         reward_errors,
+                        pred_values,
+                        pred_rewards,
+                        target_values,
+                        target_rewards,
                         mode="train"):
         if mode == "train":
             trackers = self.train_trackers
@@ -122,9 +136,10 @@ class TrainingWorker(object):
         trackers["epoch_losses"] += np.array(epoch_losses)
         trackers["value_errors"] += np.array(value_errors)
         trackers["reward_errors"] += np.array(reward_errors)
-
-        return nce_losses, nce_accs, reward_losses, value_losses, policy_losses,\
-               epoch_losses, value_errors, reward_errors
+        trackers["mean_pred_values"] += np.array(pred_values)
+        trackers["mean_pred_rewards"] += np.array(pred_rewards)
+        trackers["mean_target_values"] += np.array(target_values)
+        trackers["mean_target_rewards"] += np.array(target_rewards)
 
     def summarize_trackers(self, mode="train"):
         if mode == "train":
@@ -141,9 +156,14 @@ class TrainingWorker(object):
         epoch_losses = np.array(trackers["epoch_losses"]/iterations)
         value_errors = np.array(trackers["value_errors"]/iterations)
         reward_errors = np.array(trackers["reward_errors"]/iterations)
+        pred_values = np.array(trackers["mean_pred_values"]/iterations)
+        pred_rewards = np.array(trackers["mean_pred_rewards"]/iterations)
+        target_values = np.array(trackers["mean_target_values"]/iterations)
+        target_rewards = np.array(trackers["mean_target_rewards"]/iterations)
 
         return nce_losses, nce_accs, reward_losses, value_losses, policy_losses,\
-               epoch_losses, value_errors, reward_errors
+               epoch_losses, value_errors, reward_errors, pred_values, \
+               target_values, pred_rewards, target_rewards
 
     def log_results(self,
                     prefix='train',
@@ -159,11 +179,13 @@ class TrainingWorker(object):
             self.reset_trackers(prefix)
             return
 
-        nce_losses, nce_accs, reward_losses, value_losses, policy_losses, epoch_losses,\
-            value_errors, reward_errors = self.summarize_trackers(prefix)
+        nce_losses, nce_accs, reward_losses, value_losses, policy_losses, \
+        epoch_losses, value_errors, reward_errors, pred_values, target_values,\
+        pred_rewards, target_rewards = self.summarize_trackers(prefix)
+
         self.reset_trackers(prefix)
         print(
-            "{} Epoch: {}, Epoch Loss: {:.3f}, NCE Loss: {:.3f}, NCE Acc: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Reward Error: {:.3f}, Value Error: {:.3f}".format(
+            "{} Epoch: {}, Epoch Loss: {:.3f}, NCE Loss: {:.3f}, NCE Acc: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Rew. Error: {:.3f}, Pred. Rews {:.3f}, Target_Rews. {:.3f}, Val Error: {:.3f}, Pred. Values {:.3f}, Target_Vals. {:.3f}".format(
                 prefix.capitalize(),
                 self.epochs_till_now,
                 np.mean(epoch_losses),
@@ -173,13 +195,18 @@ class TrainingWorker(object):
                 np.mean(policy_losses),
                 np.mean(value_losses),
                 np.mean(reward_errors),
-                np.mean(value_errors)))
+                np.mean(pred_rewards),
+                np.mean(target_rewards),
+                np.mean(value_errors),
+                np.mean(pred_values),
+                np.mean(target_values),
+            ))
 
         for i in range(self.maximum_length + 1):
             jump = i
             if verbose_print:
                 print(
-                    "{} Jump: {}, Epoch Loss: {:.3f}, NCE Loss: {:.3f}, NCE Acc: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Reward Error: {:.3f}, Value Error: {:.3f}".format(
+                    "{} Jump: {}, Epoch Loss: {:.3f}, NCE Loss: {:.3f}, NCE Acc: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Rew. Error: {:.3f}, Pred. Rews {:.3f}, Target_Rews. {:.3f}, Val Error: {:.3f}, Pred. Values {:.3f}, Target_Vals. {:.3f}".format(
                         prefix.capitalize(),
                         jump,
                         epoch_losses[i],
@@ -189,7 +216,11 @@ class TrainingWorker(object):
                         policy_losses[i],
                         value_losses[i],
                         reward_errors[i],
-                        value_errors[i]))
+                        pred_rewards[i],
+                        target_rewards[i],
+                        value_errors[i],
+                        pred_values[i],
+                        target_values[i]))
 
             wandb.log({prefix + 'Jump {} loss'.format(jump): epoch_losses[i],
                        prefix + 'Jump {} NCE loss'.format(jump): nce_losses[i],
@@ -199,6 +230,10 @@ class TrainingWorker(object):
                        prefix + "Jump {} Reward Error".format(jump): reward_errors[i],
                        prefix + "Jump {} Policy loss".format(jump): policy_losses[i],
                        prefix + "Jump {} Value Error".format(jump): value_errors[i],
+                       prefix + "Jump {} Pred Rewards".format(jump): pred_rewards[i],
+                       prefix + "Jump {} Pred Values".format(jump): pred_values[i],
+                       prefix + "Jump {} Target Rewards".format(jump): target_rewards[i],
+                       prefix + "Jump {} Target Values".format(jump): target_values[i],
                        'FM epoch': self.epochs_till_now})
 
         wandb.log({prefix + ' loss': np.mean(epoch_losses),
@@ -209,6 +244,10 @@ class TrainingWorker(object):
                    prefix + " Reward Error": np.mean(reward_errors),
                    prefix + " Policy loss": np.mean(policy_losses),
                    prefix + " Value Error": np.mean(value_errors),
+                   prefix + " Pred Rewards".format(jump): np.mean(pred_rewards),
+                   prefix + " Pred Values".format(jump): np.mean(pred_values),
+                   prefix + " Target Rewards".format(jump): np.mean(target_rewards),
+                   prefix + " Target Values".format(jump): np.mean(target_values),
                    'FM epoch': self.epochs_till_now})
 
     def train(self, step=True):
@@ -322,6 +361,10 @@ class TrainingWorker(object):
 
         self.buffer.update_batch_priorities(value_errors[0])
 
+        mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
+        mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
+        target_values = torch.mean(torch.stack(value_targets, 0), -1).detach().cpu().numpy()
+        target_rewards = torch.mean(rewards, 0)[:self.maximum_length+1].detach().cpu().numpy()
         value_errors = np.mean(value_errors, -1)
         reward_errors = np.mean(reward_errors, -1)
 
@@ -335,7 +378,9 @@ class TrainingWorker(object):
         self.epochs_till_now += 1
 
         return total_losses, reward_losses, nce_losses, nce_accs,\
-               policy_losses, value_losses, value_errors, reward_errors
+               policy_losses, value_losses, value_errors, reward_errors, \
+               mean_values, target_values, mean_rewards, target_rewards,
+
 
 
 class LocalNCE(nn.Module):
