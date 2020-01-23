@@ -299,7 +299,7 @@ class TrainingWorker(object):
             action = actions[i]
             current_state, pred_reward, pred_policy, pred_value = self.model(current_state, action)
 
-            # current_state = ScaleGradient.apply(current_state, 0.5)
+            current_state = ScaleGradient.apply(current_state, 0.5)
 
             predictions.append((1. / self.maximum_length,
                                 pred_reward,
