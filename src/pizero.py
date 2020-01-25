@@ -302,7 +302,6 @@ class MCTS:
             node = node.children[actions[i]]
             i += 1
         node.hidden_state = hidden_state
-        node.hidden_state.share_memory_()
         node.reward = reward
         policy_probs = F.softmax(policy_logits, dim=-1)
         for action in range(self.env.action_space[0].n):
@@ -328,7 +327,7 @@ class MCTS:
             actions.append(action)
         parent = search_path[-2]
         hidden_state = parent.hidden_state
-        return action, actions, search_path, hidden_state, root
+        return action, actions[:-1], search_path, hidden_state, root
 
     # Select the child with the highest UCB score.
     def select_child(self, node: Node):
@@ -379,6 +378,26 @@ class MCTS:
             node.visit_count += 1
             self.min_max_stats.update(node.value().item())
 
+            value = node.reward + self.args.discount * value
+        return root
+
+    def expand_and_backup(self, root, actions, hidden_state, reward, policy_logits, value):
+        # We need to use actions here to traverse the tree
+        node, i, search_path = root, 0, []
+        while i < len(actions):
+            node = node.children[actions[i]]
+            search_path.append(node)
+            i += 1
+        node.hidden_state = hidden_state
+        node.reward = reward
+        policy_probs = F.softmax(policy_logits, dim=-1)
+        for action in range(self.env.action_space[0].n):
+            node.children[action] = Node(policy_probs[action].item())
+
+        for node in reversed(search_path):
+            node.value_sum += value
+            node.visit_count += 1
+            self.min_max_stats.update(node.value().item())
             value = node.reward + self.args.discount * value
         return root
 
