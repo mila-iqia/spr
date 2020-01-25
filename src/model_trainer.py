@@ -405,7 +405,6 @@ class MCTSModel(nn.Module):
                                          weight_decay=args.weight_decay)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
                                                                 args.lr_decay ** (1. / args.lr_decay_steps), )
-
     def encode(self, images, actions):
         return self.encoder(images, actions)
 

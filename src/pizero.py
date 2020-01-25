@@ -1,5 +1,7 @@
 import collections
 import math
+from queue import Queue
+
 import numpy as np
 from typing import Dict, List, Optional
 import torch.nn.functional as F
@@ -11,6 +13,8 @@ import multiprocessing
 import time
 
 import gym
+
+from rlpyt.utils.collections import namedarraytuple
 from src.mcts_memory import Transition, blank_batch_trans
 from src.model_trainer import MCTSModel
 import time
@@ -47,7 +51,7 @@ class MinMaxStats(object):
         self.maximum = max(self.maximum, value)
         self.minimum = min(self.minimum, value)
 
-    def normalize(self, value: float) -> float:
+    def normalize(self, value):
         if self.maximum > self.minimum:
             # We normalize only when we have set the maximum and minimum values.
             return (value - self.minimum) / (self.maximum - self.minimum)
@@ -187,7 +191,7 @@ class PiZero:
         self.args.root_exploration_fraction = 0.25
         self.args.root_dirichlet_alpha = 0.25
         self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
-                                   asynchronous=not args.sync_envs)
+                                   asynchronous=False)
         self.network = MCTSModel(args, self.env.action_space[0].n)
         self.network.to(self.args.device)
         self.mcts = MCTS(args, self.env, self.network)
@@ -259,7 +263,6 @@ class MCTS:
 
         for i in range(obs_tensor.shape[0]):
             root = Node(0)
-            root.hidden_state = obs_tensor[i]
             self.expand_node(root, network_output[i])
             self.add_exploration_noise(root)
             roots.append(root)
@@ -292,12 +295,19 @@ class MCTS:
                 self.backpropagate(search_paths[i], network_output[i].value)
         return roots
 
-    def expand_node(self, node, network_output):
-        node.hidden_state = network_output.next_state
-        node.reward = network_output.reward
-        policy_probs = F.softmax(network_output.policy_logits, dim=-1)
+    def expand_node(self, root, actions, hidden_state, reward, policy_logits):
+        # We need to use actions here to traverse the tree
+        node, i = root, 0
+        while i < len(actions):
+            node = node.children[actions[i]]
+            i += 1
+        node.hidden_state = hidden_state
+        node.hidden_state.share_memory_()
+        node.reward = reward
+        policy_probs = F.softmax(policy_logits, dim=-1)
         for action in range(self.env.action_space[0].n):
             node.children[action] = Node(policy_probs[action].item())
+        return root
 
     # At the start of each search, we add dirichlet noise to the prior of the root
     # to encourage the search to explore new actions.
@@ -307,6 +317,18 @@ class MCTS:
         frac = self.args.root_exploration_fraction
         for a, n in zip(actions, noise):
             node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
+        return node
+
+    def run_selection(self, root):
+        node, action, actions = root, None, []
+        search_path = [node]
+        while node.expanded():
+            action, node = self.select_child(node)
+            search_path.append(node)
+            actions.append(action)
+        parent = search_path[-2]
+        hidden_state = parent.hidden_state
+        return action, actions, search_path, hidden_state, root
 
     # Select the child with the highest UCB score.
     def select_child(self, node: Node):
@@ -344,15 +366,21 @@ class MCTS:
         children = list(children)
         return children[action_argmax][0], children[action_argmax][1]
 
-    def backpropagate(self, search_path: List[Node], value: float):
+    def backpropagate(self, actions, value: float, root):
         # TODO: Rename to backup
         # TODO: Vectorize this using masking
+        node, i, search_path = root, 0, []
+        while i < len(actions):
+            node = node.children[actions[i]]
+            search_path.append(node)
+            i += 1
         for node in reversed(search_path):
             node.value_sum += value
             node.visit_count += 1
             self.min_max_stats.update(node.value().item())
 
             value = node.reward + self.args.discount * value
+        return root
 
     def select_action(self, node: Node):
         visit_counts = [

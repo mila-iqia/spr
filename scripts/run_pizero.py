@@ -1,5 +1,7 @@
 from collections import deque
 from multiprocessing import Queue
+
+from src.async_mcts import AsyncMCTS
 from src.mcts_memory import LocalBuffer
 from src.model_trainer import TrainingWorker
 from src.pizero import PiZero, ReanalyzeWorker
@@ -15,6 +17,7 @@ def run_pizero(args):
     pizero = PiZero(args)
     env, mcts = pizero.env, pizero.mcts
     obs, env_steps = torch.from_numpy(env.reset()), 0
+    async_mcts = AsyncMCTS(args, mcts)
 
     sample_queue = Queue()
     reanalyze_queue = Queue()
@@ -45,7 +48,7 @@ def run_pizero(args):
             with prof():
                 roots = mcts.batched_run(obs)
         else:
-            roots = mcts.batched_run(obs)
+            roots = async_mcts.run(obs)
 
         actions, policy_probs, values = [], [], []
         for root in roots:
@@ -102,7 +105,7 @@ def run_pizero(args):
                          torch.from_numpy(reward).float(),
                          torch.from_numpy(done).float(),
                          torch.stack(policy_probs).float(),
-                         torch.stack(values).float().cpu())
+                         torch.tensor(values).float().cpu())
 
         if env_steps % args.jumps == 0 and env_steps > 0:
             # Send transitions from the local buffer to the replay buffer
@@ -147,8 +150,8 @@ if __name__ == '__main__':
                          tags=tags, config=vars(args))
 
     if len(args.savedir) == 0:
-        dir = os.environ["SLURM_TMPDIR"]
-        args.savedir = "{}/{}".format(dir, run.id)
+        args.savedir = os.environ["SLURM_TMPDIR"]
+    args.savedir = "{}/{}".format(args.savedir, run.id)
     os.makedirs(args.savedir, exist_ok=True)
 
     print("Saving episode data in {}".format(args.savedir))
