@@ -373,7 +373,6 @@ class TrainingWorker(object):
         else:
             nce_losses = np.zeros(self.maximum_length + 1)
 
-        import ipdb; ipdb.set_trace()
         self.buffer.update_batch_priorities(value_errors[0])
 
         mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
