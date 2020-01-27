@@ -331,14 +331,14 @@ class TrainingWorker(object):
             pred_reward = F.log_softmax(pred_reward, -1)
             pred_policy = F.log_softmax(pred_policy, -1)
 
-            current_reward_loss = -torch.sum(reward_target * pred_reward, -1).mean()
-            current_value_loss = -torch.sum(value_target * pred_value, -1).mean()
-            current_policy_loss = -torch.sum(policies[i] * pred_policy, -1).mean()
+            current_reward_loss = -torch.sum(reward_target * pred_reward, -1)
+            current_value_loss = -torch.sum(value_target * pred_value, -1)
+            current_policy_loss = -torch.sum(policies[i] * pred_policy, -1)
 
-            loss = loss + loss_scale * (
+            loss = loss + loss_scale * (is_weights * (
                        current_value_loss*self.args.value_loss_weight +
                        current_policy_loss*self.args.policy_loss_weight +
-                       current_reward_loss*self.args.reward_loss_weight)
+                       current_reward_loss*self.args.reward_loss_weight).mean())
 
             total_losses[i] += (current_value_loss*self.args.value_loss_weight +
                        current_policy_loss*self.args.policy_loss_weight +
@@ -353,7 +353,7 @@ class TrainingWorker(object):
                 target_images = target_images.permute(0, 2, 1, 3)
                 nce_input = torch.stack(pred_states, 1).flatten(3, 4).permute(3, 1, 0, 2)
                 nce_loss, nce_accs = self.nce(nce_input, target_images)
-                nce_loss = nce_loss.mean(-1)
+                nce_loss = (nce_loss*is_weights).mean(-1)
                 nce_losses = nce_loss.detach().cpu().numpy()
             else:
                 nce_loss = []
@@ -361,9 +361,8 @@ class TrainingWorker(object):
                     current_targets = target_images[:, :, i]
                     nce_input = pred_state.flatten(2, 3).permute(2, 0, 1)
                     current_nce_loss, current_nce_acc = self.nce(nce_input, current_targets)
-                    nce_loss.append(current_nce_loss)
-                    current_nce_loss = current_nce_loss.mean()
-                    nce_losses.append(current_nce_loss.detach().cpu().item())
+                    nce_loss.append((current_nce_loss*is_weights).mean())
+                    nce_losses.append(current_nce_loss.detach().cpu().mean().item())
                     nce_accs[i] = current_nce_acc
 
             for i, current_nce_loss in enumerate(nce_loss):
@@ -374,6 +373,7 @@ class TrainingWorker(object):
         else:
             nce_losses = np.zeros(self.maximum_length + 1)
 
+        import ipdb; ipdb.set_trace()
         self.buffer.update_batch_priorities(value_errors[0])
 
         mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
