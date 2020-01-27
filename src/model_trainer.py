@@ -25,7 +25,7 @@ class TrainingWorker(object):
         self.maximum_length = args.jumps
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
-        self.nce = LocalNCE()
+        self.nce = LocalNCE() if not args.use_all_targets else BlockNCE()
         self.epochs_till_now = 0
 
         self.train_trackers = dict()
@@ -269,7 +269,7 @@ class TrainingWorker(object):
             initial_actions = actions[0]
             is_weights = is_weights.to(self.args.device)
 
-            target_images = states[:, :, 0].transpose(0, 1)
+            target_images = states[:self.maximum_length+1, :, 0].transpose(0, 1)
             target_images = target_images.reshape(-1, *states.shape[-3:])
 
         # Get into the shape used by the NCE code.
@@ -288,7 +288,10 @@ class TrainingWorker(object):
 
         pred_values, pred_rewards, pred_policies = [], [], []
         loss = torch.zeros(1, device=self.args.device)
-        reward_losses, value_losses, policy_losses, nce_losses, nce_accs, total_losses, value_targets = [], [], [], [], [], [], []
+        reward_losses, value_losses, policy_losses, \
+        nce_losses, value_targets = [], [], [], [], []
+        total_losses, nce_accs = np.zeros(self.maximum_length + 1),\
+                                 np.zeros(self.maximum_length + 1)
 
         discounts = torch.ones_like(rewards)[:self.multistep]*self.args.discount
         discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[:, None].float()
@@ -313,13 +316,13 @@ class TrainingWorker(object):
             value_target = torch.sum(discounts*rewards[i:i+self.multistep], 0)
             value_target = value_target + self.args.discount ** self.multistep \
                            * values[i+self.multistep]
+
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
             reward_target = to_categorical(transform(rewards[i]))
 
             pred_rewards.append(inverse_transform(from_categorical(pred_reward, logits=True)))
             pred_values.append(inverse_transform(from_categorical(pred_value, logits=True)))
-            pred_policies.append(pred_policy)
 
             value_errors.append(torch.abs(pred_values[-1] - values[i]).detach().cpu().numpy())
             reward_errors.append(torch.abs(pred_rewards[-1] - rewards[i]).detach().cpu().numpy())
@@ -332,32 +335,44 @@ class TrainingWorker(object):
             current_value_loss = -torch.sum(value_target * pred_value, -1).mean()
             current_policy_loss = -torch.sum(policies[i] * pred_policy, -1).mean()
 
-            reward_losses.append(current_reward_loss.detach().cpu().item())
-            value_losses.append(current_value_loss.detach().cpu().item())
-            policy_losses.append(current_policy_loss.detach().cpu().item())
+            loss = loss + loss_scale * (
+                       current_value_loss*self.args.value_loss_weight +
+                       current_policy_loss*self.args.policy_loss_weight +
+                       current_reward_loss*self.args.reward_loss_weight)
 
-            if not self.args.no_nce:
-                if self.use_all_targets:
-                    current_targets = target_images.roll(-i, 2).flatten(1, 2)
-                else:
-                    current_targets = target_images[:, :, i]
-                nce_input = pred_states[i].flatten(2, 3).permute(2, 0, 1)
-                current_nce_loss, current_nce_acc = self.nce(nce_input, current_targets)
-                current_nce_loss = current_nce_loss.mean()
-                nce_losses.append(current_nce_loss.detach().cpu().item())
-                nce_accs.append(current_nce_acc)
+            total_losses[i] += (current_value_loss*self.args.value_loss_weight +
+                       current_policy_loss*self.args.policy_loss_weight +
+                       current_reward_loss*self.args.reward_loss_weight).detach().mean().cpu().item()
+
+            reward_losses.append(current_reward_loss.detach().mean().cpu().item())
+            value_losses.append(current_value_loss.detach().mean().cpu().item())
+            policy_losses.append(current_policy_loss.detach().mean().cpu().item())
+
+        if not self.args.no_nce:
+            if self.use_all_targets:
+                target_images = target_images.permute(0, 2, 1, 3)
+                nce_input = torch.stack(pred_states, 1).flatten(3, 4).permute(3, 1, 0, 2)
+                nce_loss, nce_accs = self.nce(nce_input, target_images)
+                nce_loss = nce_loss.mean(-1)
+                nce_losses = nce_loss.detach().cpu().numpy()
             else:
-                current_nce_loss = 0
-                nce_losses.append(0)
+                nce_loss = []
+                for i, pred_state in enumerate(pred_states):
+                    current_targets = target_images[:, :, i]
+                    nce_input = pred_state.flatten(2, 3).permute(2, 0, 1)
+                    current_nce_loss, current_nce_acc = self.nce(nce_input, current_targets)
+                    nce_loss.append(current_nce_loss)
+                    current_nce_loss = current_nce_loss.mean()
+                    nce_losses.append(current_nce_loss.detach().cpu().item())
+                    nce_accs[i] = current_nce_acc
 
-            current_loss = current_value_loss*self.args.value_loss_weight + \
-                           current_policy_loss*self.args.policy_loss_weight + \
-                           current_reward_loss*self.args.reward_loss_weight + \
-                           current_nce_loss*self.args.contrastive_loss_weight
+            for i, current_nce_loss in enumerate(nce_loss):
+                loss_scale = predictions[i][0]
+                loss = loss + loss_scale*self.args.contrastive_loss_weight*current_nce_loss
+                total_losses[i] += current_nce_loss.mean().detach().cpu().item()
 
-            total_losses.append(current_loss.mean().detach().cpu().item())
-            current_loss = (current_loss * is_weights).mean()
-            loss = loss + current_loss
+        else:
+            nce_losses = np.zeros(self.maximum_length + 1)
 
         self.buffer.update_batch_priorities(value_errors[0])
 
@@ -380,7 +395,6 @@ class TrainingWorker(object):
         return total_losses, reward_losses, nce_losses, nce_accs,\
                policy_losses, value_losses, value_errors, reward_errors, \
                mean_values, target_values, mean_rewards, target_rewards,
-
 
 
 class LocalNCE(nn.Module):
@@ -442,6 +456,71 @@ class LocalNCE(nn.Module):
         loss_nce = 0.5 * (loss_nce_x1_to_x2 + loss_nce_x2_to_x1)
         acc = self.calculate_accuracy(lsmax_x1_to_x2)
         return loss_nce, acc
+
+
+class BlockNCE(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def calculate_accuracy(self, preds):
+        labels = torch.arange(preds.shape[-2], dtype=torch.long, device=preds.device)
+        preds = torch.argmax(-preds, dim=-1)
+        corrects = torch.eq(labels, preds)
+        return corrects
+
+    def forward(self, f_x1s, f_x2s):
+        """
+        Compute InfoNCE cost with source features in f_x1 and target features in
+        f_x2. We assume one source feature vector per location per item in batch
+        and one target feature vector per location per item in batch. There are
+        n_batch items, n_locs locations, and n_rkhs dimensions per vector.
+        -- note: we can predict x1->x2 and x2->x1 in parallel "for free"
+
+        For the positive nce pair (f_x1[i, :, l], f_x2[i, :, l]), which comes from
+        batch item i at spatial location l, we will use the target feature vectors
+        f_x2[j, :, l] as negative samples, for all j != i.
+
+        Input:
+          f_x1 : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs source vectors per item
+          f_x2 : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs target vectors per item.  Negative samples.
+        Output:
+          loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
+        """
+        # reshaping for big matrix multiply
+        # f_x1 = f_x1.permute(2, 0, 1)  # (n_locs, n_batch, n_rkhs)
+        f_x1 = f_x1s.flatten(1, 2)
+        f_x2 = f_x2s.flatten(1, 2)
+        f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
+
+        new_target = f_x2
+        n_batch = f_x1.size(1)
+        neg_batch = new_target.size(-1)
+
+        # compute dot(f_glb[i, :, l], f_lcl[j, :, l]) for all i, j, l
+        # -- after matmul: raw_scores[l, i, j] = dot(f_x1[i, :, l], f_x2[j, :, l])
+        raw_scores = torch.matmul(f_x1, new_target)  # (n_locs, n_batch, n_batch)
+        # We get NCE log softmax by normalizing over dim 1 or 2 of raw_scores...
+        # -- normalizing over dim 1 gives scores for predicting x2->x1
+        # -- normalizing over dim 2 gives scores for predicting x1->x2
+        lsmax_x1_to_x2 = -F.log_softmax(raw_scores, dim=2)  # (n_locs, n_batch, n_batch)
+        lsmax_x2_to_x1 = -F.log_softmax(raw_scores, dim=1)  # (n_locs, n_batch, n_batch)
+        # make a mask for picking out the NCE scores for positive pairs
+        pos_mask = torch.eye(n_batch, dtype=f_x1.dtype, device=f_x1.device)
+        if n_batch != neg_batch:
+            with torch.no_grad():
+                mask = torch.zeros((n_batch, neg_batch), dtype=f_x1.dtype, device=f_x1.device)
+                mask[:n_batch, :n_batch] += pos_mask
+                pos_mask = mask
+        pos_mask = pos_mask.unsqueeze(dim=0)
+        # use masked sums to select NCE scores for positive pairs
+        loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=2)  # (n_locs, n_batch)
+        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)[:, :n_batch]  # (n_locs, n_batch)
+        # combine forwards/backwards prediction costs (or whatever)
+        loss_nce = 0.5 * (loss_nce_x1_to_x2 + loss_nce_x2_to_x1)
+        loss_nce = loss_nce.view(*f_x1.shape[0:2])
+        corrects = self.calculate_accuracy(lsmax_x1_to_x2)
+        accuracy = torch.mean(corrects.float().view(*f_x1s.shape[:3]), (0, 2)).detach().cpu().numpy()
+        return loss_nce.mean(0).view(f_x1s.shape[1], f_x1s.shape[2]), accuracy
 
 
 class MCTSModel(nn.Module):

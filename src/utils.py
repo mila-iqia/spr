@@ -60,7 +60,7 @@ def get_args():
     parser.add_argument('--priority-weight', type=float, default=1., metavar='β',
                         help='Initial prioritised experience replay importance sampling weight')
     parser.add_argument('--jumps', type=int, default=5, help='')
-    parser.add_argument('--value-loss-weight', type=float, default=1.)
+    parser.add_argument('--value-loss-weight', type=float, default=0.1)
     parser.add_argument('--policy-loss-weight', type=float, default=1.)
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
     parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
