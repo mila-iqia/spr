@@ -1,7 +1,5 @@
 import collections
 import math
-from queue import Queue
-
 import numpy as np
 from typing import Dict, List, Optional
 import torch.nn.functional as F
@@ -11,10 +9,9 @@ import numpy as np
 from itertools import islice
 import multiprocessing
 import time
+import copy
 
 import gym
-
-from rlpyt.utils.collections import namedarraytuple
 from src.mcts_memory import Transition, blank_batch_trans
 from src.model_trainer import MCTSModel
 import time
@@ -51,7 +48,7 @@ class MinMaxStats(object):
         self.maximum = max(self.maximum, value)
         self.minimum = min(self.minimum, value)
 
-    def normalize(self, value):
+    def normalize(self, value: float) -> float:
         if self.maximum > self.minimum:
             # We normalize only when we have set the maximum and minimum values.
             return (value - self.minimum) / (self.maximum - self.minimum)
@@ -78,7 +75,7 @@ class Node(object):
 
 
 class ReanalyzeWorker(multiprocessing.Process):
-    def __init__(self, args, input_queue, output_queue, obs_shape):
+    def __init__(self, args, input_queue, output_queue):
         super().__init__()
         self.reanalyze_heads = 4*args.num_envs
         self.current_write_episodes = [ListEpisode([], [], [], []) for _ in range(self.reanalyze_heads)]
@@ -90,7 +87,10 @@ class ReanalyzeWorker(multiprocessing.Process):
         self.current_indices = []
         self.directory = args.savedir
         self.total_episodes = 0
-        self.obs_shape = obs_shape
+        self.dummy_env = gym.vector.make('atari-v0', num_envs=1, args=args,
+                                        asynchronous=False)
+        self.obs_shape = self.dummy_env.observation_space.shape[2:]
+        self.dummy_env.close()
         self.args = args
 
     def run(self, forever=True):
@@ -148,9 +148,9 @@ class ReanalyzeWorker(multiprocessing.Process):
         # We only want to reanalyze done episodes for now.
 
         observations = np.zeros((self.reanalyze_heads,
-                                    self.args.framestack,
-                                    *self.obs_shape),
-                                   dtype=np.uint8)
+                                 self.args.framestack,
+                                 *self.obs_shape),
+                                dtype=np.uint8)
         actions = []
         rewards = np.zeros(self.reanalyze_heads)
         dones = np.zeros(self.reanalyze_heads)
@@ -179,7 +179,7 @@ class ReanalyzeWorker(multiprocessing.Process):
                 # Load in a random new episode
                 self.current_read_episodes[i] = self.load_episode(np.random.randint(self.total_episodes))
 
-        return torch.from_numpy(observations).float() / 255.,\
+        return torch.from_numpy(observations).float() / 255., \
                actions, rewards, dones
 
 
@@ -191,8 +191,9 @@ class PiZero:
         self.args.root_exploration_fraction = 0.25
         self.args.root_dirichlet_alpha = 0.25
         self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
-                                   asynchronous=False)
+                                   asynchronous=not args.sync_envs)
         self.network = MCTSModel(args, self.env.action_space[0].n)
+        self.network.share_memory()
         self.network.to(self.args.device)
         self.mcts = MCTS(args, self.env, self.network)
 
@@ -231,13 +232,14 @@ class MCTS:
         self.args = args
         self.env = env
         self.network = network
+        self.target_network = network
         self.min_max_stats = MinMaxStats()
 
     def run(self, obs):
         root = Node(0)
         obs = obs.to(self.args.device)
         root.hidden_state = obs
-        self.expand_node(root, network_output=self.network.initial_inference(obs))
+        self.expand_node(root, network_output=self.target_network.initial_inference(obs))
         for s in range(self.args.num_simulations):
             node = root
             search_path = [node]
@@ -251,7 +253,7 @@ class MCTS:
             parent = search_path[-2]
             with torch.no_grad():
                 action = torch.tensor(action, device=self.args.device)
-                network_output = self.network.inference(parent.hidden_state, action)
+                network_output = self.target_network.inference(parent.hidden_state, action)
             self.expand_node(node, network_output)
             self.backpropagate(search_path, network_output.value)
         return root
@@ -259,7 +261,7 @@ class MCTS:
     def batched_run(self, obs_tensor):
         roots = []
         obs_tensor = obs_tensor.to(self.args.device)
-        network_output = self.network.initial_inference(obs_tensor)
+        network_output = self.target_network.initial_inference(obs_tensor)
 
         for i in range(obs_tensor.shape[0]):
             root = Node(0)
@@ -288,25 +290,19 @@ class MCTS:
             with torch.no_grad():
                 actions = torch.stack(actions, 0).to(self.args.device)
                 hidden_states = torch.stack(hidden_states, 0).to(self.args.device)
-                network_output = self.network.inference(hidden_states, actions)
+                network_output = self.target_network.inference(hidden_states, actions)
 
             for i in range(obs_tensor.shape[0]):
                 self.expand_node(nodes[i], network_output[i])
                 self.backpropagate(search_paths[i], network_output[i].value)
         return roots
 
-    def expand_node(self, root, actions, hidden_state, reward, policy_logits):
-        # We need to use actions here to traverse the tree
-        node, i = root, 0
-        while i < len(actions):
-            node = node.children[actions[i]]
-            i += 1
-        node.hidden_state = hidden_state
-        node.reward = reward
-        policy_probs = F.softmax(policy_logits, dim=-1)
+    def expand_node(self, node, network_output):
+        node.hidden_state = network_output.next_state
+        node.reward = network_output.reward
+        policy_probs = F.softmax(network_output.policy_logits, dim=-1)
         for action in range(self.env.action_space[0].n):
             node.children[action] = Node(policy_probs[action].item())
-        return root
 
     # At the start of each search, we add dirichlet noise to the prior of the root
     # to encourage the search to explore new actions.
@@ -316,18 +312,6 @@ class MCTS:
         frac = self.args.root_exploration_fraction
         for a, n in zip(actions, noise):
             node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
-        return node
-
-    def run_selection(self, root):
-        node, action, actions = root, None, []
-        search_path = [node]
-        while node.expanded():
-            action, node = self.select_child(node)
-            search_path.append(node)
-            actions.append(action)
-        parent = search_path[-2]
-        hidden_state = parent.hidden_state
-        return action, actions[:-1], search_path, hidden_state, root
 
     # Select the child with the highest UCB score.
     def select_child(self, node: Node):
@@ -350,7 +334,7 @@ class MCTS:
     def optimized_select_child(self, parent, children):
         # TODO: Vectorize this
         pb_c = np.array([math.log((parent.visit_count + self.args.pb_c_base + 1) /
-                        self.args.pb_c_base) + self.args.pb_c_init] * len(children))
+                                  self.args.pb_c_base) + self.args.pb_c_init] * len(children))
         child_visit_counts, child_priors, child_values = zip(*[(child.visit_count, child.prior, child.value())
                                                                for action, child in children])
         child_visit_counts = np.array(child_visit_counts)
@@ -365,41 +349,15 @@ class MCTS:
         children = list(children)
         return children[action_argmax][0], children[action_argmax][1]
 
-    def backpropagate(self, actions, value: float, root):
+    def backpropagate(self, search_path: List[Node], value: float):
         # TODO: Rename to backup
         # TODO: Vectorize this using masking
-        node, i, search_path = root, 0, []
-        while i < len(actions):
-            node = node.children[actions[i]]
-            search_path.append(node)
-            i += 1
         for node in reversed(search_path):
             node.value_sum += value
             node.visit_count += 1
             self.min_max_stats.update(node.value().item())
 
             value = node.reward + self.args.discount * value
-        return root
-
-    def expand_and_backup(self, root, actions, hidden_state, reward, policy_logits, value):
-        # We need to use actions here to traverse the tree
-        node, i, search_path = root, 0, []
-        while i < len(actions):
-            node = node.children[actions[i]]
-            search_path.append(node)
-            i += 1
-        node.hidden_state = hidden_state
-        node.reward = reward
-        policy_probs = F.softmax(policy_logits, dim=-1)
-        for action in range(self.env.action_space[0].n):
-            node.children[action] = Node(policy_probs[action].item())
-
-        for node in reversed(search_path):
-            node.value_sum += value
-            node.visit_count += 1
-            self.min_max_stats.update(node.value().item())
-            value = node.reward + self.args.discount * value
-        return root
 
     def select_action(self, node: Node):
         visit_counts = [
