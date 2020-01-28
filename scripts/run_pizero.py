@@ -15,16 +15,14 @@ import numpy as np
 
 def run_pizero(args):
     pizero = PiZero(args)
-    env, mcts = pizero.env, pizero.mcts
-    obs, env_steps = torch.from_numpy(env.reset()), 0
-    async_mcts = AsyncMCTS(args, mcts)
+    async_mcts = AsyncMCTS(args, pizero.network)
+    env_steps = 0
 
     sample_queue = Queue()
     reanalyze_queue = Queue()
     reanalyze_worker = ReanalyzeWorker(args,
                                        sample_queue,
-                                       reanalyze_queue,
-                                       obs.shape[2:])
+                                       reanalyze_queue)
     reanalyze_worker.start()
     training_worker = TrainingWorker(args, model=pizero.network)
     local_buf = LocalBuffer()
@@ -39,26 +37,15 @@ def run_pizero(args):
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     while env_steps < args.total_env_steps:
+        # Run MCTS for the vectorized observation
+        obs, actions, reward, done, policy_probs, values = async_mcts.run_mcts()
+
         if total_episodes > 0 and args.reanalyze:
             new_samples = reanalyze_queue.get()
             obs = torch.cat([obs, new_samples[0]], 0)  # Append reanalyze candidates to new observations
 
-        # Run MCTS for the vectorized observation
-        if args.profile:
-            with prof():
-                roots = mcts.batched_run(obs)
-        else:
-            roots = async_mcts.run(obs)
-
-        actions, policy_probs, values = [], [], []
-        for root in roots:
-            # Select action for each obs
-            action, policy = mcts.select_action(root)
-            actions.append(action)
-            policy_probs.append(policy.probs)
-            values.append(root.value())
         actions = actions[:args.num_envs]  # Cut out any reanalyzed actions.
-        next_obs, reward, done, infos = env.step(actions)
+
         eprets += np.array(reward)
 
         for i in range(args.num_envs):
@@ -68,7 +55,6 @@ def run_pizero(args):
                            'env_steps': env_steps,
                            "Reanalyze queue length:": reanalyze_queue.qsize()})
                 eprets[i] = 0
-        next_obs = torch.from_numpy(next_obs)
 
         if args.reanalyze:
             # Still haven't concluded an episode
@@ -101,11 +87,7 @@ def run_pizero(args):
             total_episodes += np.sum(done[:args.num_envs])
 
         local_buf.append(obs,
-                         torch.tensor(actions).float(),
-                         torch.from_numpy(reward).float(),
-                         torch.from_numpy(done).float(),
-                         torch.stack(policy_probs).float(),
-                         torch.tensor(values).float().cpu())
+                         actions, reward, done, policy_probs, values)
 
         if env_steps % args.jumps == 0 and env_steps > 0:
             # Send transitions from the local buffer to the replay buffer
@@ -128,7 +110,6 @@ def run_pizero(args):
             print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
             wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
-        obs = next_obs
         env_steps += args.num_envs
 
     if args.profile:
