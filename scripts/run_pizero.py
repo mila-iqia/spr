@@ -4,47 +4,40 @@ from multiprocessing import Queue
 from src.async_mcts import AsyncMCTS
 from src.mcts_memory import LocalBuffer
 from src.model_trainer import TrainingWorker
-from src.pizero import PiZero, ReanalyzeWorker
+from src.pizero import PiZero
+from src.async_reanalyze import AsyncReanalyze
 from src.utils import get_args
 
 import os
+import copy
 import torch
 import wandb
 import numpy as np
 
-
 def run_pizero(args):
     pizero = PiZero(args)
-    async_mcts = AsyncMCTS(args, pizero.network)
     env_steps = 0
-
-    sample_queue = Queue()
-    reanalyze_queue = Queue()
-    reanalyze_worker = ReanalyzeWorker(args,
-                                       sample_queue,
-                                       reanalyze_queue)
-    reanalyze_worker.start()
     training_worker = TrainingWorker(args, model=pizero.network)
+
+    if args.target_update_interval > 0:
+        target_network = copy.deepcopy(pizero.network)
+    else:
+        target_network = pizero.network
+    target_network.share_memory()
+
+    if args.reanalyze:
+        async_reanalyze = AsyncReanalyze(args, target_network)
+
+    async_mcts = AsyncMCTS(args, target_network)
     local_buf = LocalBuffer()
     eprets = np.zeros(args.num_envs, 'f')
     episode_rewards = deque(maxlen=10)
     wandb.log({'env_steps': 0})
 
-    total_episodes = 0
-    if args.profile:
-        import pprofile
-        prof = pprofile.Profile()
-        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
+    total_episodes = 0.
     while env_steps < args.total_env_steps:
         # Run MCTS for the vectorized observation
         obs, actions, reward, done, policy_probs, values = async_mcts.run_mcts()
-
-        if total_episodes > 0 and args.reanalyze:
-            new_samples = reanalyze_queue.get()
-            obs = torch.cat([obs, new_samples[0]], 0)  # Append reanalyze candidates to new observations
-
-        actions = actions[:args.num_envs]  # Cut out any reanalyzed actions.
 
         eprets += np.array(reward)
 
@@ -52,42 +45,29 @@ def run_pizero(args):
             if done[i]:
                 episode_rewards.append(eprets[i])
                 wandb.log({'Episode Reward': eprets[i],
-                           'env_steps': env_steps,
-                           "Reanalyze queue length:": reanalyze_queue.qsize()})
+                           'env_steps': env_steps})
                 eprets[i] = 0
 
         if args.reanalyze:
-            # Still haven't concluded an episode
-            if total_episodes == 0:
-                # to preserve expectations for the buffer, just pad with
-                # the current examples
-                obs = torch.cat([obs]*5, 0)
-                obs[args.num_envs:] = 0
-                actions = actions + [0]*(4*len(actions))
-                reward = np.concatenate([reward]*5, 0)
-                reward[args.num_envs:] = 0
-                done = np.concatenate([done]*5, 0)
-                done[args.num_envs:] = 0
-                policy_probs = policy_probs * 5
-                done[args.num_envs:] = 0
-                values = values + [torch.zeros_like(values[0])]*(4*len(values))
+            async_reanalyze.store_transitions(
+                (obs[:, -1]*255).byte(),
+                actions,
+                reward,
+                done,
+            )
 
-            else:
-                # Add the reanalyzed transitions to the real data.
-                # Obs, policy_probs and values are already handled above.
-                actions = actions + new_samples[1]
-                reward = np.concatenate([reward, new_samples[2]], 0)
-                done = np.concatenate([done, new_samples[3]], 0)
+            total_episodes += torch.sum(done)
 
-            sample_queue.put(((obs[:args.num_envs, -1]*255).byte(),
-                               actions[:args.num_envs],
-                               reward[:args.num_envs],
-                               done[:args.num_envs]))
+            # Add the reanalyzed transitions to the real data.
+            new_samples = async_reanalyze.get_transitions(total_episodes)
+            obs = torch.cat([obs, new_samples[0]], 0)
+            actions = torch.cat([actions, new_samples[1]], 0)
+            reward = torch.cat([reward, new_samples[2]], 0)
+            done = torch.cat([done, new_samples[3]], 0)
+            policy_probs = torch.cat([policy_probs, new_samples[4]], 0)
+            values = torch.cat([values, new_samples[5]], 0)
 
-            total_episodes += np.sum(done[:args.num_envs])
-
-        local_buf.append(obs,
-                         actions, reward, done, policy_probs, values)
+        local_buf.append(obs, actions, reward, done, policy_probs, values)
 
         if env_steps % args.jumps == 0 and env_steps > 0:
             # Send transitions from the local buffer to the replay buffer
@@ -98,6 +78,11 @@ def run_pizero(args):
         if env_steps % args.training_interval == 0 and env_steps > 400:
             training_worker.step()  # TODO: Make this async, and add ability to take multiple steps here
             training_worker.log_results()
+            if (args.target_update_interval >= 0 and
+                env_steps//args.training_interval %
+                args.target_update_interval == 0):
+
+                target_network.load_state_dict(pizero.network.state_dict())
 
         if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
             print('Env Steps: {}, Mean Reward: {}, Median Reward: {}'.format(env_steps, np.mean(episode_rewards),
@@ -112,23 +97,21 @@ def run_pizero(args):
 
         env_steps += args.num_envs
 
-    if args.profile:
-        prof.dump_stats("profile.out")
-
 
 if __name__ == '__main__':
     args = get_args()
     tags = []
-    if len(args.name) == 0:
-        run = wandb.init(project=args.wandb_proj,
-                         entity="abs-world-models",
-                         tags=tags,
-                         config=vars(args))
-    else:
-        run = wandb.init(project=args.wandb_proj,
-                         name=args.name,
-                         entity="abs-world-models",
-                         tags=tags, config=vars(args))
+    try:
+        if len(args.name) == 0:
+            run = wandb.init(project=args.wandb_proj, entity="abs-world-models", tags=tags, config=vars(args))
+        else:
+            run = wandb.init(project=args.wandb_proj,
+                             name=args.name,
+                             entity="abs-world-models",
+                             tags=tags, config=vars(args))
+    except wandb.run_manager.LaunchError as e:
+        print(e)
+        pass
 
     if len(args.savedir) == 0:
         args.savedir = os.environ["SLURM_TMPDIR"]

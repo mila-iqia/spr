@@ -37,7 +37,7 @@ class TrainingWorker(object):
         examples = get_example_outputs(self.args)
         batch_size = self.args.num_envs
         if self.args.reanalyze:
-            batch_size *= 5
+            batch_size = batch_size + self.args.num_reanalyze_envs
         example_to_buffer = SamplesToBuffer(
             observation=examples["observation"],
             action=examples["action"],

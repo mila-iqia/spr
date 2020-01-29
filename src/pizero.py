@@ -8,8 +8,7 @@ from torch.distributions import Categorical
 import numpy as np
 from itertools import islice
 import multiprocessing
-import time
-import copy
+
 
 import gym
 from src.mcts_memory import Transition, blank_batch_trans
@@ -21,20 +20,6 @@ from recordclass import dataobject
 MAXIMUM_FLOAT_VALUE = float('inf')
 
 KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
-
-
-class ListEpisode(dataobject):
-    obs: list
-    actions: list
-    rewards: list
-    dones: list
-
-
-class NPEpisode(dataobject):
-    obs: np.ndarray
-    actions: np.ndarray
-    rewards: np.ndarray
-    dones: np.ndarray
 
 
 class MinMaxStats(object):
@@ -72,116 +57,6 @@ class Node(object):
         if self.visit_count == 0:
             return 0
         return self.value_sum / self.visit_count
-
-
-class ReanalyzeWorker(multiprocessing.Process):
-    def __init__(self, args, input_queue, output_queue):
-        super().__init__()
-        self.reanalyze_heads = 4*args.num_envs
-        self.current_write_episodes = [ListEpisode([], [], [], []) for _ in range(self.reanalyze_heads)]
-        self.current_read_episodes = []
-        self.tr_indices = np.zeros((self.reanalyze_heads,), dtype="int")
-        self.inqueue = input_queue
-        self.outqueue = output_queue
-        self.buffer = []
-        self.current_indices = []
-        self.directory = args.savedir
-        self.total_episodes = 0
-        self.dummy_env = gym.vector.make('atari-v0', num_envs=1, args=args,
-                                        asynchronous=False)
-        self.obs_shape = self.dummy_env.observation_space.shape[2:]
-        self.dummy_env.close()
-        self.args = args
-
-    def run(self, forever=True):
-        while True:
-            self.write_to_buffer()
-
-            # Don't reanalyze until we have data for it.
-            if self.total_episodes > 0 and self.outqueue.qsize() < 100:
-                new_samples = self.sample_for_reanalysis()
-                self.outqueue.put(new_samples)
-            else:
-                time.sleep(0.1) # Don't just spin the processor
-            if not forever:
-                return
-
-    def write_to_buffer(self):
-        while not self.inqueue.empty():
-            obs, action, reward, done = self.inqueue.get()
-
-            for i in range(self.args.num_envs):
-                episode = self.current_write_episodes[i]
-                episode.obs.append(obs[i])
-                episode.actions.append(action[i])
-                episode.rewards.append(reward[i])
-                episode.dones.append(done[i])
-
-                if done[i]:
-                    self.save_episode(episode)
-
-            self.current_write_episodes[i] = ListEpisode([], [], [], [])
-
-    def save_episode(self, episode):
-
-        obs = np.stack(episode.obs)
-        actions = np.array(episode.actions)
-        rewards = np.array(episode.rewards)
-        dones = np.array(episode.dones)
-
-        filename = self.directory + "/ep_{}.npz".format(self.total_episodes)
-        np.savez_compressed(file=filename, obs=obs, actions=actions,
-                            dones=dones, rewards=rewards)
-        self.total_episodes += 1
-
-    def load_episode(self, index):
-        filename = self.directory + "/ep_{}.npz".format(index)
-        file = np.load(filename)
-        return NPEpisode(file["obs"], file["actions"],
-                         file["rewards"], file["dones"])
-
-    def sample_for_reanalysis(self):
-        """
-        :param buffer: list of lists of Transitions.  Each sublist is an episode.
-        :return: list of new transitions, representing a reanalyzed episode.
-        """
-        # We only want to reanalyze done episodes for now.
-
-        observations = np.zeros((self.reanalyze_heads,
-                                 self.args.framestack,
-                                 *self.obs_shape),
-                                dtype=np.uint8)
-        actions = []
-        rewards = np.zeros(self.reanalyze_heads)
-        dones = np.zeros(self.reanalyze_heads)
-
-        for i in range(self.reanalyze_heads):
-            # Should only happen at initialization.
-            if i >= len(self.current_read_episodes):
-                new_ep = self.load_episode(np.random.randint(self.total_episodes))
-                self.current_read_episodes.append(new_ep)
-                self.tr_indices[i] = 0
-
-            episode = self.current_read_episodes[i]
-            ind = self.tr_indices[i]
-
-            bottom_ind = max(0, ind - self.args.framestack + 1)
-            start_point = self.args.framestack - (ind - bottom_ind + 1)
-            observations[i, start_point:] = episode.obs[bottom_ind:ind+1]
-            actions.append(episode.actions[ind])
-            rewards[i] = episode.rewards[ind]
-            dones[i] = episode.dones[ind]
-            self.tr_indices[i] += 1
-
-            # Check if we've finished the episode.
-            if self.tr_indices[i] >= episode.obs.shape[0]:
-                self.tr_indices[i] = 0
-                # Load in a random new episode
-                self.current_read_episodes[i] = self.load_episode(np.random.randint(self.total_episodes))
-
-        return torch.from_numpy(observations).float() / 255., \
-               actions, rewards, dones
-
 
 class PiZero:
     def __init__(self, args):
@@ -228,10 +103,9 @@ class PiZero:
 
 
 class MCTS:
-    def __init__(self, args, env, network):
+    def __init__(self, args, n_actions, network):
         self.args = args
-        self.env = env
-        self.network = network
+        self.n_actions = n_actions
         self.target_network = network
         self.min_max_stats = MinMaxStats()
 
@@ -301,14 +175,14 @@ class MCTS:
         node.hidden_state = network_output.next_state
         node.reward = network_output.reward
         policy_probs = F.softmax(network_output.policy_logits, dim=-1)
-        for action in range(self.env.action_space[0].n):
+        for action in range(self.n_actions):
             node.children[action] = Node(policy_probs[action].item())
 
     # At the start of each search, we add dirichlet noise to the prior of the root
     # to encourage the search to explore new actions.
     def add_exploration_noise(self, node: Node):
         actions = list(node.children.keys())
-        noise = np.random.dirichlet([self.args.root_dirichlet_alpha] * self.env.action_space[0].n)
+        noise = np.random.dirichlet([self.args.root_dirichlet_alpha] * self.n_actions)
         frac = self.args.root_exploration_fraction
         for a, n in zip(actions, noise):
             node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
