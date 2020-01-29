@@ -21,7 +21,9 @@ def get_args():
     parser.add_argument('--total-env-steps', type=int, default=1000000,
                         help='Total number to env steps to train (default: 100000)')
     parser.add_argument('--num-envs', type=int, default=64, help='Number of parallel envs to run')
+    parser.add_argument('--num-reanalyze-envs', type=int, default=64, help='Number of parallel envs to run')
     parser.add_argument('--num-workers', type=int, default=8, help='Number of parallel envs to run')
+    parser.add_argument('--num-reanalyze-workers', type=int, default=8, help='Number of parallel envs to run')
     parser.add_argument('--sync-envs', action='store_true')
     parser.add_argument('--buffer-size', type=int, default=100000)
     parser.add_argument('--seed', type=int, default=42,
@@ -35,6 +37,9 @@ def get_args():
     parser.add_argument('--discount', type=float, default=0.99)
     parser.add_argument('--evaluation-episodes', type=int, default=5,
                         help='Number of episodes to average over when evaluating')
+    parser.add_argument('--target-update-interval', type=int, default=1000,
+                        help='How often to update search target network. '
+                             ' <=0 to disable')
 
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
