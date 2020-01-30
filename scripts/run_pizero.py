@@ -75,7 +75,7 @@ def run_pizero(args):
             training_worker.buffer.append_samples(samples_to_buffer)
             local_buf.clear()
 
-        if env_steps % args.training_interval == 0 and env_steps > 400:
+        if env_steps % args.training_interval == 0 and env_steps > args.num_envs*20:
             training_worker.step()  # TODO: Make this async, and add ability to take multiple steps here
             training_worker.log_results()
             if (args.target_update_interval >= 0 and
