@@ -139,7 +139,7 @@ class MCTS:
         with torch.no_grad():
             roots = []
             obs_tensor = obs_tensor.to(self.args.device)
-              network_output = self.network.initial_inference(obs_tensor)
+            network_output = self.network.initial_inference(obs_tensor)
 
             for i in range(obs_tensor.shape[0]):
                 root = Node(0)
