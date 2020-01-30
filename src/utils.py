@@ -40,9 +40,6 @@ def get_args():
     parser.add_argument('--discount', type=float, default=0.99)
     parser.add_argument('--evaluation-episodes', type=int, default=5,
                         help='Number of episodes to average over when evaluating')
-    parser.add_argument('--target-update-interval', type=int, default=1000,
-                        help='How often to update search target network. '
-                             ' <=0 to disable')
 
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
