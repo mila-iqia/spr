@@ -25,7 +25,7 @@ class TrainingWorker(object):
         self.maximum_length = args.jumps
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
-        self.nce = LocalNCE()
+        self.nce = LocalNCE() if not args.use_all_targets else BlockNCE()
         self.epochs_till_now = 0
 
         self.train_trackers = dict()
@@ -79,31 +79,48 @@ class TrainingWorker(object):
         trackers["value_losses"] = np.zeros(self.maximum_length+1)
         trackers["policy_losses"] = np.zeros(self.maximum_length+1)
         trackers["reward_losses"] = np.zeros(self.maximum_length+1)
-        trackers["local_losses"] = np.zeros(self.maximum_length+1)
+        trackers["nce_losses"] = np.zeros(self.maximum_length+1)
+        trackers["nce_accs"] = np.zeros(self.maximum_length+1)
         trackers["value_errors"] = np.zeros(self.maximum_length+1)
         trackers["reward_errors"] = np.zeros(self.maximum_length+1)
+        trackers["mean_pred_values"] = np.zeros(self.maximum_length+1)
+        trackers["mean_pred_rewards"] = np.zeros(self.maximum_length+1)
+        trackers["mean_target_values"] = np.zeros(self.maximum_length+1)
+        trackers["mean_target_rewards"] = np.zeros(self.maximum_length+1)
         trackers["iterations"] = 0
 
     def step(self):
 
-        total_losses, reward_losses,\
-        contrastive_losses, policy_losses,\
-        value_losses, value_errors,\
-        reward_errors = self.train()
+        total_losses, reward_losses, nce_losses, nce_accs, policy_losses,\
+        value_losses, value_errors, reward_errors, mean_values, target_values,\
+        mean_rewards, target_rewards, = self.train()
 
-        self.update_trackers(reward_losses, contrastive_losses, policy_losses,
-                             value_losses, total_losses,
+        self.update_trackers(reward_losses,
+                             nce_losses,
+                             nce_accs,
+                             policy_losses,
+                             value_losses,
+                             total_losses,
                              value_errors,
-                             reward_errors)
+                             reward_errors,
+                             mean_values,
+                             mean_rewards,
+                             target_values,
+                             target_rewards)
 
     def update_trackers(self,
                         reward_losses,
-                        local_losses,
+                        nce_losses,
+                        nce_accs,
                         policy_losses,
                         value_losses,
                         epoch_losses,
                         value_errors,
                         reward_errors,
+                        pred_values,
+                        pred_rewards,
+                        target_values,
+                        target_rewards,
                         mode="train"):
         if mode == "train":
             trackers = self.train_trackers
@@ -111,16 +128,18 @@ class TrainingWorker(object):
             trackers = self.val_trackers
 
         trackers["iterations"] += 1
-        trackers["local_losses"] += np.array(local_losses)
+        trackers["nce_losses"] += np.array(nce_losses)
+        trackers["nce_accs"] += np.array(nce_accs)
         trackers["reward_losses"] += np.array(reward_losses)
         trackers["policy_losses"] += np.array(policy_losses)
         trackers["value_losses"] += np.array(value_losses)
         trackers["epoch_losses"] += np.array(epoch_losses)
         trackers["value_errors"] += np.array(value_errors)
         trackers["reward_errors"] += np.array(reward_errors)
-
-        return local_losses, reward_losses, value_losses, policy_losses,\
-               epoch_losses, value_errors, reward_errors
+        trackers["mean_pred_values"] += np.array(pred_values)
+        trackers["mean_pred_rewards"] += np.array(pred_rewards)
+        trackers["mean_target_values"] += np.array(target_values)
+        trackers["mean_target_rewards"] += np.array(target_rewards)
 
     def summarize_trackers(self, mode="train"):
         if mode == "train":
@@ -129,16 +148,22 @@ class TrainingWorker(object):
             trackers = self.val_trackers
 
         iterations = trackers["iterations"]
-        local_losses = np.array(trackers["local_losses"]/iterations)
+        nce_losses = np.array(trackers["nce_losses"]/iterations)
+        nce_accs = np.array(trackers["nce_accs"]/iterations)
         reward_losses = np.array(trackers["reward_losses"]/iterations)
         policy_losses = np.array(trackers["policy_losses"]/iterations)
         value_losses = np.array(trackers["value_losses"]/iterations)
         epoch_losses = np.array(trackers["epoch_losses"]/iterations)
         value_errors = np.array(trackers["value_errors"]/iterations)
         reward_errors = np.array(trackers["reward_errors"]/iterations)
+        pred_values = np.array(trackers["mean_pred_values"]/iterations)
+        pred_rewards = np.array(trackers["mean_pred_rewards"]/iterations)
+        target_values = np.array(trackers["mean_target_values"]/iterations)
+        target_rewards = np.array(trackers["mean_target_rewards"]/iterations)
 
-        return local_losses, reward_losses, value_losses, policy_losses,\
-               epoch_losses, value_errors, reward_errors
+        return nce_losses, nce_accs, reward_losses, value_losses, policy_losses,\
+               epoch_losses, value_errors, reward_errors, pred_values, \
+               target_values, pred_rewards, target_rewards
 
     def log_results(self,
                     prefix='train',
@@ -154,52 +179,75 @@ class TrainingWorker(object):
             self.reset_trackers(prefix)
             return
 
-        local_losses, reward_losses, value_losses, policy_losses, epoch_losses,\
-            value_errors, reward_errors = self.summarize_trackers(prefix)
+        nce_losses, nce_accs, reward_losses, value_losses, policy_losses, \
+        epoch_losses, value_errors, reward_errors, pred_values, target_values,\
+        pred_rewards, target_rewards = self.summarize_trackers(prefix)
+
         self.reset_trackers(prefix)
         print(
-            "{} Epoch: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Reward Error: {:.3f}, Value Error: {:.3f}".format(
+            "{} Epoch: {}, Epoch Loss: {:.3f}, NCE Loss: {:.3f}, NCE Acc: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Rew. Error: {:.3f}, Pred. Rews {:.3f}, Target_Rews. {:.3f}, Val Error: {:.3f}, Pred. Values {:.3f}, Target_Vals. {:.3f}".format(
                 prefix.capitalize(),
                 self.epochs_till_now,
                 np.mean(epoch_losses),
-                np.mean(local_losses),
+                np.mean(nce_losses),
+                np.mean(nce_accs),
                 np.mean(reward_losses),
                 np.mean(policy_losses),
                 np.mean(value_losses),
                 np.mean(reward_errors),
-                np.mean(value_errors)))
+                np.mean(pred_rewards),
+                np.mean(target_rewards),
+                np.mean(value_errors),
+                np.mean(pred_values),
+                np.mean(target_values),
+            ))
 
         for i in range(self.maximum_length + 1):
             jump = i
             if verbose_print:
                 print(
-                    "{} Jump: {}, Epoch Loss: {:.3f}, Local Loss: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Reward Error: {:.3f}, Value Error: {:.3f}".format(
+                    "{} Jump: {}, Epoch Loss: {:.3f}, NCE Loss: {:.3f}, NCE Acc: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Rew. Error: {:.3f}, Pred. Rews {:.3f}, Target_Rews. {:.3f}, Val Error: {:.3f}, Pred. Values {:.3f}, Target_Vals. {:.3f}".format(
                         prefix.capitalize(),
                         jump,
                         epoch_losses[i],
-                        local_losses[i],
+                        nce_losses[i],
+                        nce_accs[i],
                         reward_losses[i],
                         policy_losses[i],
                         value_losses[i],
                         reward_errors[i],
-                        value_errors[i]))
+                        pred_rewards[i],
+                        target_rewards[i],
+                        value_errors[i],
+                        pred_values[i],
+                        target_values[i]))
 
             wandb.log({prefix + 'Jump {} loss'.format(jump): epoch_losses[i],
-                       prefix + 'Jump {} local loss'.format(jump): local_losses[i],
+                       prefix + 'Jump {} NCE loss'.format(jump): nce_losses[i],
+                       prefix + 'Jump {} NCE acc'.format(jump): nce_accs[i],
                        prefix + "Jump {} Reward Loss".format(jump): reward_losses[i],
                        prefix + 'Jump {} Value Loss'.format(jump): value_losses[i],
                        prefix + "Jump {} Reward Error".format(jump): reward_errors[i],
                        prefix + "Jump {} Policy loss".format(jump): policy_losses[i],
                        prefix + "Jump {} Value Error".format(jump): value_errors[i],
+                       prefix + "Jump {} Pred Rewards".format(jump): pred_rewards[i],
+                       prefix + "Jump {} Pred Values".format(jump): pred_values[i],
+                       prefix + "Jump {} Target Rewards".format(jump): target_rewards[i],
+                       prefix + "Jump {} Target Values".format(jump): target_values[i],
                        'FM epoch': self.epochs_till_now})
 
         wandb.log({prefix + ' loss': np.mean(epoch_losses),
-                   prefix + ' local loss': np.mean(local_losses),
+                   prefix + ' NCE loss': np.mean(nce_losses),
+                   prefix + ' NCE acc': np.mean(nce_accs),
                    prefix + " Reward Loss": np.mean(reward_losses),
                    prefix + ' Value Loss': np.mean(value_losses),
                    prefix + " Reward Error": np.mean(reward_errors),
                    prefix + " Policy loss": np.mean(policy_losses),
                    prefix + " Value Error": np.mean(value_errors),
+                   prefix + " Pred Rewards".format(jump): np.mean(pred_rewards),
+                   prefix + " Pred Values".format(jump): np.mean(pred_values),
+                   prefix + " Target Rewards".format(jump): np.mean(target_rewards),
+                   prefix + " Target Values".format(jump): np.mean(target_values),
                    'FM epoch': self.epochs_till_now})
 
     def train(self, step=True):
@@ -221,7 +269,7 @@ class TrainingWorker(object):
             initial_actions = actions[0]
             is_weights = is_weights.to(self.args.device)
 
-            target_images = states[:, :, 0].transpose(0, 1)
+            target_images = states[:self.maximum_length+1, :, 0].transpose(0, 1)
             target_images = target_images.reshape(-1, *states.shape[-3:])
 
         # Get into the shape used by the NCE code.
@@ -240,7 +288,10 @@ class TrainingWorker(object):
 
         pred_values, pred_rewards, pred_policies = [], [], []
         loss = torch.zeros(1, device=self.args.device)
-        reward_losses, value_losses, policy_losses, nce_losses, total_losses, value_targets = [], [], [], [], [], []
+        reward_losses, value_losses, policy_losses, \
+        nce_losses, value_targets = [], [], [], [], []
+        total_losses, nce_accs = np.zeros(self.maximum_length + 1),\
+                                 np.zeros(self.maximum_length + 1)
 
         discounts = torch.ones_like(rewards)[:self.multistep]*self.args.discount
         discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[:, None].float()
@@ -265,13 +316,13 @@ class TrainingWorker(object):
             value_target = torch.sum(discounts*rewards[i:i+self.multistep], 0)
             value_target = value_target + self.args.discount ** self.multistep \
                            * values[i+self.multistep]
+
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
             reward_target = to_categorical(transform(rewards[i]))
 
             pred_rewards.append(inverse_transform(from_categorical(pred_reward, logits=True)))
             pred_values.append(inverse_transform(from_categorical(pred_value, logits=True)))
-            pred_policies.append(pred_policy)
 
             value_errors.append(torch.abs(pred_values[-1] - values[i]).detach().cpu().numpy())
             reward_errors.append(torch.abs(pred_rewards[-1] - rewards[i]).detach().cpu().numpy())
@@ -280,37 +331,54 @@ class TrainingWorker(object):
             pred_reward = F.log_softmax(pred_reward, -1)
             pred_policy = F.log_softmax(pred_policy, -1)
 
-            current_reward_loss = -torch.sum(reward_target * pred_reward, -1).mean()
-            current_value_loss = -torch.sum(value_target * pred_value, -1).mean()
-            current_policy_loss = -torch.sum(policies[i] * pred_policy, -1).mean()
+            current_reward_loss = -torch.sum(reward_target * pred_reward, -1)
+            current_value_loss = -torch.sum(value_target * pred_value, -1)
+            current_policy_loss = -torch.sum(policies[i] * pred_policy, -1)
 
-            reward_losses.append(current_reward_loss.detach().cpu().item())
-            value_losses.append(current_value_loss.detach().cpu().item())
-            policy_losses.append(current_policy_loss.detach().cpu().item())
+            loss = loss + loss_scale * (is_weights * (
+                       current_value_loss*self.args.value_loss_weight +
+                       current_policy_loss*self.args.policy_loss_weight +
+                       current_reward_loss*self.args.reward_loss_weight).mean())
 
-            if not self.args.no_nce:
-                if self.use_all_targets:
-                    current_targets = target_images.roll(-i, 2).flatten(1, 2)
-                else:
-                    current_targets = target_images[:, :, i]
-                nce_input = current_state.flatten(2, 3).permute(2, 0, 1)
-                current_nce_loss = self.nce(nce_input, current_targets).mean()
-                nce_losses.append(current_nce_loss.detach().cpu().item())
+            total_losses[i] += (current_value_loss*self.args.value_loss_weight +
+                       current_policy_loss*self.args.policy_loss_weight +
+                       current_reward_loss*self.args.reward_loss_weight).detach().mean().cpu().item()
+
+            reward_losses.append(current_reward_loss.detach().mean().cpu().item())
+            value_losses.append(current_value_loss.detach().mean().cpu().item())
+            policy_losses.append(current_policy_loss.detach().mean().cpu().item())
+
+        if not self.args.no_nce:
+            if self.use_all_targets:
+                target_images = target_images.permute(0, 2, 1, 3)
+                nce_input = torch.stack(pred_states, 1).flatten(3, 4).permute(3, 1, 0, 2)
+                nce_loss, nce_accs = self.nce(nce_input, target_images)
+                nce_loss = (nce_loss*is_weights).mean(-1)
+                nce_losses = nce_loss.detach().cpu().numpy()
             else:
-                current_nce_loss = 0
-                nce_losses.append(0)
+                nce_loss = []
+                for i, pred_state in enumerate(pred_states):
+                    current_targets = target_images[:, :, i]
+                    nce_input = pred_state.flatten(2, 3).permute(2, 0, 1)
+                    current_nce_loss, current_nce_acc = self.nce(nce_input, current_targets)
+                    nce_loss.append((current_nce_loss*is_weights).mean())
+                    nce_losses.append(current_nce_loss.detach().cpu().mean().item())
+                    nce_accs[i] = current_nce_acc
 
-            current_loss = current_value_loss*self.args.value_loss_weight + \
-                           current_policy_loss*self.args.policy_loss_weight + \
-                           current_reward_loss*self.args.reward_loss_weight + \
-                           current_nce_loss*self.args.contrastive_loss_weight
+            for i, current_nce_loss in enumerate(nce_loss):
+                loss_scale = predictions[i][0]
+                loss = loss + loss_scale*self.args.contrastive_loss_weight*current_nce_loss
+                total_losses[i] += current_nce_loss.mean().detach().cpu().item()
 
-            total_losses.append(current_loss.mean().detach().cpu().item())
-            current_loss = (current_loss * is_weights).mean()
-            loss = loss + current_loss
+        else:
+            nce_losses = np.zeros(self.maximum_length + 1)
 
         self.buffer.update_batch_priorities(value_errors[0])
 
+        mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
+        mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
+        target_values = torch.mean(torch.stack(value_targets, 0), -1).detach().cpu().numpy()
+        target_rewards = torch.mean(rewards, 0)[:self.maximum_length+1].detach().cpu().numpy()
         value_errors = np.mean(value_errors, -1)
         reward_errors = np.mean(reward_errors, -1)
 
@@ -323,13 +391,20 @@ class TrainingWorker(object):
 
         self.epochs_till_now += 1
 
-        return total_losses, reward_losses, nce_losses, policy_losses,\
-               value_losses, value_errors, reward_errors
+        return total_losses, reward_losses, nce_losses, nce_accs,\
+               policy_losses, value_losses, value_errors, reward_errors, \
+               mean_values, target_values, mean_rewards, target_rewards,
 
 
 class LocalNCE(nn.Module):
     def __init__(self):
         super().__init__()
+
+    def calculate_accuracy(self, preds):
+        labels = torch.arange(preds.shape[1], dtype=torch.long, device=preds.device)
+        preds = torch.argmax(-preds, dim=-1)
+        acc = float(torch.sum(torch.eq(labels, preds)).data) / preds.numel()
+        return acc
 
     def forward(self, f_x1, f_x2):
         """
@@ -349,14 +424,17 @@ class LocalNCE(nn.Module):
         Output:
           loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
         """
-        n_batch = f_x1.size(1)
-        neg_batch = f_x2.size(1)
         # reshaping for big matrix multiply
         # f_x1 = f_x1.permute(2, 0, 1)  # (n_locs, n_batch, n_rkhs)
         f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
+
+        new_target = f_x2
+        n_batch = f_x1.size(1)
+        neg_batch = new_target.size(-1)
+
         # compute dot(f_glb[i, :, l], f_lcl[j, :, l]) for all i, j, l
         # -- after matmul: raw_scores[l, i, j] = dot(f_x1[i, :, l], f_x2[j, :, l])
-        raw_scores = torch.matmul(f_x1, f_x2)  # (n_locs, n_batch, n_batch)
+        raw_scores = torch.matmul(f_x1, new_target)  # (n_locs, n_batch, n_batch)
         # We get NCE log softmax by normalizing over dim 1 or 2 of raw_scores...
         # -- normalizing over dim 1 gives scores for predicting x2->x1
         # -- normalizing over dim 2 gives scores for predicting x1->x2
@@ -375,7 +453,73 @@ class LocalNCE(nn.Module):
         loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)[:, :n_batch]  # (n_locs, n_batch)
         # combine forwards/backwards prediction costs (or whatever)
         loss_nce = 0.5 * (loss_nce_x1_to_x2 + loss_nce_x2_to_x1)
-        return loss_nce
+        acc = self.calculate_accuracy(lsmax_x1_to_x2)
+        return loss_nce, acc
+
+
+class BlockNCE(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def calculate_accuracy(self, preds):
+        labels = torch.arange(preds.shape[-2], dtype=torch.long, device=preds.device)
+        preds = torch.argmax(-preds, dim=-1)
+        corrects = torch.eq(labels, preds)
+        return corrects
+
+    def forward(self, f_x1s, f_x2s):
+        """
+        Compute InfoNCE cost with source features in f_x1 and target features in
+        f_x2. We assume one source feature vector per location per item in batch
+        and one target feature vector per location per item in batch. There are
+        n_batch items, n_locs locations, and n_rkhs dimensions per vector.
+        -- note: we can predict x1->x2 and x2->x1 in parallel "for free"
+
+        For the positive nce pair (f_x1[i, :, l], f_x2[i, :, l]), which comes from
+        batch item i at spatial location l, we will use the target feature vectors
+        f_x2[j, :, l] as negative samples, for all j != i.
+
+        Input:
+          f_x1 : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs source vectors per item
+          f_x2 : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs target vectors per item.  Negative samples.
+        Output:
+          loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
+        """
+        # reshaping for big matrix multiply
+        # f_x1 = f_x1.permute(2, 0, 1)  # (n_locs, n_batch, n_rkhs)
+        f_x1 = f_x1s.flatten(1, 2)
+        f_x2 = f_x2s.flatten(1, 2)
+        f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
+
+        new_target = f_x2
+        n_batch = f_x1.size(1)
+        neg_batch = new_target.size(-1)
+
+        # compute dot(f_glb[i, :, l], f_lcl[j, :, l]) for all i, j, l
+        # -- after matmul: raw_scores[l, i, j] = dot(f_x1[i, :, l], f_x2[j, :, l])
+        raw_scores = torch.matmul(f_x1, new_target)  # (n_locs, n_batch, n_batch)
+        # We get NCE log softmax by normalizing over dim 1 or 2 of raw_scores...
+        # -- normalizing over dim 1 gives scores for predicting x2->x1
+        # -- normalizing over dim 2 gives scores for predicting x1->x2
+        lsmax_x1_to_x2 = -F.log_softmax(raw_scores, dim=2)  # (n_locs, n_batch, n_batch)
+        lsmax_x2_to_x1 = -F.log_softmax(raw_scores, dim=1)  # (n_locs, n_batch, n_batch)
+        # make a mask for picking out the NCE scores for positive pairs
+        pos_mask = torch.eye(n_batch, dtype=f_x1.dtype, device=f_x1.device)
+        if n_batch != neg_batch:
+            with torch.no_grad():
+                mask = torch.zeros((n_batch, neg_batch), dtype=f_x1.dtype, device=f_x1.device)
+                mask[:n_batch, :n_batch] += pos_mask
+                pos_mask = mask
+        pos_mask = pos_mask.unsqueeze(dim=0)
+        # use masked sums to select NCE scores for positive pairs
+        loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=2)  # (n_locs, n_batch)
+        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)[:, :n_batch]  # (n_locs, n_batch)
+        # combine forwards/backwards prediction costs (or whatever)
+        loss_nce = 0.5 * (loss_nce_x1_to_x2 + loss_nce_x2_to_x1)
+        loss_nce = loss_nce.view(*f_x1.shape[0:2])
+        corrects = self.calculate_accuracy(lsmax_x1_to_x2)
+        accuracy = torch.mean(corrects.float().view(*f_x1s.shape[:3]), (0, 2)).detach().cpu().numpy()
+        return loss_nce.mean(0).view(f_x1s.shape[1], f_x1s.shape[2]), accuracy
 
 
 class MCTSModel(nn.Module):
@@ -399,10 +543,17 @@ class MCTSModel(nn.Module):
             list(self.policy_model.parameters()) +\
             list(self.encoder.parameters()) +\
             list(self.target_encoder.parameters())
-        self.optimizer = torch.optim.SGD(params,
-                                         lr=args.learning_rate,
-                                         momentum=args.momentum,
-                                         weight_decay=args.weight_decay)
+
+        if args.optim == "adam":
+            self.optimizer = torch.optim.AdamW(params,
+                                               lr=args.learning_rate,
+                                               weight_decay=args.weight_decay,
+                                               eps=args.adam_eps)
+        elif args.optim == "sgd":
+            self.optimizer = torch.optim.SGD(params,
+                                             lr=args.learning_rate,
+                                             momentum=args.momentum,
+                                             weight_decay=args.weight_decay)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
                                                                 args.lr_decay ** (1. / args.lr_decay_steps), )
     def encode(self, images, actions):
