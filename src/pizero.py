@@ -8,8 +8,6 @@ from torch.distributions import Categorical
 import numpy as np
 from itertools import islice
 import multiprocessing
-import time
-import copy
 
 import gym
 from src.mcts_memory import Transition, blank_batch_trans
@@ -21,20 +19,6 @@ from recordclass import dataobject
 MAXIMUM_FLOAT_VALUE = float('inf')
 
 KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
-
-
-class ListEpisode(dataobject):
-    obs: list
-    actions: list
-    rewards: list
-    dones: list
-
-
-class NPEpisode(dataobject):
-    obs: np.ndarray
-    actions: np.ndarray
-    rewards: np.ndarray
-    dones: np.ndarray
 
 
 class MinMaxStats(object):
@@ -73,113 +57,6 @@ class Node(object):
             return 0
         return self.value_sum / self.visit_count
 
-
-class ReanalyzeWorker(multiprocessing.Process):
-    def __init__(self, args, input_queue, output_queue, obs_shape):
-        super().__init__()
-        self.reanalyze_heads = 4*args.num_envs
-        self.current_write_episodes = [ListEpisode([], [], [], []) for _ in range(self.reanalyze_heads)]
-        self.current_read_episodes = []
-        self.tr_indices = np.zeros((self.reanalyze_heads,), dtype="int")
-        self.inqueue = input_queue
-        self.outqueue = output_queue
-        self.buffer = []
-        self.current_indices = []
-        self.directory = args.savedir
-        self.total_episodes = 0
-        self.obs_shape = obs_shape
-        self.args = args
-
-    def run(self, forever=True):
-        while True:
-            self.write_to_buffer()
-
-            # Don't reanalyze until we have data for it.
-            if self.total_episodes > 0 and self.outqueue.qsize() < 100:
-                new_samples = self.sample_for_reanalysis()
-                self.outqueue.put(new_samples)
-            else:
-                time.sleep(0.1) # Don't just spin the processor
-            if not forever:
-                return
-
-    def write_to_buffer(self):
-        while not self.inqueue.empty():
-            obs, action, reward, done = self.inqueue.get()
-
-            for i in range(self.args.num_envs):
-                episode = self.current_write_episodes[i]
-                episode.obs.append(obs[i])
-                episode.actions.append(action[i])
-                episode.rewards.append(reward[i])
-                episode.dones.append(done[i])
-
-                if done[i]:
-                    self.save_episode(episode)
-
-            self.current_write_episodes[i] = ListEpisode([], [], [], [])
-
-    def save_episode(self, episode):
-
-        obs = np.stack(episode.obs)
-        actions = np.array(episode.actions)
-        rewards = np.array(episode.rewards)
-        dones = np.array(episode.dones)
-
-        filename = self.directory + "/ep_{}.npz".format(self.total_episodes)
-        np.savez_compressed(file=filename, obs=obs, actions=actions,
-                            dones=dones, rewards=rewards)
-        self.total_episodes += 1
-
-    def load_episode(self, index):
-        filename = self.directory + "/ep_{}.npz".format(index)
-        file = np.load(filename)
-        return NPEpisode(file["obs"], file["actions"],
-                         file["rewards"], file["dones"])
-
-    def sample_for_reanalysis(self):
-        """
-        :param buffer: list of lists of Transitions.  Each sublist is an episode.
-        :return: list of new transitions, representing a reanalyzed episode.
-        """
-        # We only want to reanalyze done episodes for now.
-
-        observations = np.zeros((self.reanalyze_heads,
-                                    self.args.framestack,
-                                    *self.obs_shape),
-                                   dtype=np.uint8)
-        actions = []
-        rewards = np.zeros(self.reanalyze_heads)
-        dones = np.zeros(self.reanalyze_heads)
-
-        for i in range(self.reanalyze_heads):
-            # Should only happen at initialization.
-            if i >= len(self.current_read_episodes):
-                new_ep = self.load_episode(np.random.randint(self.total_episodes))
-                self.current_read_episodes.append(new_ep)
-                self.tr_indices[i] = 0
-
-            episode = self.current_read_episodes[i]
-            ind = self.tr_indices[i]
-
-            bottom_ind = max(0, ind - self.args.framestack + 1)
-            start_point = self.args.framestack - (ind - bottom_ind + 1)
-            observations[i, start_point:] = episode.obs[bottom_ind:ind+1]
-            actions.append(episode.actions[ind])
-            rewards[i] = episode.rewards[ind]
-            dones[i] = episode.dones[ind]
-            self.tr_indices[i] += 1
-
-            # Check if we've finished the episode.
-            if self.tr_indices[i] >= episode.obs.shape[0]:
-                self.tr_indices[i] = 0
-                # Load in a random new episode
-                self.current_read_episodes[i] = self.load_episode(np.random.randint(self.total_episodes))
-
-        return torch.from_numpy(observations).float() / 255.,\
-               actions, rewards, dones
-
-
 class PiZero:
     def __init__(self, args):
         self.args = args
@@ -190,6 +67,7 @@ class PiZero:
         self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
                                    asynchronous=not args.sync_envs)
         self.network = MCTSModel(args, self.env.action_space[0].n)
+        self.network.share_memory()
         self.network.to(self.args.device)
         self.mcts = MCTS(args, self.env, self.network)
 
@@ -224,14 +102,10 @@ class PiZero:
 
 
 class MCTS:
-    def __init__(self, args, env, network):
+    def __init__(self, args, n_actions, network):
         self.args = args
-        self.env = env
         self.network = network
-        if args.target_update_interval <= 0:
-            self.target_network = network
-        else:
-            self.target_network = copy.deepcopy(network)
+        self.n_actions = n_actions
         self.min_max_stats = MinMaxStats()
 
     def update_target(self):
@@ -256,63 +130,62 @@ class MCTS:
             parent = search_path[-2]
             with torch.no_grad():
                 action = torch.tensor(action, device=self.args.device)
-                network_output = self.target_network.inference(parent.hidden_state, action)
+                network_output = self.network.inference(parent.hidden_state, action)
             self.expand_node(node, network_output)
             self.backpropagate(search_path, network_output.value)
         return root
 
     def batched_run(self, obs_tensor):
-        roots = []
-        obs_tensor = obs_tensor.to(self.args.device)
-        network_output = self.target_network.initial_inference(obs_tensor)
+        with torch.no_grad():
+            roots = []
+            obs_tensor = obs_tensor.to(self.args.device)
+              network_output = self.network.initial_inference(obs_tensor)
 
-        for i in range(obs_tensor.shape[0]):
-            root = Node(0)
-            root.hidden_state = obs_tensor[i]
-            self.expand_node(root, network_output[i])
-            self.add_exploration_noise(root)
-            roots.append(root)
-
-        for s in range(self.args.num_simulations):
-            nodes, search_paths, actions, hidden_states = [], [], [], []
             for i in range(obs_tensor.shape[0]):
-                node = roots[i]
-                search_path = [node]
+                root = Node(0)
+                self.expand_node(root, network_output[i])
+                self.add_exploration_noise(root)
+                roots.append(root)
 
-                while node.expanded():
-                    action, node = self.optimized_select_child(node, node.children.items())
-                    search_path.append(node)
+            for s in range(self.args.num_simulations):
+                nodes, search_paths, actions, hidden_states = [], [], [], []
+                for i in range(obs_tensor.shape[0]):
+                    node = roots[i]
+                    search_path = [node]
 
-                # Inside the search tree we use the dynamics function to obtain the next
-                # hidden state given an action and the previous hidden state.
-                parent = search_path[-2]
-                actions.append(torch.tensor(action))
-                hidden_states.append(parent.hidden_state)
-                nodes.append(node)
-                search_paths.append(search_path)
+                    while node.expanded():
+                        action, node = self.optimized_select_child(node, node.children.items())
+                        search_path.append(node)
 
-            with torch.no_grad():
+                    # Inside the search tree we use the dynamics function to obtain the next
+                    # hidden state given an action and the previous hidden state.
+                    parent = search_path[-2]
+                    actions.append(torch.tensor(action))
+                    hidden_states.append(parent.hidden_state)
+                    nodes.append(node)
+                    search_paths.append(search_path)
+
                 actions = torch.stack(actions, 0).to(self.args.device)
                 hidden_states = torch.stack(hidden_states, 0).to(self.args.device)
-                network_output = self.target_network.inference(hidden_states, actions)
+                network_output = self.network.inference(hidden_states, actions)
 
-            for i in range(obs_tensor.shape[0]):
-                self.expand_node(nodes[i], network_output[i])
-                self.backpropagate(search_paths[i], network_output[i].value)
-        return roots
+                for i in range(obs_tensor.shape[0]):
+                    self.expand_node(nodes[i], network_output[i])
+                    self.backpropagate(search_paths[i], network_output[i].value)
+            return roots
 
     def expand_node(self, node, network_output):
         node.hidden_state = network_output.next_state
         node.reward = network_output.reward
         policy_probs = F.softmax(network_output.policy_logits, dim=-1)
-        for action in range(self.env.action_space[0].n):
+        for action in range(self.n_actions):
             node.children[action] = Node(policy_probs[action].item())
 
     # At the start of each search, we add dirichlet noise to the prior of the root
     # to encourage the search to explore new actions.
     def add_exploration_noise(self, node: Node):
         actions = list(node.children.keys())
-        noise = np.random.dirichlet([self.args.root_dirichlet_alpha] * self.env.action_space[0].n)
+        noise = np.random.dirichlet([self.args.root_dirichlet_alpha] * self.n_actions)
         frac = self.args.root_exploration_fraction
         for a, n in zip(actions, noise):
             node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
@@ -338,7 +211,7 @@ class MCTS:
     def optimized_select_child(self, parent, children):
         # TODO: Vectorize this
         pb_c = np.array([math.log((parent.visit_count + self.args.pb_c_base + 1) /
-                        self.args.pb_c_base) + self.args.pb_c_init] * len(children))
+                                  self.args.pb_c_base) + self.args.pb_c_init] * len(children))
         child_visit_counts, child_priors, child_values = zip(*[(child.visit_count, child.prior, child.value())
                                                                for action, child in children])
         child_visit_counts = np.array(child_visit_counts)
