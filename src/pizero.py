@@ -9,7 +9,6 @@ import numpy as np
 from itertools import islice
 import multiprocessing
 
-
 import gym
 from src.mcts_memory import Transition, blank_batch_trans
 from src.model_trainer import MCTSModel
@@ -105,9 +104,13 @@ class PiZero:
 class MCTS:
     def __init__(self, args, n_actions, network):
         self.args = args
+        self.network = network
         self.n_actions = n_actions
-        self.target_network = network
         self.min_max_stats = MinMaxStats()
+
+    def update_target(self):
+        if self.args.target_update_interval > 0:
+            self.target_network.load_state_dict(self.network.state_dict())
 
     def run(self, obs):
         root = Node(0)
@@ -127,49 +130,49 @@ class MCTS:
             parent = search_path[-2]
             with torch.no_grad():
                 action = torch.tensor(action, device=self.args.device)
-                network_output = self.target_network.inference(parent.hidden_state, action)
+                network_output = self.network.inference(parent.hidden_state, action)
             self.expand_node(node, network_output)
             self.backpropagate(search_path, network_output.value)
         return root
 
     def batched_run(self, obs_tensor):
-        roots = []
-        obs_tensor = obs_tensor.to(self.args.device)
-        network_output = self.target_network.initial_inference(obs_tensor)
+        with torch.no_grad():
+            roots = []
+            obs_tensor = obs_tensor.to(self.args.device)
+              network_output = self.network.initial_inference(obs_tensor)
 
-        for i in range(obs_tensor.shape[0]):
-            root = Node(0)
-            self.expand_node(root, network_output[i])
-            self.add_exploration_noise(root)
-            roots.append(root)
-
-        for s in range(self.args.num_simulations):
-            nodes, search_paths, actions, hidden_states = [], [], [], []
             for i in range(obs_tensor.shape[0]):
-                node = roots[i]
-                search_path = [node]
+                root = Node(0)
+                self.expand_node(root, network_output[i])
+                self.add_exploration_noise(root)
+                roots.append(root)
 
-                while node.expanded():
-                    action, node = self.optimized_select_child(node, node.children.items())
-                    search_path.append(node)
+            for s in range(self.args.num_simulations):
+                nodes, search_paths, actions, hidden_states = [], [], [], []
+                for i in range(obs_tensor.shape[0]):
+                    node = roots[i]
+                    search_path = [node]
 
-                # Inside the search tree we use the dynamics function to obtain the next
-                # hidden state given an action and the previous hidden state.
-                parent = search_path[-2]
-                actions.append(torch.tensor(action))
-                hidden_states.append(parent.hidden_state)
-                nodes.append(node)
-                search_paths.append(search_path)
+                    while node.expanded():
+                        action, node = self.optimized_select_child(node, node.children.items())
+                        search_path.append(node)
 
-            with torch.no_grad():
+                    # Inside the search tree we use the dynamics function to obtain the next
+                    # hidden state given an action and the previous hidden state.
+                    parent = search_path[-2]
+                    actions.append(torch.tensor(action))
+                    hidden_states.append(parent.hidden_state)
+                    nodes.append(node)
+                    search_paths.append(search_path)
+
                 actions = torch.stack(actions, 0).to(self.args.device)
                 hidden_states = torch.stack(hidden_states, 0).to(self.args.device)
-                network_output = self.target_network.inference(hidden_states, actions)
+                network_output = self.network.inference(hidden_states, actions)
 
-            for i in range(obs_tensor.shape[0]):
-                self.expand_node(nodes[i], network_output[i])
-                self.backpropagate(search_paths[i], network_output[i].value)
-        return roots
+                for i in range(obs_tensor.shape[0]):
+                    self.expand_node(nodes[i], network_output[i])
+                    self.backpropagate(search_paths[i], network_output[i].value)
+            return roots
 
     def expand_node(self, node, network_output):
         node.hidden_state = network_output.next_state

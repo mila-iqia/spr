@@ -25,7 +25,10 @@ def get_args():
     parser.add_argument('--num-workers', type=int, default=8, help='Number of parallel envs to run')
     parser.add_argument('--num-reanalyze-workers', type=int, default=8, help='Number of parallel envs to run')
     parser.add_argument('--sync-envs', action='store_true')
-    parser.add_argument('--buffer-size', type=int, default=100000)
+    parser.add_argument('--buffer-size', type=int, default=200000)
+    parser.add_argument('--target-update-interval', type=int, default=1000,
+                        help="Number of gradient steps for each update to the "
+                             "target network.  <=0 to disable target network.")
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
     parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')
@@ -49,9 +52,11 @@ def get_args():
                         help='Perform training after every {training-interval} env steps ')
     parser.add_argument('--batch-size', type=int, default=128, help='Batch size to use during training')
     parser.add_argument('--learning-rate', type=float, default=0.001, metavar='η', help='Learning rate')
+    parser.add_argument('--optim', type=str, default='sgd', choices=["adam", "sgd"], help='Optimizer')
     parser.add_argument('--lr-decay-steps', type=float, default=350.e3, help='Learning rate decay time constant')
     parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
+    parser.add_argument('--adam-eps', type=float, default=1e-4, help='Adam epsilon')
     parser.add_argument('--weight-decay', type=float, default=1e-3, help='Weight decay regularization constant')
     parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
     parser.add_argument('--dynamics-blocks', type=int, default=16, help='# of resblocks in dynamics model')
@@ -61,7 +66,7 @@ def get_args():
     parser.add_argument('--priority-weight', type=float, default=1., metavar='β',
                         help='Initial prioritised experience replay importance sampling weight')
     parser.add_argument('--jumps', type=int, default=5, help='')
-    parser.add_argument('--value-loss-weight', type=float, default=1.)
+    parser.add_argument('--value-loss-weight', type=float, default=0.1)
     parser.add_argument('--policy-loss-weight', type=float, default=1.)
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
     parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
