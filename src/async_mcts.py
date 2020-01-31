@@ -78,7 +78,6 @@ class AsyncMCTS:
 
 
 def worker(index, network, args, n_runs, send_queue, receive_queue, error_queue):
-    envs_per_worker = args.num_envs // args.num_workers
     env = gym.vector.make('atari-v0', num_envs=n_runs, args=args,
                           asynchronous=False)
     mcts = VectorizedMCTS(args, env.action_space[0].n, n_runs, network)
@@ -92,11 +91,10 @@ def worker(index, network, args, n_runs, send_queue, receive_queue, error_queue)
                 break
             if command == 'run_mcts':
                 obs = torch.from_numpy(obs)
-                actions, values, policies = mcts.run(obs)
+                actions, policies, values = mcts.run(obs)
                 policy_probs = policies.probs
 
                 next_obs, reward, done, infos = env.step(actions.cpu().numpy())
-                actions = torch.tensor(actions)
                 reward, done = torch.from_numpy(reward).float(),\
                                torch.from_numpy(done).float()
 

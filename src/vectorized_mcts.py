@@ -20,7 +20,7 @@ class VectorizedMCTS:
 
         self.device = args.device
         self.n_runs, self.n_sims = n_runs, args.num_simulations
-        self.id_null = self.n_sims + 1
+        self.id_null = self.n_sims
         self.id_children = torch.zeros((n_runs, self.n_sims + 1, self.num_actions), dtype=torch.int64, device=self.device)
         self.id_parent = torch.zeros((n_runs, self.n_sims + 1), dtype=torch.int64, device=self.device)
         self.search_actions = torch.zeros((n_runs, self.n_sims + 1), dtype=torch.int64, device=self.device)
@@ -37,11 +37,12 @@ class VectorizedMCTS:
         self.id_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
         self.actions_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
         self.search_depths = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
+        self.batch_range = torch.arange(self.n_runs, device=self.device)
 
     def normalize(self):
-        if (self.max_q < self.min_q)[0]:
+        if (self.max_q <= self.min_q)[0]:
             return self.q
-        return (self.q - self.min_q.unsqueeze(dim=-1)) / (self.max_q - self.min_q).unsqueeze(dim=-1)
+        return (self.q - self.min_q[:, None, None]) / (self.max_q - self.min_q)[:, None, None]
 
     @torch.no_grad()
     def run(self, obs):
@@ -65,7 +66,7 @@ class VectorizedMCTS:
             self.search_depths.fill_(0)
             for depth in range(sim_id):
                 id_next = self.id_children.gather(1, self.id_current.unsqueeze(-1).expand(-1, -1, self.num_actions))
-                current_actions = actions.gather(1, self.id_current)
+                current_actions = actions.gather(1, self.id_current.clamp_max(sim_id-1))
                 id_next = id_next.squeeze().gather(-1, current_actions)
                 self.search_actions[:, depth] = current_actions.squeeze()
 
@@ -86,13 +87,14 @@ class VectorizedMCTS:
             self.reward[:, sim_id] = reward
             self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1)
 
-            self.id_children[self.id_final, self.actions_final] = sim_id
+            self.id_children[self.batch_range, self.id_final, self.actions_final] = sim_id
             self.id_parent[:, sim_id] = self.id_final.squeeze()
 
+            self.id_final.fill_(sim_id)
             self.backup(self.id_final, sim_id, value)
 
         action, policy = self.select_action()
-        value = (self.visit_count[:, 0] * self.q[:, 0])/(self.visit_count[:, 0])
+        value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
 
         return action, policy, value
 
@@ -105,23 +107,25 @@ class VectorizedMCTS:
     def backup(self, id_final, depth, value_final):
         returns = value_final
         id_current = id_final
-        for d in range(depth, -1, -1):
-            reward = self.reward.gather(1, id_current)
+        for d in range(depth, 0, -1):
+            reward = self.reward.gather(1, id_current).squeeze()
             returns = returns*self.args.discount + reward
-            actions = self.search_actions[:, d]
+            actions = self.search_actions.gather(1, self.search_depths)
             new_id_current = self.id_parent.gather(1, id_current)
-            done_mask = (id_current != new_id_current).float()
+            not_done_mask = (id_current != new_id_current).float()
             id_current = new_id_current
-            self.visit_count[:, id_current, actions] += done_mask
-            self.q[:, id_current, actions] += done_mask * \
-                                              ((returns - self.q[:, id_current, actions])
-                                              /self.visit_count[:, id_current, actions])
+            self.visit_count[self.batch_range, id_current.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
+            self.q[self.batch_range, id_current.squeeze(), actions.squeeze()] += not_done_mask.squeeze() * \
+                                              ((returns - self.q[self.batch_range, id_current.squeeze(), actions.squeeze()])
+                                              /self.visit_count[self.batch_range, id_current.squeeze(), actions.squeeze()])
+            self.search_depths -= not_done_mask.long()
+            self.search_depths.clamp_min_(0)
 
         self.min_q = self.q[:, :depth+1].min(1)[0].min(1)[0]
         self.max_q = self.q[:, :depth+1].max(1)[0].max(1)[0]
 
     def ucb_select_child(self, depth):
-        total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True)
+        total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True) + 1
         pb_c = torch.log((total_visits + self.args.pb_c_base + 1) / self.args.pb_c_base) + self.args.pb_c_init
         pb_c = pb_c * (torch.sqrt(total_visits) / (1 + self.visit_count[:, :depth])) * self.prior[:, :depth]
         normalized_q = self.normalize()
