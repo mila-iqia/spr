@@ -1,15 +1,9 @@
 import argparse
-import copy
 from datetime import datetime
-import os
-import subprocess
 
 import atari_py
 import torch
-import torch.nn.functional as F
 import numpy as np
-from sklearn.metrics import f1_score as compute_f1_score
-from collections import defaultdict
 import wandb
 import matplotlib.pyplot as plt
 import io
@@ -25,6 +19,7 @@ def get_args():
     parser.add_argument('--num-workers', type=int, default=8, help='Number of parallel envs to run')
     parser.add_argument('--num-reanalyze-workers', type=int, default=8, help='Number of parallel envs to run')
     parser.add_argument('--sync-envs', action='store_true')
+    parser.add_argument('--fp16', action='store_true')
     parser.add_argument('--buffer-size', type=int, default=200000)
     parser.add_argument('--target-update-interval', type=int, default=1000,
                         help="Number of gradient steps for each update to the "
@@ -101,19 +96,6 @@ def calculate_accuracy(preds, y):
     preds = preds >= 0.5
     labels = y >= 0.5
     acc = preds.eq(labels).sum().float() / labels.numel()
-    return acc
-
-
-def calculate_multiclass_f1_score(preds, labels):
-    preds = torch.argmax(preds, dim=1).detach().numpy()
-    labels = labels.numpy()
-    f1score = compute_f1_score(labels, preds, average="weighted")
-    return f1score
-
-
-def calculate_multiclass_accuracy(preds, labels):
-    preds = torch.argmax(preds, dim=1)
-    acc = float(torch.sum(torch.eq(labels, preds)).data) / labels.size(0)
     return acc
 
 

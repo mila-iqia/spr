@@ -10,6 +10,7 @@ from src.mcts_memory import ReplayMemory, AsyncPrioritizedSequenceReplayFrameBuf
 import numpy as np
 from statistics import mean
 import wandb
+from apex import amp
 
 NetworkOutput = namedarraytuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 SamplesToBuffer = namedarraytuple("SamplesToBuffer",
@@ -321,8 +322,8 @@ class TrainingWorker(object):
             value_target = to_categorical(transform(value_target))
             reward_target = to_categorical(transform(rewards[i]))
 
-            pred_rewards.append(inverse_transform(from_categorical(pred_reward, logits=True)))
-            pred_values.append(inverse_transform(from_categorical(pred_value, logits=True)))
+            pred_rewards.append(inverse_transform(from_categorical(pred_reward.detach(), logits=True)))
+            pred_values.append(inverse_transform(from_categorical(pred_value.detach(), logits=True)))
 
             value_errors.append(torch.abs(pred_values[-1] - values[i]).detach().cpu().numpy())
             reward_errors.append(torch.abs(pred_rewards[-1] - rewards[i]).detach().cpu().numpy())
@@ -385,7 +386,11 @@ class TrainingWorker(object):
         loss = loss.mean()
         if step:
             self.model.optimizer.zero_grad()
-            loss.backward()
+            if self.args.fp16:
+                with amp.scale_loss(loss, self.model.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
             self.model.optimizer.step()
             self.model.scheduler.step()
 
@@ -848,20 +853,24 @@ class RepNet(nn.Module):
             stacked_image = torch.cat([x, actions], 1)
         else:
             stacked_image = x
-        return self.network(stacked_image)
+        latent = self.network(stacked_image)
+        return renormalize(latent, 1)
 
 
 def transform(value, eps=0.001):
+    value = value.float()  # Avoid any fp16 shenanigans
     value = torch.sign(value) * (torch.sqrt(torch.abs(value) + 1) - 1 + eps * value)
     return value
 
 
 def inverse_transform(value, eps=0.001):
+    value = value.float()  # Avoid any fp16 shenanigans
     return torch.sign(value) * eps ** -2 * 2 * (1 + 2 * eps + 2 * eps * torch.abs(value) - torch.sqrt(
         1 + 4 * eps + 4 * eps ** 2 + 4 * eps * torch.abs(value)))
 
 
 def to_categorical(value, limit=300):
+    value = value.float()  # Avoid any fp16 shenanigans
     value = value.clamp(-limit, limit)
     distribution = torch.zeros(value.shape[0], (limit*2+1), device=value.device)
     lower = value.floor().long() + limit
@@ -874,6 +883,7 @@ def to_categorical(value, limit=300):
 
 
 def from_categorical(distribution, limit=300, logits=True):
+    distribution = distribution.float()  # Avoid any fp16 shenanigans
     if logits:
         distribution = torch.softmax(distribution, -1)
     weights = torch.arange(-limit, limit + 1, device=distribution.device).float()

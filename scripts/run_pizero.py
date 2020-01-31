@@ -13,9 +13,11 @@ import copy
 import torch
 import wandb
 import numpy as np
+from apex import amp
 
 def run_pizero(args):
     pizero = PiZero(args)
+
     env_steps = 0
     training_worker = TrainingWorker(args, model=pizero.network)
 
@@ -25,6 +27,9 @@ def run_pizero(args):
         target_network = pizero.network
     target_network.share_memory()
 
+    if args.fp16:
+        amp.initialize([pizero.network, target_network],
+                       pizero.network.optimizer)
     if args.reanalyze:
         async_reanalyze = AsyncReanalyze(args, target_network)
 
