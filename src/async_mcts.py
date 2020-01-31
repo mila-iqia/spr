@@ -1,3 +1,5 @@
+import traceback
+
 import torch
 import torch.multiprocessing as mp
 import sys
@@ -8,6 +10,7 @@ from gym.vector.utils import CloudpickleWrapper
 from torch.multiprocessing.queue import Queue
 
 from src.pizero import MinMaxStats, Node, MCTS
+from src.vectorized_mcts import VectorizedMCTS
 
 
 class AsyncState(Enum):
@@ -29,12 +32,15 @@ class AsyncMCTS:
         self.send_queues = []
         self.receive_queues = []
         self.network = network
+
+        n_runs = args.num_envs // args.num_workers
+
         for idx in range(self.args.num_workers):
             receive_queue = ctx.Queue()
             send_queue = ctx.Queue()
             process = ctx.Process(target=target,
                                   name='Worker<{0}>-{1}'.format(type(self).__name__, idx),
-                                  args=(idx, self.network, args, send_queue, receive_queue, self.error_queue))
+                                  args=(idx, self.network, args, n_runs, send_queue, receive_queue, self.error_queue))
             self.receive_queues.append(receive_queue)
             self.send_queues.append(send_queue)
             self.processes.append(process)
@@ -71,36 +77,29 @@ class AsyncMCTS:
         raise exctype(value)
 
 
-def worker(index, network, args, send_queue, receive_queue, error_queue):
+def worker(index, network, args, n_runs, send_queue, receive_queue, error_queue):
     envs_per_worker = args.num_envs // args.num_workers
-    env = gym.vector.make('atari-v0', num_envs=envs_per_worker, args=args,
+    env = gym.vector.make('atari-v0', num_envs=n_runs, args=args,
                           asynchronous=False)
-    mcts = MCTS(args, env.action_space[0].n, network)
+    mcts = VectorizedMCTS(args, env.action_space[0].n, n_runs, network)
     obs = env.reset()
 
     try:
         while True:
-            if send_queue.qsize() > 0:
-                command, data = send_queue.get()
-                if command == 'close':
-                    receive_queue.put((None, True))
-                    break
-            elif receive_queue.qsize() < 10:
+            command, data = send_queue.get()
+            if command == 'close':
+                receive_queue.put((None, True))
+                break
+            if command == 'run_mcts':
                 obs = torch.from_numpy(obs)
-                roots = mcts.batched_run(obs)
-                actions, policy_probs, values = [], [], []
-                for root in roots:
-                    # Select action for each obs
-                    action, policy = mcts.select_action(root)
-                    actions.append(action)
-                    policy_probs.append(policy.probs)
-                    values.append(root.value())
-                next_obs, reward, done, infos = env.step(actions)
+                actions, values, policies = mcts.run(obs)
+                policy_probs = policies.probs
+
+                next_obs, reward, done, infos = env.step(actions.cpu().numpy())
                 actions = torch.tensor(actions)
-                reward, done, policy_probs, values = torch.from_numpy(reward).float(),\
-                                                     torch.from_numpy(done).float(), \
-                                                     torch.stack(policy_probs).float(),\
-                                                     torch.tensor(values).float()
+                reward, done = torch.from_numpy(reward).float(),\
+                               torch.from_numpy(done).float()
+
                 receive_queue.put(((obs, actions, reward, done, policy_probs, values), True))
                 obs = next_obs
             else:
@@ -109,6 +108,7 @@ def worker(index, network, args, send_queue, receive_queue, error_queue):
     except (KeyboardInterrupt, Exception):
         error_queue.put((index,) + sys.exc_info()[:2])
         print(sys.exc_info()[:2])
+        traceback.print_exc()
         receive_queue.put((None, False))
     finally:
         return
