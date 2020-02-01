@@ -5,3 +5,6 @@ opencv-python
 scikit-learn
 plotly
 recordclass
+
+# Install from https://github.com/NVIDIA/apex
+apex
