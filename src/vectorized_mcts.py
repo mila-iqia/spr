@@ -21,22 +21,34 @@ class VectorizedMCTS:
         self.device = args.device
         self.n_runs, self.n_sims = n_runs, args.num_simulations
         self.id_null = self.n_sims
-        self.id_children = torch.zeros((n_runs, self.n_sims + 1, self.num_actions), dtype=torch.int64, device=self.device)
-        self.id_parent = torch.zeros((n_runs, self.n_sims + 1), dtype=torch.int64, device=self.device)
-        self.search_actions = torch.zeros((n_runs, self.n_sims + 1), dtype=torch.int64, device=self.device)
+
+        # Initialize search tensors on the current device.
+        # These are overwritten rather than reinitalized.
         self.q = torch.zeros((n_runs, self.n_sims + 1, self.num_actions), device=self.device)
         self.prior = torch.zeros((n_runs, self.n_sims + 1, self.num_actions), device=self.device)
         self.visit_count = torch.zeros((n_runs, self.n_sims + 1, self.num_actions), device=self.device)
         self.reward = torch.zeros((n_runs, self.n_sims + 1), device=self.device)
         self.hidden_state = torch.zeros((n_runs, self.n_sims + 1, args.hidden_size, 6, 6), device=self.device)
-        self.id_current = torch.zeros((self.n_runs, 1), dtype=torch.int64, device=self.device)
-        # self.ucb_scores = torch.zeros((n_runs, self.n_sims + 1, self.num_actions))
         self.min_q, self.max_q = torch.zeros((n_runs,), device=self.device).fill_(MAXIMUM_FLOAT_VALUE), \
                                  torch.zeros((n_runs,), device=self.device).fill_(MINIMUM_FLOAT_VALUE)
-        # self.value_sum = torch.zeros(n_runs, self.n_sims + 1) # + 1 for null node
-        self.id_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
-        self.actions_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
         self.search_depths = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
+
+        # Initialize pointers defining the tree structure.
+        self.id_children = torch.zeros((n_runs, self.n_sims + 1, self.num_actions),
+                                       dtype=torch.int64, device=self.device)
+        self.id_parent = torch.zeros((n_runs, self.n_sims + 1),
+                                     dtype=torch.int64, device=self.device)
+
+        # Pointers used during the search.
+        self.id_current = torch.zeros((self.n_runs, 1), dtype=torch.int64, device=self.device)
+        self.id_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
+
+        # Tensors defining the actions taken during the search.
+        self.actions_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
+        self.search_actions = torch.zeros((n_runs, self.n_sims + 1),
+                                          dtype=torch.int64, device=self.device)
+
+        # A helper tensor used in indexing.
         self.batch_range = torch.arange(self.n_runs, device=self.device)
 
     def normalize(self):
@@ -46,6 +58,7 @@ class VectorizedMCTS:
 
     @torch.no_grad()
     def run(self, obs):
+        # Reset all relevant tensors.
         self.id_children.fill_(self.id_null)
         self.id_parent.fill_(self.id_null)
         self.visit_count.fill_(0)
@@ -64,32 +77,51 @@ class VectorizedMCTS:
             actions = self.ucb_select_child(sim_id)
             self.id_current.fill_(0)
             self.search_depths.fill_(0)
+
+            # Because the tree has exactly sim_id nodes, we are guaranteed
+            # to take at most sim_id transitions (including expansion).
             for depth in range(sim_id):
-                id_next = self.id_children.gather(1, self.id_current.unsqueeze(-1).expand(-1, -1, self.num_actions))
+                # Select the tensor of children of the current node
+                current_children = self.id_children.gather(1, self.id_current.unsqueeze(-1).expand(-1, -1, self.num_actions))
+
+                # Select the children corresponding to the current actions
                 current_actions = actions.gather(1, self.id_current.clamp_max(sim_id-1))
-                id_next = id_next.squeeze().gather(-1, current_actions)
+                id_next = current_children.squeeze().gather(-1, current_actions)
                 self.search_actions[:, depth] = current_actions.squeeze()
 
+                # Create a mask for live runs that will be true on the
+                # exact step that a run terminates
+                # A run terminates when its next state is unexpanded (null)
+                # However, terminated runs also have this condition, so we
+                # check that the current state is not yet null.
                 done_mask = (id_next == self.id_null)
-                live_mask = (self.id_current != id_next)
+                live_mask = (self.id_current != self.id_null)
                 final_mask = live_mask * done_mask
 
+                # Note the final node id and action of terminated runs
+                # to use in expansion.
                 self.id_final[final_mask] = self.id_current[final_mask]
                 self.actions_final[final_mask] = current_actions[final_mask]
-                self.search_depths[~final_mask] += 1
+
+                # If not done, increment search depths by one.
+                self.search_depths[~done_mask] += 1
 
                 self.id_current = id_next
 
+            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, 6, 6)).squeeze()
             hidden_state, reward, policy_logits, value = self.network.inference(
-                self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, 6, 6)).squeeze(),
-                self.actions_final)
+               input_state, self.actions_final)
+
+            # The new node is stored at entry sim_id
             self.hidden_state[:, sim_id, :] = hidden_state
             self.reward[:, sim_id] = reward
             self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1)
 
+            # Store the pointers from parent to new node and back.
             self.id_children[self.batch_range, self.id_final, self.actions_final] = sim_id
             self.id_parent[:, sim_id] = self.id_final.squeeze()
 
+            # The backup starts from the new node
             self.id_final.fill_(sim_id)
             self.backup(self.id_final, sim_id, value)
 
@@ -107,24 +139,42 @@ class VectorizedMCTS:
     def backup(self, id_final, depth, value_final):
         returns = value_final
         id_current = id_final
+
+        # Same number of steps as when we expanded
         for d in range(depth, 0, -1):
+
+            # Determine the parent of the current node
+            parent_id = self.id_parent.gather(1, id_current)
+
+            # A backup has terminated if the parent id is null
+            not_done_mask = (parent_id != self.id_null).float()
+
+            # Get the rewards observed when transitioning to the current node
             reward = self.reward.gather(1, id_current).squeeze()
+            # Calculate the return as observed by the new parent.
             returns = returns*self.args.discount + reward
             actions = self.search_actions.gather(1, self.search_depths)
-            new_id_current = self.id_parent.gather(1, id_current)
-            not_done_mask = (id_current != new_id_current).float()
-            id_current = new_id_current
-            self.visit_count[self.batch_range, id_current.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
-            self.q[self.batch_range, id_current.squeeze(), actions.squeeze()] += not_done_mask.squeeze() * \
-                                              ((returns - self.q[self.batch_range, id_current.squeeze(), actions.squeeze()])
-                                              /self.visit_count[self.batch_range, id_current.squeeze(), actions.squeeze()])
+
+            # Update q and count at the parent for the actions taken then
+            self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
+            self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze() * \
+                                              ((returns - self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()])
+                                              /self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()])
+
+            # Decrement the depth counter used for actions
             self.search_depths -= not_done_mask.long()
+            # Ensure that it is nonnegative to not crash in gathering.
             self.search_depths.clamp_min_(0)
 
+            id_current = parent_id
+
+        # Calculate new max and min q values per-tree for normalization
         self.min_q = self.q[:, :depth+1].min(1)[0].min(1)[0]
         self.max_q = self.q[:, :depth+1].max(1)[0].max(1)[0]
 
     def ucb_select_child(self, depth):
+        # We have one extra visit of only the parent node that must be added
+        # to the sum.  Otherwise, all values will be 0.
         total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True) + 1
         pb_c = torch.log((total_visits + self.args.pb_c_base + 1) / self.args.pb_c_base) + self.args.pb_c_init
         pb_c = pb_c * (torch.sqrt(total_visits) / (1 + self.visit_count[:, :depth])) * self.prior[:, :depth]
