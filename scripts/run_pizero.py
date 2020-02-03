@@ -14,6 +14,11 @@ import torch
 import wandb
 import numpy as np
 from apex import amp
+import time
+import gym
+
+from src.vectorized_mcts import VectorizedMCTS
+
 
 def run_pizero(args):
     pizero = PiZero(args)
@@ -39,13 +44,21 @@ def run_pizero(args):
     episode_rewards = deque(maxlen=10)
     wandb.log({'env_steps': 0})
 
+    env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
+                          asynchronous=not args.sync_envs)
+    obs = env.reset()
+    vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
     total_episodes = 0.
     while env_steps < args.total_env_steps:
+        obs = torch.from_numpy(obs)
+
         # Run MCTS for the vectorized observation
-        obs, actions, reward, done, policy_probs, values = async_mcts.run_mcts()
-        actions = actions.cpu()
-        policy_probs = policy_probs.cpu()
-        values = values.cpu()
+        actions, policies, values = vectorized_mcts.run(obs)
+        policy_probs = policies.probs
+        next_obs, reward, done, infos = env.step(actions.cpu().numpy())
+        reward, done = torch.from_numpy(reward).float(), torch.from_numpy(done).float()
+        obs, actions, reward, done, policy_probs, values = obs.cpu(), actions.cpu(), reward.cpu(),\
+                                                           done.cpu(), policy_probs.cpu(), values.cpu()
 
         eprets += np.array(reward)
 
@@ -103,6 +116,7 @@ def run_pizero(args):
             print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
             wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
+        obs = next_obs
         env_steps += args.num_envs
 
 
