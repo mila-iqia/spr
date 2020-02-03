@@ -52,13 +52,13 @@ class VectorizedMCTS:
         self.batch_range = torch.arange(self.n_runs, device=self.device)
 
     def normalize(self):
+        """Normalize Q-values to be b/w 0 and 1 for each search tree."""
         if (self.max_q <= self.min_q)[0]:
             return self.q
         return (self.q - self.min_q[:, None, None]) / (self.max_q - self.min_q)[:, None, None]
 
-    @torch.no_grad()
-    def run(self, obs):
-        # Reset all relevant tensors.
+    def reset_tensors(self):
+        """Reset all relevant tensors."""
         self.id_children.fill_(self.id_null)
         self.id_parent.fill_(self.id_null)
         self.visit_count.fill_(0)
@@ -67,13 +67,18 @@ class VectorizedMCTS:
         self.min_q.fill_(MAXIMUM_FLOAT_VALUE)
         self.max_q.fill_(MINIMUM_FLOAT_VALUE)
 
+    @torch.no_grad()
+    def run(self, obs):
+        self.reset_tensors()
         obs = obs.to(self.device)
+
         self.add_exploration_noise()
         hidden_state, reward, policy_logits, value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
         self.prior[:, 0] = F.softmax(policy_logits, dim=-1)
 
         for sim_id in range(1, self.n_sims+1):
+            # Pre-compute action to select at each node in case it is visited in this sim
             actions = self.ucb_select_child(sim_id)
             self.id_current.fill_(0)
             self.search_depths.fill_(0)
@@ -125,6 +130,7 @@ class VectorizedMCTS:
             self.id_final.fill_(sim_id)
             self.backup(self.id_final, sim_id, value)
 
+        # Get action, policy and value from the root after the search has finished
         action, policy = self.select_action()
         value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
 
