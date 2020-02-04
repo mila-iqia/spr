@@ -75,7 +75,7 @@ class AsyncReanalyze:
 
         self._state = AsyncState.DEFAULT
 
-    def store_transitions(self, obs, rewards, actions, dones):
+    def store_transitions(self, obs, actions, rewards, dones):
         for i in range(len(self.processes)):
             i_obs = obs[i*self.write_heads:(i+1)*self.write_heads]
             i_actions = actions[i*self.write_heads:(i+1)*self.write_heads]
@@ -203,6 +203,7 @@ class ReanalyzeWorker:
 
         filename = self.directory + "/ep_{}_{}.npz".format(self.index,
                                                            self.total_episodes)
+
         np.savez_compressed(file=filename, obs=obs, actions=actions,
                             dones=dones, rewards=rewards)
         self.total_episodes += 1
@@ -212,10 +213,11 @@ class ReanalyzeWorker:
         index = np.random.randint(0, len(episodes))
         filename = episodes[index]
         file = np.load(filename)
-        return TensorEpisode(torch.from_numpy(file["obs"]),
-                             torch.from_numpy(file["actions"]),
-                             torch.from_numpy(file["rewards"]),
-                             torch.from_numpy(file["dones"]))
+
+        return TensorEpisode(obs=torch.from_numpy(file["obs"]),
+                             actions=torch.from_numpy(file["actions"]),
+                             rewards=torch.from_numpy(file["rewards"]),
+                             dones=torch.from_numpy(file["dones"]))
 
     def sample_for_reanalysis(self):
         """
