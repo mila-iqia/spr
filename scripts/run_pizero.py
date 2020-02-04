@@ -49,6 +49,7 @@ def run_pizero(args):
     obs = env.reset()
     vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
     total_episodes = 0.
+    total_train_steps = 0
     while env_steps < args.total_env_steps:
         obs = torch.from_numpy(obs)
 
@@ -97,13 +98,19 @@ def run_pizero(args):
             local_buf.clear()
 
         if env_steps % args.training_interval == 0 and env_steps > args.num_envs*20:
-            training_worker.step()  # TODO: Make this async, and add ability to take multiple steps here
+            target_train_steps = env_steps // args.training_interval
+            steps = target_train_steps - total_train_steps
+            training_worker.train(steps)  # TODO: Make this async
             training_worker.log_results()
+
+            # Need to be careful when we check whether or not to reset:
             if (args.target_update_interval > 0 and
-                env_steps//args.training_interval %
-                args.target_update_interval == 0):
+                (total_train_steps % args.target_update_interval >
+                 target_train_steps % args.target_update_interval or
+                 steps > args.target_update_interval)):
 
                 target_network.load_state_dict(pizero.network.state_dict())
+            total_train_steps = target_train_steps
 
         if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
             print('Env Steps: {}, Mean Reward: {}, Median Reward: {}'.format(env_steps, np.mean(episode_rewards),
