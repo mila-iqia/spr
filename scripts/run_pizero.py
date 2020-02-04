@@ -101,7 +101,11 @@ def run_pizero(args):
             target_train_steps = env_steps // args.training_interval
             steps = target_train_steps - total_train_steps
             training_worker.train(steps)  # TODO: Make this async
-            training_worker.log_results()
+
+            if (total_train_steps % args.epoch_steps >
+                 target_train_steps % args.epoch_steps or
+                 steps > args.epoch_steps):
+                training_worker.log_results()
 
             # Need to be careful when we check whether or not to reset:
             if (args.target_update_interval > 0 and
