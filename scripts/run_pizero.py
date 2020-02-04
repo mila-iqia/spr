@@ -38,7 +38,6 @@ def run_pizero(args):
     if args.reanalyze:
         async_reanalyze = AsyncReanalyze(args, target_network)
 
-    async_mcts = AsyncMCTS(args, target_network)
     local_buf = LocalBuffer()
     eprets = np.zeros(args.num_envs, 'f')
     episode_rewards = deque(maxlen=10)
@@ -46,6 +45,7 @@ def run_pizero(args):
 
     env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
                           asynchronous=not args.sync_envs)
+    # TODO return int observations
     obs = env.reset()
     vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
     total_episodes = 0.

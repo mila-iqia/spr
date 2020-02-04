@@ -72,10 +72,10 @@ class VectorizedMCTS:
         self.reset_tensors()
         obs = obs.to(self.device)
 
-        self.add_exploration_noise()
         hidden_state, reward, policy_logits, value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
         self.prior[:, 0] = F.softmax(policy_logits, dim=-1)
+        self.add_exploration_noise()
 
         for sim_id in range(1, self.n_sims+1):
             # Pre-compute action to select at each node in case it is visited in this sim
@@ -123,7 +123,7 @@ class VectorizedMCTS:
             self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1)
 
             # Store the pointers from parent to new node and back.
-            self.id_children[self.batch_range, self.id_final, self.actions_final] = sim_id
+            self.id_children[self.batch_range, self.id_final.squeeze(), self.actions_final.squeeze()] = sim_id
             self.id_parent[:, sim_id] = self.id_final.squeeze()
 
             # The backup starts from the new node
@@ -165,7 +165,7 @@ class VectorizedMCTS:
             self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
             self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze() * \
                                               ((returns - self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()])
-                                              /self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()])
+                                              / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] + 1))
 
             # Decrement the depth counter used for actions
             self.search_depths -= not_done_mask.long()
@@ -189,7 +189,7 @@ class VectorizedMCTS:
 
     def select_action(self):
         t = self.visit_softmax_temperature()
-        policy = torch.distributions.Categorical(logits=self.visit_count[:, 0]/t)
+        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t))
         action = policy.sample()
         return action, policy
 
