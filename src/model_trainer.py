@@ -90,24 +90,25 @@ class TrainingWorker(object):
         trackers["mean_target_rewards"] = np.zeros(self.maximum_length+1)
         trackers["iterations"] = 0
 
-    def step(self):
+    def train(self, steps):
 
-        total_losses, reward_losses, nce_losses, nce_accs, policy_losses,\
-        value_losses, value_errors, reward_errors, mean_values, target_values,\
-        mean_rewards, target_rewards, = self.train()
+        for step in range(steps):
+            total_losses, reward_losses, nce_losses, nce_accs, policy_losses,\
+            value_losses, value_errors, reward_errors, mean_values, target_values,\
+            mean_rewards, target_rewards, = self.step()
 
-        self.update_trackers(reward_losses,
-                             nce_losses,
-                             nce_accs,
-                             policy_losses,
-                             value_losses,
-                             total_losses,
-                             value_errors,
-                             reward_errors,
-                             mean_values,
-                             mean_rewards,
-                             target_values,
-                             target_rewards)
+            self.update_trackers(reward_losses,
+                                 nce_losses,
+                                 nce_accs,
+                                 policy_losses,
+                                 value_losses,
+                                 total_losses,
+                                 value_errors,
+                                 reward_errors,
+                                 mean_values,
+                                 mean_rewards,
+                                 target_values,
+                                 target_rewards)
 
     def update_trackers(self,
                         reward_losses,
@@ -251,7 +252,7 @@ class TrainingWorker(object):
                    prefix + " Target Values".format(jump): np.mean(target_values),
                    'FM epoch': self.epochs_till_now})
 
-    def train(self, step=True):
+    def step(self, step=True):
         """
         Do one update of the model on data drawn from a buffer.
         :param step: whether or not to actually take a gradient step.
@@ -354,8 +355,8 @@ class TrainingWorker(object):
                 target_images = target_images.permute(0, 2, 1, 3)
                 nce_input = torch.stack(pred_states, 1).flatten(3, 4).permute(3, 1, 0, 2)
                 nce_loss, nce_accs = self.nce(nce_input, target_images)
+                nce_losses = nce_loss.mean(-1).detach().cpu().numpy()
                 nce_loss = (nce_loss*is_weights).mean(-1)
-                nce_losses = nce_loss.detach().cpu().numpy()
             else:
                 nce_loss = []
                 for i, pred_state in enumerate(pred_states):
@@ -406,6 +407,7 @@ class LocalNCE(nn.Module):
         super().__init__()
 
     def calculate_accuracy(self, preds):
+        import ipdb; ipdb.set_trace()
         labels = torch.arange(preds.shape[1], dtype=torch.long, device=preds.device)
         preds = torch.argmax(-preds, dim=-1)
         acc = float(torch.sum(torch.eq(labels, preds)).data) / preds.numel()
@@ -538,7 +540,7 @@ class MCTSModel(nn.Module):
             self.dynamics_model = TransitionModel(args.hidden_size,
                                                   num_actions,
                                                   args.dynamics_blocks)
-        self.value_model = ValueNetwork(args.hidden_size)
+        self.value_model = ValueNetwork(args.hidden_size, zero_init=True)
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         self.target_encoder = SmallEncoder(args)
@@ -787,7 +789,8 @@ class Conv2dSame(torch.nn.Module):
 
 
 class ValueNetwork(nn.Module):
-    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300):
+    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300,
+                 zero_init=False):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
@@ -797,6 +800,10 @@ class ValueNetwork(nn.Module):
                   nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
                   nn.Linear(256, limit*2 + 1)]
+        if zero_init:
+            with torch.no_grad():
+                layers[-1].weight.fill_(0)
+                layers[-1].bias.fill_(0)
         self.network = nn.Sequential(*layers)
         self.train()
 

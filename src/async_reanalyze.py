@@ -8,7 +8,7 @@ import glob
 import numpy as np
 import traceback
 
-from src.pizero import MCTS
+from src.vectorized_mcts import VectorizedMCTS as MCTS
 from recordclass import dataobject
 
 
@@ -104,7 +104,7 @@ class AsyncReanalyze:
         results, successes = zip(*[receive_queue.get() for receive_queue in self.receive_queues])
         self._raise_if_errors(successes)
         obs, actions, reward, done, policy_probs, values = map(torch.cat, zip(*results))
-        return obs, actions, reward, done, policy_probs, values
+        return obs, actions, reward, done, policy_probs.cpu(), values.cpu()
 
     def _raise_if_errors(self, successes):
         if all(successes):
@@ -140,17 +140,17 @@ class ReanalyzeWorker:
         self.error_queue = error_queue
         self.name = name
         self.network = network
-        self.reanalyze_heads = read_heads
+        self.read_heads = read_heads
         self.write_heads = write_heads
         self.current_write_episodes = [ListEpisode([], [], [], []) for _ in range(self.write_heads)]
         self.current_read_episodes = []
-        self.tr_indices = np.zeros((write_heads,), dtype="int")
+        self.tr_indices = np.zeros((read_heads,), dtype="int")
         self.buffer = []
         self.current_indices = []
         self.directory = args.savedir
         self.index = index
         self.total_episodes = 0
-        self.mcts = MCTS(args, n_actions, network)
+        self.mcts = MCTS(args, n_actions, self.read_heads, network)
         self.obs_shape = obs_shape
         self.args = args
 
@@ -222,15 +222,15 @@ class ReanalyzeWorker:
         :param buffer: list of lists of Transitions.  Each sublist is an episode.
         :return: list of new transitions, representing a reanalyzed episode.
         """
-        observations = torch.zeros((self.reanalyze_heads,
+        observations = torch.zeros((self.read_heads,
                                     self.args.framestack,
                                     *self.obs_shape),
                                    dtype=torch.uint8,)
-        actions = torch.zeros(self.reanalyze_heads, dtype=torch.long)
-        rewards = torch.zeros(self.reanalyze_heads)
-        dones = torch.zeros(self.reanalyze_heads)
+        actions = torch.zeros(self.read_heads, dtype=torch.long)
+        rewards = torch.zeros(self.read_heads)
+        dones = torch.zeros(self.read_heads)
 
-        for i in range(self.reanalyze_heads):
+        for i in range(self.read_heads):
             # Should only happen at initialization.
             if i >= len(self.current_read_episodes):
                 new_ep = self.load_episode()
@@ -256,18 +256,8 @@ class ReanalyzeWorker:
                     self.load_episode()
 
         observations = observations.float()/255.
-        roots = self.mcts.batched_run(observations)
-
-        policies = []
-        values = []
-        for root in roots:
-            # Select action for each obs
-            action, policy = self.mcts.select_action(root)
-            policies.append(policy.probs)
-            values.append(root.value())
-
-        policies = torch.stack(policies).float()
-        values = torch.stack(values).float().cpu()
+        _, policies, values = self.mcts.run(observations)
+        policies = policies.probs
 
         return observations, actions, rewards, dones, policies, values
 
