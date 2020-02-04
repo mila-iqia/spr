@@ -407,7 +407,6 @@ class LocalNCE(nn.Module):
         super().__init__()
 
     def calculate_accuracy(self, preds):
-        import ipdb; ipdb.set_trace()
         labels = torch.arange(preds.shape[1], dtype=torch.long, device=preds.device)
         preds = torch.argmax(-preds, dim=-1)
         acc = float(torch.sum(torch.eq(labels, preds)).data) / preds.numel()
