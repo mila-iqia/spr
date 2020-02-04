@@ -24,6 +24,8 @@ def get_args():
     parser.add_argument('--target-update-interval', type=int, default=1000,
                         help="Number of gradient steps for each update to the "
                              "target network.  <=0 to disable target network.")
+    parser.add_argument('--epoch-steps', type=int, default=50,
+                        help="Number of gradient steps between loggings.")
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
     parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')
