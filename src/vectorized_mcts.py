@@ -72,7 +72,7 @@ class VectorizedMCTS:
         self.reset_tensors()
         obs = obs.to(self.device)
 
-        hidden_state, reward, policy_logits, value = self.network.initial_inference(obs)
+        hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
         self.prior[:, 0] = F.softmax(policy_logits, dim=-1)
         self.add_exploration_noise()
@@ -134,6 +134,8 @@ class VectorizedMCTS:
         action, policy = self.select_action()
         value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
 
+        if self.args.no_search_value_targets:
+            value = initial_value
         return action, policy, value
 
     def add_exploration_noise(self):
