@@ -20,6 +20,7 @@ def get_args():
     parser.add_argument('--num-reanalyze-workers', type=int, default=8, help='Number of parallel envs to run')
     parser.add_argument('--sync-envs', action='store_true')
     parser.add_argument('--fp16', action='store_true')
+    parser.add_argument('--no-search-value-targets', action='store_true')
     parser.add_argument('--buffer-size', type=int, default=200000)
     parser.add_argument('--target-update-interval', type=int, default=1000,
                         help="Number of gradient steps for each update to the "
@@ -64,6 +65,7 @@ def get_args():
     parser.add_argument('--policy-loss-weight', type=float, default=1.)
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
     parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
+    parser.add_argument('--init-value-scale', type=float, default=1.)
     parser.add_argument('--film', action='store_true')
     parser.add_argument('--profile', action='store_true')
     parser.add_argument('--no-nce', action='store_true')
