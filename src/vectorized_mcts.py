@@ -132,7 +132,10 @@ class VectorizedMCTS:
 
         # Get action, policy and value from the root after the search has finished
         action, policy = self.select_action()
-        value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
+        if self.args.no_search_value_targets:
+            value = initial_value
+        else:
+            value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
 
         if self.args.no_search_value_targets:
             value = initial_value
