@@ -102,16 +102,17 @@ def run_pizero(args):
             steps = target_train_steps - total_train_steps
             training_worker.train(steps)  # TODO: Make this async
 
-            if (total_train_steps % args.epoch_steps >
-                 target_train_steps % args.epoch_steps or
-                 steps > args.epoch_steps):
+            if ((total_train_steps % args.epoch_steps >
+                 target_train_steps % args.epoch_steps) or
+                 steps >= args.epoch_steps):
+
                 training_worker.log_results()
 
             # Need to be careful when we check whether or not to reset:
             if (args.target_update_interval > 0 and
                 (total_train_steps % args.target_update_interval >
                  target_train_steps % args.target_update_interval or
-                 steps > args.target_update_interval)):
+                 steps >= args.target_update_interval)):
 
                 target_network.load_state_dict(pizero.network.state_dict())
             total_train_steps = target_train_steps

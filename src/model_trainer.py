@@ -532,14 +532,16 @@ class MCTSModel(nn.Module):
     def __init__(self, args, num_actions):
         super().__init__()
         if args.film:
-            self.dynamics_model = FiLMTransitionModel(args.hidden_size,
-                                                      num_actions,
-                                                      args.dynamics_blocks)
+            self.dynamics_model = FiLMTransitionModel(channels=args.hidden_size,
+                                                      num_actions=num_actions,
+                                                      blocks=args.dynamics_blocks,
+                                                      args=args)
         else:
-            self.dynamics_model = TransitionModel(args.hidden_size,
-                                                  num_actions,
-                                                  args.dynamics_blocks)
-        self.value_model = ValueNetwork(args.hidden_size, zero_init=True)
+            self.dynamics_model = TransitionModel(channels=args.hidden_size,
+                                                  num_actions=num_actions,
+                                                  blocks=args.dynamics_blocks,
+                                                  args=args)
+        self.value_model = ValueNetwork(args.hidden_size, init_weight_scale=args.init_value_scale)
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         self.target_encoder = SmallEncoder(args)
@@ -636,10 +638,11 @@ class TransitionModel(nn.Module):
     def __init__(self,
                  channels,
                  num_actions,
+                 args,
                  blocks=16,
                  hidden_size=256,
                  latent_size=36,
-                 action_dim=6):
+                 action_dim=6,):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [Conv2dSame(channels+action_dim, hidden_size, 3),
@@ -653,7 +656,8 @@ class TransitionModel(nn.Module):
         self.action_embedding = nn.Embedding(num_actions, latent_size*action_dim)
 
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = ValueNetwork(channels)
+        self.reward_predictor = ValueNetwork(channels,
+                                             init_weight_scale=args.init_value_scale)
         self.train()
 
     def _make_layer(self, in_channels, depth):
@@ -707,11 +711,11 @@ def renormalize(tensor, first_dim=1):
 
 
 class FiLMTransitionModel(nn.Module):
-    def __init__(self, input_channels, cond_size, blocks=16, hidden_size=256, output_size=256):
+    def __init__(self, channels, cond_size, args, blocks=16, hidden_size=256, output_size=256,):
         super().__init__()
         self.hidden_size = hidden_size
         layers = nn.ModuleList()
-        layers.append(Conv2dSame(input_channels, hidden_size, 3))
+        layers.append(Conv2dSame(channels, hidden_size, 3))
         layers.append(nn.ReLU())
         layers.append(nn.BatchNorm2d(hidden_size))
         for _ in range(blocks):
@@ -720,7 +724,8 @@ class FiLMTransitionModel(nn.Module):
                       nn.ReLU()])
 
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = ValueNetwork(output_size)
+        self.reward_predictor = ValueNetwork(channels,
+                                             init_weight_scale=args.init_value_scale)
         self.train()
 
     def forward(self, x, action):
@@ -789,7 +794,7 @@ class Conv2dSame(torch.nn.Module):
 
 class ValueNetwork(nn.Module):
     def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300,
-                 zero_init=False):
+                 init_weight_scale=1.):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
@@ -799,10 +804,8 @@ class ValueNetwork(nn.Module):
                   nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
                   nn.Linear(256, limit*2 + 1)]
-        if zero_init:
-            with torch.no_grad():
-                layers[-1].weight.fill_(0)
-                layers[-1].bias.fill_(0)
+        with torch.no_grad():
+            layers[-1].weight *= init_weight_scale
         self.network = nn.Sequential(*layers)
         self.train()
 
