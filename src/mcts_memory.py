@@ -7,7 +7,8 @@ from recordclass import recordclass
 
 from rlpyt.replays.non_sequence.frame import AsyncPrioritizedReplayFrameBuffer
 from rlpyt.replays.sequence.n_step import SamplesFromReplay
-from rlpyt.replays.sequence.frame import AsyncPrioritizedSequenceReplayFrameBuffer
+from rlpyt.replays.sequence.frame import AsyncPrioritizedSequenceReplayFrameBuffer, \
+    AsyncUniformSequenceReplayFrameBuffer
 from rlpyt.utils.buffer import torchify_buffer
 from rlpyt.utils.collections import namedarraytuple
 from rlpyt.utils.misc import extract_sequences
@@ -17,26 +18,29 @@ blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0
 blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)
 
 SamplesFromReplayPriExt = namedarraytuple("SamplesFromReplayPriExt",
-                                       SamplesFromReplay._fields + ("is_weights", "policy_probs", "values"))
+                                       SamplesFromReplay._fields + ("policy_probs", "values"))
 EPS = 1e-6
 
-class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequenceReplayFrameBuffer):
+
+class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFrameBuffer):
     """
     Extends AsyncPrioritizedSequenceReplayFrameBuffer to return policy_logits and values too during sampling.
     """
     def sample_batch(self, batch_B):
-        (T_idxs, B_idxs), priorities = self.priority_tree.sample(
-            batch_B, unique=self.unique)
+        batch_T = self.batch_T
+        T_idxs, B_idxs = self.sample_idxs(batch_B, batch_T)
+        # (T_idxs, B_idxs), priorities = self.priority_tree.sample(
+        #     batch_B, unique=self.unique)
         if self.rnn_state_interval > 1:
             T_idxs = T_idxs * self.rnn_state_interval
         batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
-        is_weights = (1. / priorities) ** self.beta
-        is_weights /= max(is_weights)  # Normalize.
-        is_weights = torchify_buffer(is_weights).float()
+        # is_weights = (1. / priorities) ** self.beta
+        # is_weights /= max(is_weights)  # Normalize.
+        # is_weights = torchify_buffer(is_weights).float()
 
         policy_probs = extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T + self.n_step_return)
         values = extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T + self.n_step_return)
-        batch = SamplesFromReplayPriExt(*batch, is_weights=is_weights, policy_probs=policy_probs, values=values)
+        batch = SamplesFromReplayPriExt(*batch, policy_probs=policy_probs, values=values)
         return self.sanitize_batch(batch)
 
     def sanitize_batch(self, batch):
