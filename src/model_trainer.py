@@ -1,6 +1,7 @@
 import collections
 
 from torch import nn
+from torch.distributions import Categorical
 import copy
 import torch
 from torch.nn import functional as F
@@ -89,6 +90,8 @@ class TrainingWorker(object):
         trackers["mean_pred_rewards"] = np.zeros(self.maximum_length+1)
         trackers["mean_target_values"] = np.zeros(self.maximum_length+1)
         trackers["mean_target_rewards"] = np.zeros(self.maximum_length+1)
+        trackers["pred_entropy"] = np.zeros(self.maximum_length+1)
+        trackers["target_entropy"] = np.zeros(self.maximum_length+1)
         trackers["iterations"] = 0
 
     def train(self, steps):
@@ -96,7 +99,8 @@ class TrainingWorker(object):
         for step in range(steps):
             total_losses, reward_losses, nce_losses, nce_accs, policy_losses,\
             value_losses, value_errors, reward_errors, mean_values, target_values,\
-            mean_rewards, target_rewards, = self.step()
+            mean_rewards, target_rewards, pred_entropies, target_entropies\
+                = self.step()
 
             self.update_trackers(reward_losses,
                                  nce_losses,
@@ -109,7 +113,9 @@ class TrainingWorker(object):
                                  mean_values,
                                  mean_rewards,
                                  target_values,
-                                 target_rewards)
+                                 target_rewards,
+                                 pred_entropies,
+                                 target_entropies)
 
     def update_trackers(self,
                         reward_losses,
@@ -124,6 +130,8 @@ class TrainingWorker(object):
                         pred_rewards,
                         target_values,
                         target_rewards,
+                        pred_entropy,
+                        target_entropy,
                         mode="train"):
         if mode == "train":
             trackers = self.train_trackers
@@ -143,6 +151,8 @@ class TrainingWorker(object):
         trackers["mean_pred_rewards"] += np.array(pred_rewards)
         trackers["mean_target_values"] += np.array(target_values)
         trackers["mean_target_rewards"] += np.array(target_rewards)
+        trackers["pred_entropy"] += np.array(pred_entropy)
+        trackers["target_entropy"] += np.array(target_entropy)
 
     def summarize_trackers(self, mode="train"):
         if mode == "train":
@@ -163,10 +173,14 @@ class TrainingWorker(object):
         pred_rewards = np.array(trackers["mean_pred_rewards"]/iterations)
         target_values = np.array(trackers["mean_target_values"]/iterations)
         target_rewards = np.array(trackers["mean_target_rewards"]/iterations)
+        pred_entropy = np.array(trackers["pred_entropy"]/iterations)
+        target_entropy = np.array(trackers["target_entropy"]/iterations)
+
 
         return nce_losses, nce_accs, reward_losses, value_losses, policy_losses,\
                epoch_losses, value_errors, reward_errors, pred_values, \
-               target_values, pred_rewards, target_rewards
+               target_values, pred_rewards, target_rewards, pred_entropy, \
+               target_entropy
 
     def log_results(self,
                     prefix='train',
@@ -184,11 +198,11 @@ class TrainingWorker(object):
 
         nce_losses, nce_accs, reward_losses, value_losses, policy_losses, \
         epoch_losses, value_errors, reward_errors, pred_values, target_values,\
-        pred_rewards, target_rewards = self.summarize_trackers(prefix)
+        pred_rewards, target_rewards, pred_entropies, target_entropies = self.summarize_trackers(prefix)
 
         self.reset_trackers(prefix)
         print(
-            "{} Epoch: {}, Epoch Loss: {:.3f}, NCE Loss: {:.3f}, NCE Acc: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Rew. Error: {:.3f}, Pred. Rews {:.3f}, Target_Rews. {:.3f}, Val Error: {:.3f}, Pred. Values {:.3f}, Target_Vals. {:.3f}".format(
+            "{} Epoch: {}, Epoch L.: {:.3f}, NCE L.: {:.3f}, NCE A.: {:.3f}, Rew. L.: {:.3f}, Policy L.: {:.3f}, Val L.: {:.3f}, Rew. E.: {:.3f}, P. Rews {:.3f}, T._Rs. {:.3f}, Val E.: {:.3f}, P. Vs. {:.3f}, T._Vs. {:.3f},  P. Ents. {:.3f}, T. Ents. {:.3f}".format(
                 prefix.capitalize(),
                 self.epochs_till_now,
                 np.mean(epoch_losses),
@@ -203,13 +217,15 @@ class TrainingWorker(object):
                 np.mean(value_errors),
                 np.mean(pred_values),
                 np.mean(target_values),
+                np.mean(pred_entropies),
+                np.mean(target_entropies),
             ))
 
         for i in range(self.maximum_length + 1):
             jump = i
             if verbose_print:
                 print(
-                    "{} Jump: {}, Epoch Loss: {:.3f}, NCE Loss: {:.3f}, NCE Acc: {:.3f}, Rew. Loss: {:.3f}, Policy Loss: {:.3f}, Value Loss: {:.3f}, Rew. Error: {:.3f}, Pred. Rews {:.3f}, Target_Rews. {:.3f}, Val Error: {:.3f}, Pred. Values {:.3f}, Target_Vals. {:.3f}".format(
+                    "{} Jump: {}, Epoch L.: {:.3f}, NCE L.: {:.3f}, NCE A.: {:.3f}, Rew. L.: {:.3f}, Policy L.: {:.3f}, Val L.: {:.3f}, Rew. E.: {:.3f}, P. Rs. {:.3f}, T._Rs. {:.3f}, Val E.: {:.3f}, P. Vs. {:.3f}, T._Vs. {:.3f},  P. Ents. {:.3f}, T. Ents. {:.3f}".format(
                         prefix.capitalize(),
                         jump,
                         epoch_losses[i],
@@ -223,7 +239,9 @@ class TrainingWorker(object):
                         target_rewards[i],
                         value_errors[i],
                         pred_values[i],
-                        target_values[i]))
+                        target_values[i],
+                        pred_entropies[i],
+                        target_entropies[i]))
 
             wandb.log({prefix + 'Jump {} loss'.format(jump): epoch_losses[i],
                        prefix + 'Jump {} NCE loss'.format(jump): nce_losses[i],
@@ -234,9 +252,11 @@ class TrainingWorker(object):
                        prefix + "Jump {} Policy loss".format(jump): policy_losses[i],
                        prefix + "Jump {} Value Error".format(jump): value_errors[i],
                        prefix + "Jump {} Pred Rewards".format(jump): pred_rewards[i],
-                       prefix + "Jump {} Pred Values".format(jump): pred_values[i],
                        prefix + "Jump {} Target Rewards".format(jump): target_rewards[i],
+                       prefix + "Jump {} Pred Values".format(jump): pred_values[i],
                        prefix + "Jump {} Target Values".format(jump): target_values[i],
+                       prefix + "Jump {} Pred Entropies".format(jump): pred_entropies[i],
+                       prefix + "Jump {} Target Entropies".format(jump): target_entropies[i],
                        'FM epoch': self.epochs_till_now})
 
         wandb.log({prefix + ' loss': np.mean(epoch_losses),
@@ -251,6 +271,8 @@ class TrainingWorker(object):
                    prefix + " Pred Values".format(jump): np.mean(pred_values),
                    prefix + " Target Rewards".format(jump): np.mean(target_rewards),
                    prefix + " Target Values".format(jump): np.mean(target_values),
+                   prefix + " Pred Entropies".format(jump): np.mean(pred_entropies),
+                   prefix + " Target Entropies".format(jump): np.mean(target_entropies),
                    'FM epoch': self.epochs_till_now})
 
     def step(self, step=True):
@@ -296,6 +318,7 @@ class TrainingWorker(object):
         nce_losses, value_targets = [], [], [], [], []
         total_losses, nce_accs = np.zeros(self.maximum_length + 1),\
                                  np.zeros(self.maximum_length + 1)
+        target_entropies, pred_entropies = [], []
 
         discounts = torch.ones_like(rewards)[:self.multistep]*self.args.discount
         discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[:, None].float()
@@ -333,6 +356,11 @@ class TrainingWorker(object):
             pred_values.append(inverse_transform(from_categorical(
                 pred_value.detach(), logits=True)))
 
+            pred_entropy = Categorical(logits=pred_policy).entropy()
+            target_entropy = Categorical(probs=policies[j]).entropy()
+            pred_entropies.append(pred_entropy.mean().cpu().detach().item())
+            target_entropies.append(target_entropy.mean().cpu().detach().item())
+
             value_errors.append(torch.abs(pred_values[-1] - value_targets[-1]).detach().cpu().numpy())
             reward_errors.append(torch.abs(pred_rewards[-1] - rewards[i]).detach().cpu().numpy())
 
@@ -350,8 +378,8 @@ class TrainingWorker(object):
                        current_reward_loss*self.args.reward_loss_weight).mean())
 
             total_losses[i] += (current_value_loss*self.args.value_loss_weight +
-                       current_policy_loss*self.args.policy_loss_weight +
-                       current_reward_loss*self.args.reward_loss_weight).detach().mean().cpu().item()
+                                current_policy_loss*self.args.policy_loss_weight +
+                                current_reward_loss*self.args.reward_loss_weight).detach().mean().cpu().item()
 
             reward_losses.append(current_reward_loss.detach().mean().cpu().item())
             value_losses.append(current_value_loss.detach().mean().cpu().item())
@@ -406,7 +434,8 @@ class TrainingWorker(object):
 
         return total_losses, reward_losses, nce_losses, nce_accs,\
                policy_losses, value_losses, value_errors, reward_errors, \
-               mean_values, target_values, mean_rewards, target_rewards,
+               mean_values, target_values, mean_rewards, target_rewards, \
+               pred_entropies, target_entropies
 
 
 class LocalNCE(nn.Module):
