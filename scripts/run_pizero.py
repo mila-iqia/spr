@@ -48,6 +48,7 @@ def run_pizero(args):
     # TODO return int observations
     obs = env.reset()
     vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
+    eval_vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.evaluation_episodes, target_network, eval=True)
     total_episodes = 0.
     total_train_steps = 0
     while env_steps < args.total_env_steps:
@@ -97,7 +98,7 @@ def run_pizero(args):
             training_worker.buffer.append_samples(samples_to_buffer)
             local_buf.clear()
 
-        if env_steps % args.training_interval == 0 and env_steps > args.num_envs*50:
+        if env_steps % args.training_interval == 0 and env_steps > args.num_envs*100:
             target_train_steps = env_steps // args.training_interval
             steps = target_train_steps - total_train_steps
             training_worker.train(steps)  # TODO: Make this async
@@ -124,10 +125,11 @@ def run_pizero(args):
             wandb.log({'Mean Reward': np.mean(episode_rewards), 'Median Reward': np.median(episode_rewards),
                        'env_steps': env_steps})
 
-        # if env_steps % args.evaluation_interval == 0 and env_steps > 0:
-        #     avg_reward = pizero.evaluate()
-        #     print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
-        #     wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
+        if env_steps % args.evaluation_interval == 0 and env_steps > 0:
+            print('Evaluating')
+            avg_reward = eval_vectorized_mcts.evaluate()
+            print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
+            wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
         obs = next_obs
         env_steps += args.num_envs
