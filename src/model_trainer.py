@@ -282,8 +282,14 @@ class TrainingWorker(object):
         :return: Updated weights for prioritized experience replay.
         """
         with torch.no_grad():
-            states, actions, rewards, return_, done, done_n, unk, \
-            is_weights, policies, values = self.buffer.sample_batch(self.args.batch_size)
+
+            (states, actions,
+            rewards, return_,
+            done, done_n, _,
+            is_weights,
+            policies,
+            values) = self.buffer.sample_batch(self.args.batch_size)
+            is_weights = is_weights.to(self.args.device)
 
             states = states.float().to(self.args.device)
             actions = actions.long().to(self.args.device)
@@ -292,7 +298,6 @@ class TrainingWorker(object):
             values = torch.from_numpy(values).float().to(self.args.device)
             initial_states = states[1]
             initial_actions = actions[0]
-            is_weights = is_weights.to(self.args.device)
 
             target_images = states[1:self.maximum_length+2, :, 0].transpose(0, 1)
             target_images = target_images.reshape(-1, *states.shape[-3:])
@@ -410,7 +415,7 @@ class TrainingWorker(object):
         else:
             nce_losses = np.zeros(self.maximum_length + 1)
 
-        self.buffer.update_batch_priorities(value_errors[0] + 1e-6)
+        # self.buffer.update_batch_priorities(value_errors[0] + 1e-6)
 
         mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
         mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
