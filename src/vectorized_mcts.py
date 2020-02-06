@@ -137,6 +137,8 @@ class VectorizedMCTS:
         else:
             value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
 
+        if self.args.no_search_value_targets:
+            value = initial_value
         return action, policy, value
 
     def add_exploration_noise(self):
