@@ -1,6 +1,7 @@
 import collections
 
 from torch import nn
+import copy
 import torch
 from torch.nn import functional as F
 
@@ -51,7 +52,7 @@ class TrainingWorker(object):
             example=example_to_buffer,
             size=self.args.buffer_size,
             B=batch_size,
-            batch_T=self.args.jumps+self.args.multistep, # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
+            batch_T=self.args.jumps+self.args.multistep+1, # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
             rnn_state_interval=0,
             discount=self.args.discount,
             n_step_return=1,
@@ -267,11 +268,11 @@ class TrainingWorker(object):
             rewards = rewards.float().to(self.args.device)
             policies = torch.from_numpy(policies).float().to(self.args.device)
             values = torch.from_numpy(values).float().to(self.args.device)
-            initial_states = states[0]
+            initial_states = states[1]
             initial_actions = actions[0]
             is_weights = is_weights.to(self.args.device)
 
-            target_images = states[:self.maximum_length+1, :, 0].transpose(0, 1)
+            target_images = states[1:self.maximum_length+2, :, 0].transpose(0, 1)
             target_images = target_images.reshape(-1, *states.shape[-3:])
 
         # Get into the shape used by the NCE code.
@@ -285,6 +286,7 @@ class TrainingWorker(object):
                                                                initial_actions,
                                                                logits=True)
 
+        # This represents s_1, r_0, pi_1, v_1
         predictions = [(1.0, pred_reward, pred_policy, pred_value)]
         pred_states = [current_state]
 
@@ -300,7 +302,7 @@ class TrainingWorker(object):
 
         value_errors, reward_errors = [], []
 
-        for i in range(self.maximum_length):
+        for i in range(1, self.maximum_length+1):
             action = actions[i]
             current_state, pred_reward, pred_policy, pred_value = self.model(current_state, action)
 
@@ -313,20 +315,25 @@ class TrainingWorker(object):
             pred_states.append(current_state)
 
         for i, prediction in enumerate(predictions):
-
+            # recall that predictions_i is r_i, pi_i+1, v_i+1
             loss_scale, pred_reward, pred_policy, pred_value = prediction
-            value_target = torch.sum(discounts*rewards[i:i+self.multistep], 0)
+
+            # Calculate the value target for v_i+1
+            j = i+1
+            value_target = torch.sum(discounts*rewards[j:j+self.multistep], 0)
             value_target = value_target + self.args.discount ** self.multistep \
-                           * values[i+self.multistep]
+                           * values[j+self.multistep]
 
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
             reward_target = to_categorical(transform(rewards[i]))
 
-            pred_rewards.append(inverse_transform(from_categorical(pred_reward.detach(), logits=True)))
-            pred_values.append(inverse_transform(from_categorical(pred_value.detach(), logits=True)))
+            pred_rewards.append(inverse_transform(from_categorical(
+                pred_reward.detach(), logits=True)))
+            pred_values.append(inverse_transform(from_categorical(
+                pred_value.detach(), logits=True)))
 
-            value_errors.append(torch.abs(pred_values[-1] - values[i]).detach().cpu().numpy())
+            value_errors.append(torch.abs(pred_values[-1] - value_targets[-1]).detach().cpu().numpy())
             reward_errors.append(torch.abs(pred_rewards[-1] - rewards[i]).detach().cpu().numpy())
 
             pred_value = F.log_softmax(pred_value, -1)
@@ -335,7 +342,7 @@ class TrainingWorker(object):
 
             current_reward_loss = -torch.sum(reward_target * pred_reward, -1)
             current_value_loss = -torch.sum(value_target * pred_value, -1)
-            current_policy_loss = -torch.sum(policies[i] * pred_policy, -1)
+            current_policy_loss = -torch.sum(policies[j] * pred_policy, -1)
 
             loss = loss + loss_scale * (is_weights * (
                        current_value_loss*self.args.value_loss_weight +
@@ -375,7 +382,7 @@ class TrainingWorker(object):
         else:
             nce_losses = np.zeros(self.maximum_length + 1)
 
-        self.buffer.update_batch_priorities(value_errors[0])
+        self.buffer.update_batch_priorities(value_errors[0] + 1e-6)
 
         mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
         mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
@@ -533,7 +540,7 @@ class MCTSModel(nn.Module):
         super().__init__()
         if args.film:
             self.dynamics_model = FiLMTransitionModel(channels=args.hidden_size,
-                                                      num_actions=num_actions,
+                                                      cond_size=num_actions,
                                                       blocks=args.dynamics_blocks,
                                                       args=args)
         else:
@@ -545,6 +552,7 @@ class MCTSModel(nn.Module):
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         self.target_encoder = SmallEncoder(args)
+        self.args = args
 
         params = list(self.dynamics_model.parameters()) + \
             list(self.value_model.parameters()) +\
@@ -563,7 +571,8 @@ class MCTSModel(nn.Module):
                                              momentum=args.momentum,
                                              weight_decay=args.weight_decay)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
-                                                                args.lr_decay ** (1. / args.lr_decay_steps), )
+                                                                args.lr_decay ** (1. / args.lr_decay_steps),)
+
     def encode(self, images, actions):
         return self.encoder(images, actions)
 
@@ -579,14 +588,19 @@ class MCTSModel(nn.Module):
         if logits:
             return NetworkOutput(hidden_state, reward_logits, policy_logits, value_logits)
 
-        value = inverse_transform(from_categorical(value_logits, logits=True))
-        reward = inverse_transform(from_categorical(reward_logits, logits=True))
+        value = inverse_transform(from_categorical(value_logits,
+                                                   logits=True))
+        reward = inverse_transform(from_categorical(reward_logits,
+                                                    logits=True))
         return NetworkOutput(hidden_state, reward, policy_logits, value)
 
     def inference(self, state, action):
-        next_state, reward_logits, policy_logits, value_logits = self.forward(state, action)
-        value = inverse_transform(from_categorical(value_logits, logits=True))
-        reward = inverse_transform(from_categorical(reward_logits, logits=True))
+        next_state, reward_logits, \
+        policy_logits, value_logits = self.forward(state, action)
+        value = inverse_transform(from_categorical(value_logits,
+                                                   logits=True))
+        reward = inverse_transform(from_categorical(reward_logits,
+                                                    logits=True))
 
         return NetworkOutput(next_state, reward, policy_logits, value)
 
@@ -868,14 +882,13 @@ class RepNet(nn.Module):
 
 def transform(value, eps=0.001):
     value = value.float()  # Avoid any fp16 shenanigans
-    value = torch.sign(value) * (torch.sqrt(torch.abs(value) + 1) - 1 + eps * value)
+    value = torch.sign(value) * (torch.sqrt(torch.abs(value) + 1) - 1) + eps * value
     return value
 
 
 def inverse_transform(value, eps=0.001):
     value = value.float()  # Avoid any fp16 shenanigans
-    return torch.sign(value) * eps ** -2 * 2 * (1 + 2 * eps + 2 * eps * torch.abs(value) - torch.sqrt(
-        1 + 4 * eps + 4 * eps ** 2 + 4 * eps * torch.abs(value)))
+    return torch.sign(value)*(((torch.sqrt(1+4*eps*(torch.abs(value) + 1 + eps)) - 1)/(2*eps))**2 - 1)
 
 
 def to_categorical(value, limit=300):

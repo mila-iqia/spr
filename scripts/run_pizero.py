@@ -97,7 +97,7 @@ def run_pizero(args):
             training_worker.buffer.append_samples(samples_to_buffer)
             local_buf.clear()
 
-        if env_steps % args.training_interval == 0 and env_steps > args.num_envs*20:
+        if env_steps % args.training_interval == 0 and env_steps > args.num_envs*50:
             target_train_steps = env_steps // args.training_interval
             steps = target_train_steps - total_train_steps
             training_worker.train(steps)  # TODO: Make this async
@@ -114,6 +114,7 @@ def run_pizero(args):
                  target_train_steps % args.target_update_interval or
                  steps >= args.target_update_interval)):
 
+                print("Updated target weights at step {}".format(target_train_steps))
                 target_network.load_state_dict(pizero.network.state_dict())
             total_train_steps = target_train_steps
 
@@ -123,10 +124,10 @@ def run_pizero(args):
             wandb.log({'Mean Reward': np.mean(episode_rewards), 'Median Reward': np.median(episode_rewards),
                        'env_steps': env_steps})
 
-        if env_steps % args.evaluation_interval == 0 and env_steps > 0:
-            avg_reward = pizero.evaluate()
-            print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
-            wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
+        # if env_steps % args.evaluation_interval == 0 and env_steps > 0:
+        #     avg_reward = pizero.evaluate()
+        #     print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
+        #     wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
         obs = next_obs
         env_steps += args.num_envs
