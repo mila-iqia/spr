@@ -2,25 +2,31 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 import torch.distributions
+import gym
 
 MAXIMUM_FLOAT_VALUE = torch.finfo().max
 MINIMUM_FLOAT_VALUE = torch.finfo().min
 
 
+
 class VectorizedMCTS:
-    def __init__(self, args, n_actions, n_runs, network):
+    def __init__(self, args, n_actions, n_runs, network, eval=False):
         self.num_actions = n_actions
         self.n_runs = n_runs
         self.network = network
         self.args = args
-        self.args.pb_c_base = 19652
-        self.args.pb_c_init = 1.25
-        self.args.root_exploration_fraction = 0.25
-        self.args.root_dirichlet_alpha = 0.25
-
+        self.pb_c_base = 19652
+        self.pb_c_init = 1.25
+        self.root_exploration_fraction = 0.25
+        self.root_dirichlet_alpha = 0.25
         self.device = args.device
         self.n_runs, self.n_sims = n_runs, args.num_simulations
         self.id_null = self.n_sims
+        self.warmup_sims = 5
+
+        if eval:
+            self.root_exploration_fraction = 0.
+            self.n_sims = 50
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
@@ -54,7 +60,7 @@ class VectorizedMCTS:
     def normalize(self):
         """Normalize Q-values to be b/w 0 and 1 for each search tree."""
         if (self.max_q <= self.min_q)[0]:
-            return self.q
+            return self.q * 0.
         return (self.q - self.min_q[:, None, None]) / (self.max_q - self.min_q)[:, None, None]
 
     def reset_tensors(self):
@@ -142,10 +148,10 @@ class VectorizedMCTS:
         return action, policy, value
 
     def add_exploration_noise(self):
-        concentrations = torch.tensor([self.args.root_dirichlet_alpha] * self.num_actions, device=self.device)
+        concentrations = torch.tensor([self.root_dirichlet_alpha] * self.num_actions, device=self.device)
         noise = torch.distributions.dirichlet.Dirichlet(concentrations).sample((self.n_runs,))
-        frac = self.args.root_exploration_fraction
-        self.prior[:, 0, :] = self.prior[:, 0, :] * (1-frac) + noise * frac
+        frac = self.root_exploration_fraction
+        self.prior[:, 0, :] = (self.prior[:, 0, :] * (1-frac)) + (noise * frac)
 
     def backup(self, id_final, depth, value_final):
         returns = value_final
@@ -180,14 +186,15 @@ class VectorizedMCTS:
             id_current = parent_id
 
         # Calculate new max and min q values per-tree for normalization
-        self.min_q = self.q[:, :depth+1].min(1)[0].min(1)[0]
-        self.max_q = self.q[:, :depth+1].max(1)[0].max(1)[0]
+        if depth > self.warmup_sims:
+            self.min_q = self.q[:, :depth+1].min(1)[0].min(1)[0]
+            self.max_q = self.q[:, :depth+1].max(1)[0].max(1)[0]
 
     def ucb_select_child(self, depth):
         # We have one extra visit of only the parent node that must be added
         # to the sum.  Otherwise, all values will be 0.
         total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True) + 1
-        pb_c = torch.log((total_visits + self.args.pb_c_base + 1) / self.args.pb_c_base) + self.args.pb_c_init
+        pb_c = torch.log((total_visits + self.pb_c_base + 1) / self.pb_c_base) + self.pb_c_init
         pb_c = pb_c * (torch.sqrt(total_visits) / (1 + self.visit_count[:, :depth])) * self.prior[:, :depth]
         normalized_q = self.normalize()
         return torch.argmax(pb_c + normalized_q[:, :depth], dim=-1)
@@ -206,3 +213,32 @@ class VectorizedMCTS:
             return 0.5
         else:
             return 0.25
+
+    def evaluate(self):
+        env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=True, args=self.args)
+        env.seed([self.args.seed] * self.n_runs)
+        for e in env.envs:
+            e.eval()
+        T_rewards = []
+        dones, reward_sums, envs_done = [False] * self.n_runs, np.array([0.] * self.n_runs), 0
+
+        obs = env.reset()
+        t = 0
+        while envs_done < self.n_runs:
+            obs = torch.from_numpy(obs)
+            actions, policy, value = self.run(obs)
+            next_obs, reward, done, _ = env.step(actions.cpu().numpy())
+            reward_sums += np.array(reward)
+            for i, d in enumerate(done):
+                if done[i] and not dones[i]:
+                    T_rewards.append(reward_sums[i])
+                    dones[i] = True
+                    envs_done += 1
+            obs = next_obs
+            t += 1
+            if t % 1000 == 0:
+                print(t, envs_done)
+        env.close()
+
+        avg_reward = sum(T_rewards) / len(T_rewards)
+        return avg_reward

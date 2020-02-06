@@ -55,10 +55,7 @@ class TrainingWorker(object):
             batch_T=self.args.jumps+self.args.multistep+1, # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
             rnn_state_interval=0,
             discount=self.args.discount,
-            n_step_return=1,
-            alpha=self.args.priority_exponent,
-            beta=self.args.priority_weight,
-            default_priority=1
+            n_step_return=1
         )
         self.buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
 
@@ -261,7 +258,7 @@ class TrainingWorker(object):
         """
         with torch.no_grad():
             states, actions, rewards, return_, done, done_n, unk, \
-            is_weights, policies, values = self.buffer.sample_batch(self.args.batch_size)
+            policies, values = self.buffer.sample_batch(self.args.batch_size)
 
             states = states.float().to(self.args.device)
             actions = actions.long().to(self.args.device)
