@@ -33,6 +33,7 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncUniformSequenceRepl
         #     batch_B, unique=self.unique)
         if self.rnn_state_interval > 1:
             T_idxs = T_idxs * self.rnn_state_interval
+
         batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
         # is_weights = (1. / priorities) ** self.beta
         # is_weights /= max(is_weights)  # Normalize.
