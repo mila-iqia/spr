@@ -387,7 +387,7 @@ class TrainingWorker(object):
         mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
         mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
         target_values = torch.mean(torch.stack(value_targets, 0), -1).detach().cpu().numpy()
-        target_rewards = torch.mean(rewards, 0)[:self.maximum_length+1].detach().cpu().numpy()
+        target_rewards = torch.mean(rewards, -1)[:self.maximum_length+1].detach().cpu().numpy()
         value_errors = np.mean(value_errors, -1)
         reward_errors = np.mean(reward_errors, -1)
 
