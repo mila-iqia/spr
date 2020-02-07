@@ -215,7 +215,7 @@ class VectorizedMCTS:
             return 0.25
 
     def evaluate(self):
-        env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=True, args=self.args)
+        env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)
         env.seed([self.args.seed] * self.n_runs)
         for e in env.envs:
             e.eval()
