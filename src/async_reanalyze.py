@@ -100,9 +100,14 @@ class AsyncReanalyze:
     def get_transitions(self, total_episodes):
         if total_episodes <= 0:
             return self.get_blank_transitions()
+        try:
+            results, successes = zip(*[receive_queue.get() for receive_queue in self.receive_queues])
+            self._raise_if_errors(successes)
 
-        results, successes = zip(*[receive_queue.get() for receive_queue in self.receive_queues])
-        self._raise_if_errors(successes)
+        except IOError:
+            traceback.print_exc()
+            self._raise_if_errors([False])
+
         obs, actions, reward, done, policy_probs, values = map(torch.cat, zip(*results))
         return obs, actions, reward, done, policy_probs.cpu(), values.cpu()
 
@@ -209,15 +214,22 @@ class ReanalyzeWorker:
         self.total_episodes += 1
 
     def load_episode(self):
-        episodes = glob.glob(self.directory + "/ep*")
-        index = np.random.randint(0, len(episodes))
-        filename = episodes[index]
-        file = np.load(filename)
+        success = False
+        while not success:
+            try:
+                episodes = glob.glob(self.directory + "/ep*")
+                index = np.random.randint(0, len(episodes))
+                filename = episodes[index]
+                file = np.load(filename)
+                episode = TensorEpisode(obs=torch.from_numpy(file["obs"]),
+                                        actions=torch.from_numpy(file["actions"]),
+                                        rewards=torch.from_numpy(file["rewards"]),
+                                        dones=torch.from_numpy(file["dones"]))
+                file.close()
+                return episode
 
-        return TensorEpisode(obs=torch.from_numpy(file["obs"]),
-                             actions=torch.from_numpy(file["actions"]),
-                             rewards=torch.from_numpy(file["rewards"]),
-                             dones=torch.from_numpy(file["dones"]))
+            except IOError:
+                traceback.print_exc()
 
     def sample_for_reanalysis(self):
         """
