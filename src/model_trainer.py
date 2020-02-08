@@ -1,16 +1,12 @@
-import collections
-
 from torch import nn
 from torch.distributions import Categorical
-import copy
 import torch
 from torch.nn import functional as F
 
 from rlpyt.utils.collections import namedarraytuple
 from src.envs import get_example_outputs
-from src.mcts_memory import ReplayMemory, AsyncPrioritizedSequenceReplayFrameBufferExtended
+from src.mcts_memory import AsyncPrioritizedSequenceReplayFrameBufferExtended
 import numpy as np
-from statistics import mean
 import wandb
 from apex import amp
 
@@ -173,7 +169,6 @@ class TrainingWorker(object):
         pred_entropy = np.array(trackers["pred_entropy"]/iterations)
         target_entropy = np.array(trackers["target_entropy"]/iterations)
 
-
         return nce_losses, nce_accs, reward_losses, value_losses, policy_losses,\
                epoch_losses, value_errors, reward_errors, pred_values, \
                target_values, pred_rewards, target_rewards, pred_entropy, \
@@ -312,7 +307,7 @@ class TrainingWorker(object):
         pred_values, pred_rewards, pred_policies = [], [], []
         loss = torch.zeros(1, device=self.args.device)
         reward_losses, value_losses, policy_losses, \
-        nce_losses, value_targets = [], [], [], [], []
+            nce_losses, value_targets = [], [], [], [], []
         total_losses, nce_accs = np.zeros(self.maximum_length + 1),\
                                  np.zeros(self.maximum_length + 1)
         target_entropies, pred_entropies = [], []
@@ -830,6 +825,32 @@ class Conv2dSame(torch.nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+
+class QNetwork(nn.Module):
+    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36, limit=300,
+                 init_weight_scale=1.):
+        super().__init__()
+        self.hidden_size = hidden_size
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+                  nn.ReLU(),
+                  nn.BatchNorm2d(hidden_size),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*hidden_size, 256),
+                  nn.ReLU(),
+                  nn.Linear(256, (num_actions)*(limit*2 + 1))]
+        with torch.no_grad():
+            layers[-1].weight *= init_weight_scale
+        self.network = nn.Sequential(*layers)
+        self.num_actions = num_actions
+        self.dist_size = limit*2 + 1
+        self.train()
+
+    def forward(self, x):
+        distributions = self.network(x).view(*x.shape[:-1],
+                                             self.num_actions,
+                                             self.dist_size)
+        return distributions
 
 
 class ValueNetwork(nn.Module):

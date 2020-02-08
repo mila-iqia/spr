@@ -83,7 +83,7 @@ class LocalBuffer:
 
 
 # Segment tree data structure where parent node values are sum/max of children node values
-class SegmentTree():
+class SegmentTree:
     def __init__(self, size):
         self.index = 0
         self.size = size
