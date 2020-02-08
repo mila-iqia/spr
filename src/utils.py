@@ -40,6 +40,7 @@ def get_args():
 
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
+    parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
 
     # PiZero arguments
     parser.add_argument('--training-interval', type=int, default=64,
