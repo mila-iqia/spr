@@ -16,13 +16,13 @@ class VectorizedMCTS:
         self.network = network
         self.args = args
         self.pb_c_base = 19652
-        self.pb_c_init = 1.25
+        self.pb_c_init = args.c1
         self.root_exploration_fraction = 0.25
         self.root_dirichlet_alpha = 0.25
         self.device = args.device
         self.n_runs, self.n_sims = n_runs, args.num_simulations
         self.id_null = self.n_sims
-        self.warmup_sims = 5
+        self.warmup_sims = 0
 
         if eval:
             self.root_exploration_fraction = 0.
