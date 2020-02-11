@@ -86,7 +86,8 @@ class AsyncReanalyze:
     def get_blank_transitions(self):
         obs = torch.zeros(self.args.num_reanalyze_envs,
                           self.args.framestack,
-                          *self.obs_shape)
+                          *self.obs_shape,
+                          dtype=torch.uint8)
 
         actions = torch.zeros(self.args.num_reanalyze_envs, dtype=torch.long)
         rewards = torch.zeros(self.args.num_reanalyze_envs)
