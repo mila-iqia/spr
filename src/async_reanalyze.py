@@ -33,13 +33,14 @@ class TensorEpisode(dataobject):
 
 
 class AsyncReanalyze:
-    def __init__(self, args, network):
+    def __init__(self, args, network, debug=False):
         self.args = args
         self.num_workers = args.num_workers
 
         self.processes = []
         ctx = mp.get_context('spawn')
         self.error_queue = ctx.Queue()
+        self.debug = debug
 
         self.send_queues = []
         self.receive_queues = []
@@ -54,24 +55,39 @@ class AsyncReanalyze:
         for idx in range(self.args.num_reanalyze_workers):
             receive_queue = ctx.Queue()
             send_queue = ctx.Queue()
-            process = ctx.Process(target=reanalyze_wrapper,
-                                  name='ReanalyzeWorker-{}'.format(idx),
-                                  args=((
-                                      args,
-                                      idx,
-                                      'ReanalyzeWorker - {}'.format(idx),
-                                      self.network,
-                                      self.write_heads,
-                                      self.read_heads,
-                                      send_queue,
-                                      receive_queue,
-                                      self.error_queue,
-                                      self.obs_shape,
-                                      self.n_actions)))
+            if not self.debug:
+                process = ctx.Process(target=reanalyze_wrapper,
+                                      name='ReanalyzeWorker-{}'.format(idx),
+                                      args=((
+                                          args,
+                                          idx,
+                                          'ReanalyzeWorker - {}'.format(idx),
+                                          self.network,
+                                          self.write_heads,
+                                          self.read_heads,
+                                          send_queue,
+                                          receive_queue,
+                                          self.error_queue,
+                                          self.obs_shape,
+                                          self.n_actions)))
+                process.start()
+
+            else:
+                process = ReanalyzeWorker(args,
+                                          idx,
+                                          'ReanalyzeWorker - {}'.format(idx),
+                                          self.network,
+                                          self.write_heads,
+                                          self.read_heads,
+                                          send_queue,
+                                          receive_queue,
+                                          self.error_queue,
+                                          self.obs_shape,
+                                          self.n_actions)
+
             self.receive_queues.append(receive_queue)
             self.send_queues.append(send_queue)
             self.processes.append(process)
-            process.start()
 
         self._state = AsyncState.DEFAULT
 
@@ -81,7 +97,10 @@ class AsyncReanalyze:
             i_actions = actions[i*self.write_heads:(i+1)*self.write_heads]
             i_rewards = rewards[i*self.write_heads:(i+1)*self.write_heads]
             i_dones = dones[i*self.write_heads:(i+1)*self.write_heads]
-            self.send_queues[i].put((i_obs, i_actions, i_rewards, i_dones))
+            if self.debug:
+                self.processes[i].save_data(i_obs, i_actions, i_rewards, i_dones)
+            else:
+                self.send_queues[i].put((i_obs, i_actions, i_rewards, i_dones))
 
     def get_blank_transitions(self):
         obs = torch.zeros(self.args.num_reanalyze_envs,
@@ -101,14 +120,14 @@ class AsyncReanalyze:
     def get_transitions(self, total_episodes):
         if total_episodes <= 0:
             return self.get_blank_transitions()
-        try:
+        if self.debug:
+            results = [p.sample_for_reanalysis() for p in self.processes]
+            successes = [True]*len(self.processes)
+        else:
             results, successes = zip(*[receive_queue.get() for receive_queue in self.receive_queues])
-            self._raise_if_errors(successes)
+        self._raise_if_errors(successes)
 
-        except IOError:
-            traceback.print_exc()
-            self._raise_if_errors([False])
-
+        print("stepped")
         obs, actions, reward, done, policy_probs, values = map(torch.cat, zip(*results))
         return obs, actions, reward, done, policy_probs.cpu(), values.cpu()
 
@@ -173,9 +192,9 @@ class ReanalyzeWorker:
                 if self.can_reanalyze and self.receive_queue.qsize() < 100:
                     new_samples = self.sample_for_reanalysis()
                     self.receive_queue.put((new_samples, True))
-                else:
+                elif not forever:
                     time.sleep(1.)  # Don't just spin the processor
-                if not forever:
+                else:
                     return
 
         except (KeyboardInterrupt, Exception):
@@ -188,18 +207,21 @@ class ReanalyzeWorker:
     def write_to_buffer(self):
         while not self.send_queue.empty():
             obs, action, reward, done = self.send_queue.get()
+            print("Received transition")
+            self.save_data(obs, action, reward, done)
 
-            for i in range(self.write_heads):
-                episode = self.current_write_episodes[i]
-                episode.obs.append(obs[i])
-                episode.actions.append(action[i])
-                episode.rewards.append(reward[i])
-                episode.dones.append(done[i])
+    def save_data(self, obs, action, reward, done):
+        for i in range(self.write_heads):
+            episode = self.current_write_episodes[i]
+            episode.obs.append(obs[i])
+            episode.actions.append(action[i])
+            episode.rewards.append(reward[i])
+            episode.dones.append(done[i])
 
-                if done[i]:
-                    self.save_episode(episode)
+            if done[i]:
+                self.save_episode(episode)
 
-            self.current_write_episodes[i] = ListEpisode([], [], [], [])
+        self.current_write_episodes[i] = ListEpisode([], [], [], [])
 
     def save_episode(self, episode):
         obs = torch.stack(episode.obs).numpy()
