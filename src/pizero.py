@@ -64,12 +64,12 @@ class PiZero:
         self.args.pb_c_init = 1.25
         self.args.root_exploration_fraction = 0.25
         self.args.root_dirichlet_alpha = 0.25
-        self.env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
-                                   asynchronous=not args.sync_envs)
-        self.network = MCTSModel(args, self.env.action_space[0].n)
+        dummy_env = gym.vector.make('atari-v0', num_envs=1, args=args,
+                                    asynchronous=False)
+        dummy_env.seed(args.seed)
+        self.network = MCTSModel(args, dummy_env.action_space[0].n)
         self.network.share_memory()
         self.network.to(self.args.device)
-        self.mcts = MCTS(args, self.env, self.network)
 
     def evaluate(self):
         num_envs = self.args.evaluation_episodes
@@ -95,6 +95,7 @@ class PiZero:
                     T_rewards.append(reward_sums[i])
                     dones[i] = True
                     envs_done += 1
+            obs = next_obs
         env.close()
 
         avg_reward = sum(T_rewards) / len(T_rewards)

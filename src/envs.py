@@ -30,7 +30,7 @@ class AtariEnv(gym.core.Env):
         self.training = True  # Consistent with model training mode
         self.grayscale = args.grayscale
         channels = 1 if self.grayscale else 3
-        self.observation_space = gym.spaces.Box(low=-float('inf'), high=float('inf'), shape=(args.framestack, channels, 96, 96))
+        self.observation_space = gym.spaces.Box(low=0, high=255, dtype=np.uint8, shape=(args.framestack, channels, 96, 96))
         self.action_space = gym.spaces.Discrete(len(self.actions))
 
     def _get_state(self):
@@ -38,16 +38,16 @@ class AtariEnv(gym.core.Env):
             obs = self.ale.getScreenGrayscale()
         else:
             obs = self.ale.getScreenRGB()
-        state = cv2.resize(obs, (96, 96), interpolation=cv2.INTER_LINEAR)/255.
+        state = cv2.resize(obs, (96, 96), interpolation=cv2.INTER_NEAREST)
         if len(state.shape) == 2:
             state = state[..., None]
         return state
 
     def _reset_buffer(self):
         if self.grayscale:
-            blank = np.zeros((96, 96, 1))
+            blank = np.zeros((96, 96, 1), dtype=np.uint8)
         else:
-            blank = np.zeros((96, 96, 3))
+            blank = np.zeros((96, 96, 3), dtype=np.uint8)
         for _ in range(self.window):
             self.state_buffer.append(blank)
 
@@ -76,7 +76,7 @@ class AtariEnv(gym.core.Env):
             channels = 1
         else:
             channels = 3
-        frame_buffer = np.zeros((2, 96, 96, channels))
+        frame_buffer = np.zeros((2, 96, 96, channels), dtype=np.uint8)
         reward, done = 0, False
         for t in range(4):
             reward += self.ale.act(self.actions.get(action))

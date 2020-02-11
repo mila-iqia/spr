@@ -269,7 +269,6 @@ class ReanalyzeWorker:
                 self.current_read_episodes[i] = \
                     self.load_episode()
 
-        observations = observations.float()/255.
         _, policies, values = self.mcts.run(observations)
         policies = policies.probs
 
