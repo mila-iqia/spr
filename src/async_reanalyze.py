@@ -127,7 +127,6 @@ class AsyncReanalyze:
             results, successes = zip(*[receive_queue.get() for receive_queue in self.receive_queues])
         self._raise_if_errors(successes)
 
-        print("stepped")
         obs, actions, reward, done, policy_probs, values = map(torch.cat, zip(*results))
         return obs, actions, reward, done, policy_probs.cpu(), values.cpu()
 
