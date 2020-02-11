@@ -47,13 +47,12 @@ def run_pizero(args):
                           asynchronous=not args.sync_envs)
     # TODO return int observations
     obs = env.reset()
+    obs = torch.from_numpy(obs)
     vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
     eval_vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.evaluation_episodes, target_network, eval=True)
     total_episodes = 0.
     total_train_steps = 0
     while env_steps < args.total_env_steps:
-        obs = torch.from_numpy(obs)
-
         # Run MCTS for the vectorized observation
         actions, policies, values = vectorized_mcts.run(obs)
         policy_probs = policies.probs
@@ -73,7 +72,7 @@ def run_pizero(args):
 
         if args.reanalyze:
             async_reanalyze.store_transitions(
-                (obs[:, -1]*255).byte(),
+                obs[:, -1],
                 actions,
                 reward,
                 done,
@@ -98,7 +97,7 @@ def run_pizero(args):
             training_worker.buffer.append_samples(samples_to_buffer)
             local_buf.clear()
 
-        if env_steps % args.training_interval == 0 and env_steps > args.num_envs*100:
+        if env_steps % args.training_interval == 0 and env_steps > args.num_envs*25:
             target_train_steps = env_steps // args.training_interval
             steps = target_train_steps - total_train_steps
             training_worker.train(steps)  # TODO: Make this async
@@ -126,12 +125,11 @@ def run_pizero(args):
                        'env_steps': env_steps})
 
         if env_steps % args.evaluation_interval == 0 and env_steps > 0:
-            print('Evaluating')
             avg_reward = eval_vectorized_mcts.evaluate()
             print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
             wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
-        obs = next_obs
+        obs.copy_(torch.from_numpy(next_obs))
         env_steps += args.num_envs
 
 
