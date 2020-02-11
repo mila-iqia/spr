@@ -48,7 +48,6 @@ class AsyncReanalyze:
         self.network = network
         dummy_env = gym.vector.make('atari-v0', num_envs=1, args=args,
                                     asynchronous=False)
-        dummy_env.seed(args.seed)
         self.n_actions = dummy_env.action_space[0].n
         self.obs_shape = dummy_env.observation_space.shape[2:]
         dummy_env.close()
