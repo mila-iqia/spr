@@ -23,11 +23,11 @@ class VectorizedMCTS:
         self.id_null = self.n_sims + 1
 
         if eval:
-            self.root_exploration_fraction = 0.
             self.n_sims = 50
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
+        # Store tensors to have [N_RUNS, N_SIMS] leading dimensions.
         self.q = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
         self.prior = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
         self.visit_count = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
@@ -81,7 +81,7 @@ class VectorizedMCTS:
     @torch.no_grad()
     def run(self, obs):
         self.reset_tensors()
-        obs = obs.to(self.device)
+        obs = obs.to(self.device).float() / 255.
 
         hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
@@ -229,7 +229,7 @@ class VectorizedMCTS:
         dones, reward_sums, envs_done = [False] * self.n_runs, np.array([0.] * self.n_runs), 0
 
         obs = env.reset()
-        t = 0
+        obs = torch.from_numpy(obs)
         while envs_done < self.n_runs:
             obs = torch.from_numpy(obs)
             actions, policy, value = self.run(obs)
@@ -240,10 +240,7 @@ class VectorizedMCTS:
                     T_rewards.append(reward_sums[i])
                     dones[i] = True
                     envs_done += 1
-            obs = next_obs
-            t += 1
-            if t % 1000 == 0:
-                print(t, envs_done)
+            obs.copy_(torch.from_numpy(next_obs))
         env.close()
 
         avg_reward = sum(T_rewards) / len(T_rewards)
