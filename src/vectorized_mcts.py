@@ -231,7 +231,6 @@ class VectorizedMCTS:
         obs = env.reset()
         obs = torch.from_numpy(obs)
         while envs_done < self.n_runs:
-            obs = torch.from_numpy(obs)
             actions, policy, value = self.run(obs)
             next_obs, reward, done, _ = env.step(actions.cpu().numpy())
             reward_sums += np.array(reward)
