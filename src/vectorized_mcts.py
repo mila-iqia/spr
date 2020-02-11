@@ -21,6 +21,7 @@ class VectorizedMCTS:
         self.device = args.device
         self.n_runs, self.n_sims = n_runs, args.num_simulations
         self.id_null = self.n_sims + 1
+        self.warmup_sims = min(self.n_sims // 3 + 1, 10)
 
         if eval:
             self.n_sims = 50
@@ -61,9 +62,9 @@ class VectorizedMCTS:
 
     def normalize(self, sim_id):
         """Normalize Q-values to be b/w 0 and 1 for each search tree."""
-        if sim_id <= 2:
-            return self.q
         valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
+        if sim_id <= self.warmup_sims:
+            return -self.visit_count
         values = self.q - valid_indices * self.min_q[:, None, None]
         values /= (self.max_q - self.min_q)[:, None, None]
         return values
