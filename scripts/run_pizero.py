@@ -36,7 +36,7 @@ def run_pizero(args):
         amp.initialize([pizero.network, target_network],
                        pizero.network.optimizer)
     if args.reanalyze:
-        async_reanalyze = AsyncReanalyze(args, target_network)
+        async_reanalyze = AsyncReanalyze(args, target_network, debug=args.debug_reanalyze)
 
     local_buf = LocalBuffer()
     eprets = np.zeros(args.num_envs, 'f')
@@ -82,14 +82,16 @@ def run_pizero(args):
 
             # Add the reanalyzed transitions to the real data.
             new_samples = async_reanalyze.get_transitions(total_episodes)
-            obs = torch.cat([obs, new_samples[0]], 0)
+            cat_obs = torch.cat([obs, new_samples[0]], 0)
             actions = torch.cat([actions, new_samples[1]], 0)
             reward = torch.cat([reward, new_samples[2]], 0)
             done = torch.cat([done, new_samples[3]], 0)
             policy_probs = torch.cat([policy_probs, new_samples[4]], 0)
             values = torch.cat([values, new_samples[5]], 0)
+            local_buf.append(cat_obs, actions, reward, done, policy_probs, values)
 
-        local_buf.append(obs, actions, reward, done, policy_probs, values)
+        else:
+            local_buf.append(obs, actions, reward, done, policy_probs, values)
 
         if env_steps % args.jumps == 0 and env_steps > 0:
             # Send transitions from the local buffer to the replay buffer
@@ -124,7 +126,7 @@ def run_pizero(args):
             wandb.log({'Mean Reward': np.mean(episode_rewards), 'Median Reward': np.median(episode_rewards),
                        'env_steps': env_steps})
 
-        if env_steps % args.evaluation_interval == 0:
+        if env_steps % args.evaluation_interval == 0 and not args.debug_reanalyze:
             avg_reward = eval_vectorized_mcts.evaluate()
             print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
             wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
