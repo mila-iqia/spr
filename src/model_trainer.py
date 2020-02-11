@@ -15,6 +15,12 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
                                   ["observation", "action", "reward", "done", "policy_probs", "value"])
 
 
+def init(module, weight_init, bias_init, gain=1):
+    weight_init(module.weight.data, gain=gain)
+    bias_init(module.bias.data)
+    return module
+
+
 class TrainingWorker(object):
     def __init__(self, args, model):
         super().__init__()
@@ -277,7 +283,7 @@ class TrainingWorker(object):
             states, actions, rewards, return_, done, done_n, unk, \
             policies, values = self.buffer.sample_batch(self.args.batch_size)
 
-            states = states.float().to(self.args.device)
+            states = states.float().to(self.args.device) / 255.
             actions = actions.long().to(self.args.device)
             rewards = rewards.float().to(self.args.device)
             policies = torch.from_numpy(policies).float().to(self.args.device)
@@ -858,15 +864,19 @@ class ValueNetwork(nn.Module):
                  init_weight_scale=1.):
         super().__init__()
         self.hidden_size = hidden_size
+        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                               constant_(x, 0), gain=nn.init.calculate_gain('relu'))
+        init_2 = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                               constant_(x, 0))
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
-                  nn.Linear(256, limit*2 + 1)]
-        with torch.no_grad():
-            layers[-1].weight *= init_weight_scale
+                  init_2(nn.Linear(256, limit*2 + 1))]
+        # with torch.no_grad():
+        #     layers[-1].weight *= init_weight_scale
         self.network = nn.Sequential(*layers)
         self.train()
 
@@ -878,11 +888,16 @@ class PolicyNetwork(nn.Module):
     def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
         super().__init__()
         self.hidden_size = hidden_size
+        init_ = lambda m: init(
+            m,
+            nn.init.orthogonal_,
+            lambda x: nn.init.constant_(x, 0),
+            gain=0.01)
         layers = [Conv2dSame(input_channels, hidden_size, 3),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, num_actions)]
+                  init_(nn.Linear(pixels * hidden_size, num_actions))]
         self.network = nn.Sequential(*layers)
         self.train()
 

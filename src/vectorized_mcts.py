@@ -4,9 +4,8 @@ import torch.nn.functional as F
 import torch.distributions
 import gym
 
-MAXIMUM_FLOAT_VALUE = torch.finfo().max
-MINIMUM_FLOAT_VALUE = torch.finfo().min
-
+MAXIMUM_FLOAT_VALUE = torch.finfo().max / 10
+MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
 
 
 class VectorizedMCTS:
@@ -21,28 +20,31 @@ class VectorizedMCTS:
         self.root_dirichlet_alpha = 0.25
         self.device = args.device
         self.n_runs, self.n_sims = n_runs, args.num_simulations
-        self.id_null = self.n_sims
-        self.warmup_sims = 0
+        self.id_null = self.n_sims + 1
 
         if eval:
-            self.root_exploration_fraction = 0.
             self.n_sims = 50
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
-        self.q = torch.zeros((n_runs, self.n_sims + 1, self.num_actions), device=self.device)
-        self.prior = torch.zeros((n_runs, self.n_sims + 1, self.num_actions), device=self.device)
-        self.visit_count = torch.zeros((n_runs, self.n_sims + 1, self.num_actions), device=self.device)
-        self.reward = torch.zeros((n_runs, self.n_sims + 1), device=self.device)
-        self.hidden_state = torch.zeros((n_runs, self.n_sims + 1, args.hidden_size, 6, 6), device=self.device)
+        # Store tensors to have [N_RUNS, N_SIMS] leading dimensions.
+        self.q = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
+        self.prior = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
+        self.visit_count = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
+        self.reward = torch.zeros((n_runs, self.n_sims + 2), device=self.device)
+        self.hidden_state = torch.zeros((n_runs, self.n_sims + 2, args.hidden_size, 6, 6), device=self.device)
         self.min_q, self.max_q = torch.zeros((n_runs,), device=self.device).fill_(MAXIMUM_FLOAT_VALUE), \
                                  torch.zeros((n_runs,), device=self.device).fill_(MINIMUM_FLOAT_VALUE)
+        self.init_min_q, self.init_max_q = torch.zeros((n_runs,), device=self.device).fill_(MAXIMUM_FLOAT_VALUE), \
+                                           torch.zeros((n_runs,), device=self.device).fill_(MINIMUM_FLOAT_VALUE)
         self.search_depths = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
+        self.dummy_ones = torch.ones_like(self.visit_count, device=self.device)
+        self.dummy_zeros = torch.zeros_like(self.visit_count, device=self.device)
 
         # Initialize pointers defining the tree structure.
-        self.id_children = torch.zeros((n_runs, self.n_sims + 1, self.num_actions),
+        self.id_children = torch.zeros((n_runs, self.n_sims + 2, self.num_actions),
                                        dtype=torch.int64, device=self.device)
-        self.id_parent = torch.zeros((n_runs, self.n_sims + 1),
+        self.id_parent = torch.zeros((n_runs, self.n_sims + 2),
                                      dtype=torch.int64, device=self.device)
 
         # Pointers used during the search.
@@ -51,17 +53,20 @@ class VectorizedMCTS:
 
         # Tensors defining the actions taken during the search.
         self.actions_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=self.device)
-        self.search_actions = torch.zeros((n_runs, self.n_sims + 1),
+        self.search_actions = torch.zeros((n_runs, self.n_sims + 2),
                                           dtype=torch.int64, device=self.device)
 
         # A helper tensor used in indexing.
         self.batch_range = torch.arange(self.n_runs, device=self.device)
 
-    def normalize(self):
+    def normalize(self, sim_id):
         """Normalize Q-values to be b/w 0 and 1 for each search tree."""
-        if (self.max_q <= self.min_q)[0]:
-            return self.q * 0.
-        return (self.q - self.min_q[:, None, None]) / (self.max_q - self.min_q)[:, None, None]
+        if sim_id <= 2:
+            return self.q
+        valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
+        values = self.q - valid_indices * self.min_q[:, None, None]
+        values /= (self.max_q - self.min_q)[:, None, None]
+        return values
 
     def reset_tensors(self):
         """Reset all relevant tensors."""
@@ -76,7 +81,7 @@ class VectorizedMCTS:
     @torch.no_grad()
     def run(self, obs):
         self.reset_tensors()
-        obs = obs.to(self.device)
+        obs = obs.to(self.device).float() / 255.
 
         hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
@@ -174,9 +179,16 @@ class VectorizedMCTS:
 
             # Update q and count at the parent for the actions taken then
             self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
-            self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze() * \
-                                              ((returns - self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()])
-                                              / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] + 1))
+            values = ((self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] *
+                     self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()]) + returns) \
+                     / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] + 1)
+            values *= not_done_mask.squeeze()
+            self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] = values
+            values = values.squeeze()
+            mins = torch.where(not_done_mask.squeeze() > 0, values, self.init_min_q)
+            maxes = torch.where(not_done_mask.squeeze() > 0, values, self.init_max_q)
+            self.min_q = torch.min(self.min_q, mins)
+            self.max_q = torch.max(self.max_q, maxes)
 
             # Decrement the depth counter used for actions
             self.search_depths -= not_done_mask.long()
@@ -185,18 +197,12 @@ class VectorizedMCTS:
 
             id_current = parent_id
 
-        # Calculate new max and min q values per-tree for normalization
-        if depth > self.warmup_sims:
-            self.min_q = self.q[:, :depth+1].min(1)[0].min(1)[0]
-            self.max_q = self.q[:, :depth+1].max(1)[0].max(1)[0]
-
     def ucb_select_child(self, depth):
         # We have one extra visit of only the parent node that must be added
         # to the sum.  Otherwise, all values will be 0.
         total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True) + 1
-        pb_c = torch.log((total_visits + self.pb_c_base + 1) / self.pb_c_base) + self.pb_c_init
-        pb_c = pb_c * (torch.sqrt(total_visits) / (1 + self.visit_count[:, :depth])) * self.prior[:, :depth]
-        normalized_q = self.normalize()
+        pb_c = self.pb_c_init * (torch.sqrt(total_visits) / (1 + self.visit_count[:, :depth])) * self.prior[:, :depth]
+        normalized_q = self.normalize(depth)
         return torch.argmax(pb_c + normalized_q[:, :depth], dim=-1)
 
     def select_action(self):
@@ -216,16 +222,14 @@ class VectorizedMCTS:
 
     def evaluate(self):
         env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)
-        env.seed([self.args.seed] * self.n_runs)
         for e in env.envs:
             e.eval()
         T_rewards = []
         dones, reward_sums, envs_done = [False] * self.n_runs, np.array([0.] * self.n_runs), 0
 
         obs = env.reset()
-        t = 0
+        obs = torch.from_numpy(obs)
         while envs_done < self.n_runs:
-            obs = torch.from_numpy(obs)
             actions, policy, value = self.run(obs)
             next_obs, reward, done, _ = env.step(actions.cpu().numpy())
             reward_sums += np.array(reward)
@@ -234,10 +238,7 @@ class VectorizedMCTS:
                     T_rewards.append(reward_sums[i])
                     dones[i] = True
                     envs_done += 1
-            obs = next_obs
-            t += 1
-            if t % 1000 == 0:
-                print(t, envs_done)
+            obs.copy_(torch.from_numpy(next_obs))
         env.close()
 
         avg_reward = sum(T_rewards) / len(T_rewards)
