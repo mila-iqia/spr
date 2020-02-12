@@ -281,10 +281,9 @@ def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
             command, env_step = send_queue.get()
             if command == 'evaluate':
                 avg_reward = eval_mcts.evaluate()
-                print(avg_reward)
-                recieve_queue.put(((avg_reward, env_step), True))
+                recieve_queue.put(((env_step, avg_reward), True))
             else:
-                time.sleep(1.)
+                time.sleep(100.)
     except (KeyboardInterrupt, Exception):
         error_queue.put((name,) + sys.exc_info())
         traceback.print_exc()
