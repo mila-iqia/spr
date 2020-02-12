@@ -75,7 +75,7 @@ def get_args():
     parser.add_argument('--no-search-value-targets', action='store_true')
     parser.add_argument('--evaluation-interval', type=int, default=100000,
                         help='Evaluate after every {evaluation-interval} env steps')
-    parser.add_argument('--log-interval', type=int, default=4000,
+    parser.add_argument('--log-interval', type=int, default=3200,
                         help='Evaluate after every {evaluation-interval} env steps')
 
     parser.add_argument('--wandb-proj', type=str, default='pizero')

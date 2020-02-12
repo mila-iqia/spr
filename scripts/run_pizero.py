@@ -126,15 +126,14 @@ def run_pizero(args):
                                                                              np.median(episode_rewards)))
             wandb.log({'Mean Reward': np.mean(episode_rewards), 'Median Reward': np.median(episode_rewards),
                        'env_steps': env_steps})
+            eval_result = async_eval.get_eval_results()
+            if eval_result:
+                eval_env_step, avg_reward = eval_result
+                print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
+                wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
         if env_steps % args.evaluation_interval == 0 and not args.debug_reanalyze:
             async_eval.send_queue.put(('evaluate', env_steps))
-
-        eval_result = async_eval.get_eval_results()
-        if eval_result:
-            eval_env_step, avg_reward = eval_result
-            print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
-            wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
         obs.copy_(torch.from_numpy(next_obs))
         env_steps += args.num_envs
