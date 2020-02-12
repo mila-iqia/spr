@@ -3,6 +3,11 @@ import numpy as np
 import torch.nn.functional as F
 import torch.distributions
 import gym
+import torch.multiprocessing as mp
+import time
+import traceback
+import sys
+import wandb
 
 MAXIMUM_FLOAT_VALUE = torch.finfo().max / 10
 MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
@@ -20,11 +25,10 @@ class VectorizedMCTS:
         self.root_dirichlet_alpha = 0.25
         self.device = args.device
         self.n_runs, self.n_sims = n_runs, args.num_simulations
-        self.id_null = self.n_sims + 1
-        self.warmup_sims = min(self.n_sims // 3 + 1, 10)
-
         if eval:
             self.n_sims = 50
+        self.id_null = self.n_sims + 1
+        self.warmup_sims = min(self.n_sims // 3 + 1, 10)
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
@@ -244,3 +248,47 @@ class VectorizedMCTS:
 
         avg_reward = sum(T_rewards) / len(T_rewards)
         return avg_reward
+
+
+class AsyncEval:
+    def __init__(self, eval_mcts):
+        ctx = mp.get_context('spawn')
+        self.error_queue = ctx.Queue()
+        self.send_queue = ctx.Queue()
+        self.receive_queue = ctx.Queue()
+        process = ctx.Process(target=eval_wrapper,
+                              name='EvalWorker',
+                              args=((
+                                  eval_mcts,
+                                  'EvalWorker',
+                                  self.send_queue,
+                                  self.receive_queue,
+                                  self.error_queue,
+                                  )))
+        process.start()
+
+    def get_eval_results(self):
+        try:
+            result, success = self.receive_queue.get_nowait()
+            return result
+        except:
+            return None
+
+
+def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
+    try:
+        while True:
+            command, env_step = send_queue.get()
+            if command == 'evaluate':
+                avg_reward = eval_mcts.evaluate()
+                print(avg_reward)
+                recieve_queue.put(((avg_reward, env_step), True))
+            else:
+                time.sleep(1.)
+    except (KeyboardInterrupt, Exception):
+        error_queue.put((name,) + sys.exc_info())
+        traceback.print_exc()
+        recieve_queue.put((None, False))
+    finally:
+        return
+
