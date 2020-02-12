@@ -17,7 +17,7 @@ from apex import amp
 import time
 import gym
 
-from src.vectorized_mcts import VectorizedMCTS
+from src.vectorized_mcts import VectorizedMCTS, AsyncEval
 
 
 def run_pizero(args):
@@ -50,6 +50,7 @@ def run_pizero(args):
     obs = torch.from_numpy(obs)
     vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
     eval_vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.evaluation_episodes, target_network, eval=True)
+    async_eval = AsyncEval(eval_vectorized_mcts)
     total_episodes = 0.
     total_train_steps = 0
     while env_steps < args.total_env_steps:
@@ -127,8 +128,12 @@ def run_pizero(args):
                        'env_steps': env_steps})
 
         if env_steps % args.evaluation_interval == 0 and not args.debug_reanalyze:
-            avg_reward = eval_vectorized_mcts.evaluate()
-            print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
+            async_eval.send_queue.put(('evaluate', env_steps))
+
+        eval_result = async_eval.get_eval_results()
+        if eval_result:
+            eval_env_step, avg_reward = eval_result
+            print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
             wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
         obs.copy_(torch.from_numpy(next_obs))
