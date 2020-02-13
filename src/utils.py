@@ -42,6 +42,7 @@ def get_args():
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
     parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
+    parser.add_argument('--visit-temp', type=float, default=1.0, help='Visit counts softmax temperature for sampling actions')
 
     # PiZero arguments
     parser.add_argument('--training-interval', type=int, default=64,
@@ -52,7 +53,7 @@ def get_args():
     parser.add_argument('--lr-decay-steps', type=float, default=350.e3, help='Learning rate decay time constant')
     parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
-    parser.add_argument('--adam-eps', type=float, default=1e-4, help='Adam epsilon')
+    parser.add_argument('--adam-eps', type=float, default=1e-5, help='Adam epsilon')
     parser.add_argument('--weight-decay', type=float, default=1e-3, help='Weight decay regularization constant')
     parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
     parser.add_argument('--dynamics-blocks', type=int, default=16, help='# of resblocks in dynamics model')

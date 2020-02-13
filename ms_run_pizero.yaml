@@ -1,7 +1,7 @@
 description: AWM
 
 target:
-  cluster: eu1
+  cluster: sc3
   vc: msrlabs
 
 environment:
@@ -38,9 +38,9 @@ search:
       - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
       - pip install --user git+git://github.com/astooke/rlpyt
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
-      - python -m scripts.run_pizero --grayscale --game {game} {search-targets} --training-interval {training-interval} --batch-size 128 {nce} {envs} --num-simulations 10 --total-env-steps 5000000 {reanalyze} --target-update-interval {uti} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 1 --num-simulations 10 --c1 {c1} --evaluation-interval 80000
+      - python -m scripts.run_pizero --grayscale --game {game} {search-targets} --training-interval {training-interval} --batch-size 128 {nce} {envs} --num-simulations 10 --total-env-steps 5000000 {reanalyze} --target-update-interval {uti} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 10 --num-simulations 10 --c1 {c1} --evaluation-interval 80000 --visit-temp {visit-temp}
   type: grid
-  max_trials: 100
+  max_trials: 1
   params:
     - name: game
       spec: discrete
@@ -53,19 +53,22 @@ search:
       values: ['--num-envs 64 --num-workers 1']
     - name: reanalyze
       spec: discrete
-      values: ['--reanalyze  --num-reanalyze-workers 1', '']
+      values: ['--reanalyze  --num-reanalyze-workers 1 --num-reanalyze-envs 128 --debug-reanalyze', '']
     - name: uti
       spec: discrete
       values: [0]
     - name: multistep
       spec: discrete
-      values: [5]
+      values: [10]
     - name: training-interval
       spec: discrete
-      values: [32]
+      values: [64]
     - name: c1
       spec: discrete
-      values: [1.25, 2., 2.5, 3., 5., 10., 20.]
+      values: [1.25]
     - name: search-targets
       spec: discrete
       values: ['--no-search-value-targets', '']
+    - name: visit-temp
+      spec: discrete
+      values: [1.0]

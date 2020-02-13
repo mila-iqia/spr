@@ -23,6 +23,7 @@ class VectorizedMCTS:
         self.pb_c_init = args.c1
         self.root_exploration_fraction = 0.25
         self.root_dirichlet_alpha = 0.25
+        self.visit_temp = args.visit_temp
         self.device = args.device
         self.n_runs, self.n_sims = n_runs, args.num_simulations
         if eval:
@@ -211,21 +212,21 @@ class VectorizedMCTS:
         return torch.argmax(pb_c + normalized_q[:, :depth], dim=-1)
 
     def select_action(self):
-        t = self.visit_softmax_temperature()
+        t = self.visit_temp
         policy = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t))
         action = policy.sample()
         return action, policy
 
     def visit_softmax_temperature(self, training_steps=0):
         # TODO: Change the temperature schedule
-        if training_steps < 500e3:
-            return 1.0
-        elif training_steps < 750e3:
-            return 0.5
-        else:
-            return 0.25
+        return self.args.visit_temp
 
-    def evaluate(self):
+    def evaluate(self, env_step=None):
+        if 100e3 < env_step < 300e3:
+            self.visit_temp = 0.5
+
+        if env_step > 300e3:
+            self.visit_temp = 0.25
         env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)
         for e in env.envs:
             e.eval()
@@ -280,7 +281,7 @@ def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
         while True:
             command, env_step = send_queue.get()
             if command == 'evaluate':
-                avg_reward = eval_mcts.evaluate()
+                avg_reward = eval_mcts.evaluate(env_step)
                 recieve_queue.put(((env_step, avg_reward), True))
             else:
                 time.sleep(100.)
