@@ -9,7 +9,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from rlpyt.utils.collections import namedarraytuple
 from src.logging import update_trackers, reset_trackers
 import numpy as np
-from apex import amp
 import sys
 import traceback
 import gym
@@ -62,7 +61,7 @@ class TrainingWorker(object):
 
         self.squeue = squeue
         self.error_queue = error_queue
-        self.recieve_queue = receive_queue,
+        self.receive_queue = receive_queue
 
         self.args = args
         self.buffer = buffer
@@ -82,6 +81,7 @@ class TrainingWorker(object):
             self.squeue.put(self.model)
 
         if self.args.fp16:
+            from apex import amp
             amp.initialize(self.model, self.model.optimizer)
         if self.args.ddp:
             self.model = DDP(self.model, self.devices)

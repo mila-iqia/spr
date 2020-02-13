@@ -8,6 +8,7 @@ import wandb
 import matplotlib.pyplot as plt
 import io
 from PIL import Image
+import dill
 
 
 def get_args():
@@ -78,6 +79,7 @@ def get_args():
                         help='Evaluate after every {evaluation-interval} env steps')
     parser.add_argument('--log-interval', type=int, default=3200,
                         help='Evaluate after every {evaluation-interval} env steps')
+    parser.add_argument('--ddp', action='store_true')
 
     parser.add_argument('--wandb-proj', type=str, default='pizero')
     parser.add_argument('--name', type=str, default='')
@@ -200,3 +202,15 @@ def save_to_pil():
     im = Image.open(buf)
     im.load()
     return im
+
+class DillWrapper(object):
+    def __init__(self, x):
+        self.x = x
+
+    def __getstate__(self):
+        import dill
+        return dill.dumps(self.x)
+
+    def __setstate__(self, ob):
+        self.x = dill.loads(ob)
+

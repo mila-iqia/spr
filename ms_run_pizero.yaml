@@ -1,7 +1,7 @@
 description: AWM
 
 target:
-  cluster: sc3
+  cluster: eu2
   vc: msrlabs
 
 environment:
@@ -30,10 +30,11 @@ search:
       - export PATH=$$PATH:~/.local/bin
       - export LC_ALL=C.UTF-8
       - export LANG=C.UTF-8
-      - git clone https://github.com/NVIDIA/apex
-      - cd apex
-      - pip install --user -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
-      - cd ..
+#      - git clone https://github.com/NVIDIA/apex
+#      - cd apex
+#      - pip install --user -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
+#      - cd ..
+      - pip install --user dill
       - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly recordclass pyprind psutil
       - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
       - pip install --user git+git://github.com/astooke/rlpyt

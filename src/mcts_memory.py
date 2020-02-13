@@ -49,7 +49,7 @@ def initialize_replay_buffer(args):
         discount=args.discount,
         n_step_return=1,
     )
-    buffer = PrioritizedSequenceReplayFrameBuffer(**replay_kwargs)
+    buffer = AsyncPrioritizedSequenceReplayFrameBuffer(**replay_kwargs)
 
     return buffer
 

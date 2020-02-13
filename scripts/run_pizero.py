@@ -1,12 +1,11 @@
 from collections import deque
 import torch.multiprocessing as mp
 
-from gym.vector.utils import CloudpickleWrapper
 from src.async_mcts import AsyncMCTS
 from src.mcts_memory import LocalBuffer, initialize_replay_buffer, samples_to_buffer
 from src.model_trainer import TrainingWorker
 from src.async_reanalyze import AsyncReanalyze
-from src.utils import get_args
+from src.utils import get_args, DillWrapper
 from src.logging import log_results
 
 import os
@@ -35,7 +34,7 @@ def run_pizero(args):
                                 send_queue,
                                 error_queue,
                                 receive_queue,
-                                CloudpickleWrapper(buffer))
+                                DillWrapper(buffer))
         process = ctx.Process(target=worker.optimize, args=())
         process.start()
         receive_queues.append(receive_queue)
@@ -130,7 +129,7 @@ def run_pizero(args):
             total_train_steps = target_train_steps
 
         # Send a command to start training if ready
-        if args.env_steps*101 >= env_steps > args.num_envs*100:
+        if args.num_envs*101 >= env_steps > args.num_envs*100:
             [q.put("train") for q in receive_queues]
 
         if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
