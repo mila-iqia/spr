@@ -3,16 +3,19 @@ from torch.distributions import Categorical
 import torch
 from torch.nn import functional as F
 
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 from rlpyt.utils.collections import namedarraytuple
-from src.envs import get_example_outputs
-from src.mcts_memory import AsyncPrioritizedSequenceReplayFrameBufferExtended
+from src.logging import update_trackers, reset_trackers
 import numpy as np
-import wandb
 from apex import amp
+import sys
+import traceback
+import gym
+import os
 
 NetworkOutput = namedarraytuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
-SamplesToBuffer = namedarraytuple("SamplesToBuffer",
-                                  ["observation", "action", "reward", "done", "policy_probs", "value"])
 
 
 def init(module, weight_init, bias_init, gain=1):
@@ -21,79 +24,88 @@ def init(module, weight_init, bias_init, gain=1):
     return module
 
 
+def cleanup():
+    dist.destroy_process_group()
+
+
+def setup(rank, world_size, seed, backend):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # initialize the process group
+    dist.init_process_group(backend, rank=rank, world_size=world_size)
+
+    # Explicitly setting seed to make sure that models created in two processes
+    # start from same random weights and biases.
+    torch.manual_seed(seed)
+
+
+def create_network(args):
+    dummy_env = gym.vector.make('atari-v0', num_envs=1, args=args,
+                                asynchronous=False)
+    dummy_env.seed(args.seed)
+    model = MCTSModel(args, dummy_env.action_space[0].n)
+    model.to(args.device)
+    model.share_memory()
+    return model
+
+
 class TrainingWorker(object):
-    def __init__(self, args, model):
+    def __init__(self, rank, size, devices, args, squeue, error_queue,
+                     receive_queue, buffer, backend="gloo",):
         super().__init__()
-        self.model = model
+        self.devices = devices
+        self.size = size
+        self.rank = rank
+        self.backend = backend
+        self.buffer = buffer
+
+        self.squeue = squeue
+        self.error_queue = error_queue
+        self.recieve_queue = receive_queue,
+
         self.args = args
-        self.initialize_replay_buffer()
+        self.buffer = buffer
         self.maximum_length = args.jumps
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
         self.nce = LocalNCE() if not args.use_all_targets else BlockNCE()
         self.epochs_till_now = 0
 
-        self.train_trackers = dict()
-        self.val_trackers = dict()
-        self.reset_trackers("train")
-        self.reset_trackers("val")
+        self.train_trackers = reset_trackers(self.maximum_length)
 
-    def initialize_replay_buffer(self):
-        examples = get_example_outputs(self.args)
-        batch_size = self.args.num_envs
-        if self.args.reanalyze:
-            batch_size = batch_size + self.args.num_reanalyze_envs
-        example_to_buffer = SamplesToBuffer(
-            observation=examples["observation"],
-            action=examples["action"],
-            reward=examples["reward"],
-            done=examples["done"],
-            policy_probs=examples['policy_probs'],
-            value=examples['value']
-        )
-        replay_kwargs = dict(
-            example=example_to_buffer,
-            size=self.args.buffer_size,
-            B=batch_size,
-            batch_T=self.args.jumps+self.args.multistep+1, # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
-            rnn_state_interval=0,
-            discount=self.args.discount,
-            n_step_return=1
-        )
-        self.buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
+    def startup(self):
+        setup(self.rank, self.size, self.args.seed, self.backend)
+        self.buffer = self.buffer.fn
+        self.model = create_network(self.args)
+        if self.rank == 0:
+            self.squeue.put(self.model)
 
-    def samples_to_buffer(self, observation, action, reward, done, policy_probs, value):
-        return SamplesToBuffer(
-            observation=observation,
-            action=action,
-            reward=reward,
-            done=done,
-            policy_probs=policy_probs,
-            value=value
-        )
+        if self.args.fp16:
+            amp.initialize(self.model, self.model.optimizer)
+        if self.args.ddp:
+            self.model = DDP(self.model, self.devices)
 
-    def reset_trackers(self, mode="train"):
-        if mode == "train":
-            trackers = self.train_trackers
-        else:
-            trackers = self.val_trackers
-        trackers["epoch_losses"] = np.zeros(self.maximum_length+1)
-        trackers["value_losses"] = np.zeros(self.maximum_length+1)
-        trackers["policy_losses"] = np.zeros(self.maximum_length+1)
-        trackers["reward_losses"] = np.zeros(self.maximum_length+1)
-        trackers["nce_losses"] = np.zeros(self.maximum_length+1)
-        trackers["nce_accs"] = np.zeros(self.maximum_length+1)
-        trackers["value_errors"] = np.zeros(self.maximum_length+1)
-        trackers["reward_errors"] = np.zeros(self.maximum_length+1)
-        trackers["mean_pred_values"] = np.zeros(self.maximum_length+1)
-        trackers["mean_pred_rewards"] = np.zeros(self.maximum_length+1)
-        trackers["mean_target_values"] = np.zeros(self.maximum_length+1)
-        trackers["mean_target_rewards"] = np.zeros(self.maximum_length+1)
-        trackers["pred_entropy"] = np.zeros(self.maximum_length+1)
-        trackers["target_entropy"] = np.zeros(self.maximum_length+1)
-        trackers["iterations"] = 0
+    def optimize(worker):
+        worker.startup()
+        command = worker.receive_queue.get()
+        try:
+            while True:
+                if not worker.receive_queue.empty():
+                    command = worker.receive_queue.get()
+                    if not command:
+                        return
+                worker.train(worker.args.epoch_steps, log=worker.rank == 0)
+                if worker.rank == 0:
+                    worker.squeue.put((worker.epochs_till_now, worker.train_trackers))
+                    worker.train_trackers = reset_trackers(worker.maximum_length)
+        except (KeyboardInterrupt, Exception):
+            worker.error_queue.put((worker.rank,) + sys.exc_info())
+            traceback.print_exc()
+        finally:
+            return
 
-    def train(self, steps):
+    def train(self, steps, log=True):
 
         for step in range(steps):
             total_losses, reward_losses, nce_losses, nce_accs, policy_losses,\
@@ -101,177 +113,22 @@ class TrainingWorker(object):
             mean_rewards, target_rewards, pred_entropies, target_entropies\
                 = self.step()
 
-            self.update_trackers(reward_losses,
-                                 nce_losses,
-                                 nce_accs,
-                                 policy_losses,
-                                 value_losses,
-                                 total_losses,
-                                 value_errors,
-                                 reward_errors,
-                                 mean_values,
-                                 mean_rewards,
-                                 target_values,
-                                 target_rewards,
-                                 pred_entropies,
-                                 target_entropies)
-
-    def update_trackers(self,
-                        reward_losses,
-                        nce_losses,
-                        nce_accs,
-                        policy_losses,
-                        value_losses,
-                        epoch_losses,
-                        value_errors,
-                        reward_errors,
-                        pred_values,
-                        pred_rewards,
-                        target_values,
-                        target_rewards,
-                        pred_entropy,
-                        target_entropy,
-                        mode="train"):
-        if mode == "train":
-            trackers = self.train_trackers
-        else:
-            trackers = self.val_trackers
-
-        trackers["iterations"] += 1
-        trackers["nce_losses"] += np.array(nce_losses)
-        trackers["nce_accs"] += np.array(nce_accs)
-        trackers["reward_losses"] += np.array(reward_losses)
-        trackers["policy_losses"] += np.array(policy_losses)
-        trackers["value_losses"] += np.array(value_losses)
-        trackers["epoch_losses"] += np.array(epoch_losses)
-        trackers["value_errors"] += np.array(value_errors)
-        trackers["reward_errors"] += np.array(reward_errors)
-        trackers["mean_pred_values"] += np.array(pred_values)
-        trackers["mean_pred_rewards"] += np.array(pred_rewards)
-        trackers["mean_target_values"] += np.array(target_values)
-        trackers["mean_target_rewards"] += np.array(target_rewards)
-        trackers["pred_entropy"] += np.array(pred_entropy)
-        trackers["target_entropy"] += np.array(target_entropy)
-
-    def summarize_trackers(self, mode="train"):
-        if mode == "train":
-            trackers = self.train_trackers
-        else:
-            trackers = self.val_trackers
-
-        iterations = trackers["iterations"]
-        nce_losses = np.array(trackers["nce_losses"]/iterations)
-        nce_accs = np.array(trackers["nce_accs"]/iterations)
-        reward_losses = np.array(trackers["reward_losses"]/iterations)
-        policy_losses = np.array(trackers["policy_losses"]/iterations)
-        value_losses = np.array(trackers["value_losses"]/iterations)
-        epoch_losses = np.array(trackers["epoch_losses"]/iterations)
-        value_errors = np.array(trackers["value_errors"]/iterations)
-        reward_errors = np.array(trackers["reward_errors"]/iterations)
-        pred_values = np.array(trackers["mean_pred_values"]/iterations)
-        pred_rewards = np.array(trackers["mean_pred_rewards"]/iterations)
-        target_values = np.array(trackers["mean_target_values"]/iterations)
-        target_rewards = np.array(trackers["mean_target_rewards"]/iterations)
-        pred_entropy = np.array(trackers["pred_entropy"]/iterations)
-        target_entropy = np.array(trackers["target_entropy"]/iterations)
-
-        return nce_losses, nce_accs, reward_losses, value_losses, policy_losses,\
-               epoch_losses, value_errors, reward_errors, pred_values, \
-               target_values, pred_rewards, target_rewards, pred_entropy, \
-               target_entropy
-
-    def log_results(self,
-                    prefix='train',
-                    verbose_print=True,):
-
-        if prefix == "train":
-            trackers = self.train_trackers
-        else:
-            trackers = self.val_trackers
-        iterations = trackers["iterations"]
-        if iterations == 0:
-            # We did nothing since the last log, so just quit.
-            self.reset_trackers(prefix)
-            return
-
-        nce_losses, nce_accs, reward_losses, value_losses, policy_losses, \
-        epoch_losses, value_errors, reward_errors, pred_values, target_values,\
-        pred_rewards, target_rewards, pred_entropies, target_entropies = self.summarize_trackers(prefix)
-
-        self.reset_trackers(prefix)
-        print(
-            "{} Epoch: {}, Epoch L.: {:.3f}, NCE L.: {:.3f}, NCE A.: {:.3f}, Rew. L.: {:.3f}, Policy L.: {:.3f}, Val L.: {:.3f}, Rew. E.: {:.3f}, P. Rews {:.3f}, T._Rs. {:.3f}, Val E.: {:.3f}, P. Vs. {:.3f}, T._Vs. {:.3f},  P. Ents. {:.3f}, T. Ents. {:.3f}".format(
-                prefix.capitalize(),
-                self.epochs_till_now,
-                np.mean(epoch_losses),
-                np.mean(nce_losses),
-                np.mean(nce_accs),
-                np.mean(reward_losses),
-                np.mean(policy_losses),
-                np.mean(value_losses),
-                np.mean(reward_errors),
-                np.mean(pred_rewards),
-                np.mean(target_rewards),
-                np.mean(value_errors),
-                np.mean(pred_values),
-                np.mean(target_values),
-                np.mean(pred_entropies),
-                np.mean(target_entropies),
-            ))
-
-        for i in range(self.maximum_length + 1):
-            jump = i
-            if verbose_print:
-                print(
-                    "{} Jump: {}, Epoch L.: {:.3f}, NCE L.: {:.3f}, NCE A.: {:.3f}, Rew. L.: {:.3f}, Policy L.: {:.3f}, Val L.: {:.3f}, Rew. E.: {:.3f}, P. Rs. {:.3f}, T._Rs. {:.3f}, Val E.: {:.3f}, P. Vs. {:.3f}, T._Vs. {:.3f},  P. Ents. {:.3f}, T. Ents. {:.3f}".format(
-                        prefix.capitalize(),
-                        jump,
-                        epoch_losses[i],
-                        nce_losses[i],
-                        nce_accs[i],
-                        reward_losses[i],
-                        policy_losses[i],
-                        value_losses[i],
-                        reward_errors[i],
-                        pred_rewards[i],
-                        target_rewards[i],
-                        value_errors[i],
-                        pred_values[i],
-                        target_values[i],
-                        pred_entropies[i],
-                        target_entropies[i]))
-
-            wandb.log({prefix + 'Jump {} loss'.format(jump): epoch_losses[i],
-                       prefix + 'Jump {} NCE loss'.format(jump): nce_losses[i],
-                       prefix + 'Jump {} NCE acc'.format(jump): nce_accs[i],
-                       prefix + "Jump {} Reward Loss".format(jump): reward_losses[i],
-                       prefix + 'Jump {} Value Loss'.format(jump): value_losses[i],
-                       prefix + "Jump {} Reward Error".format(jump): reward_errors[i],
-                       prefix + "Jump {} Policy loss".format(jump): policy_losses[i],
-                       prefix + "Jump {} Value Error".format(jump): value_errors[i],
-                       prefix + "Jump {} Pred Rewards".format(jump): pred_rewards[i],
-                       prefix + "Jump {} Target Rewards".format(jump): target_rewards[i],
-                       prefix + "Jump {} Pred Values".format(jump): pred_values[i],
-                       prefix + "Jump {} Target Values".format(jump): target_values[i],
-                       prefix + "Jump {} Pred Entropies".format(jump): pred_entropies[i],
-                       prefix + "Jump {} Target Entropies".format(jump): target_entropies[i],
-                       'FM epoch': self.epochs_till_now})
-
-        wandb.log({prefix + ' loss': np.mean(epoch_losses),
-                   prefix + ' NCE loss': np.mean(nce_losses),
-                   prefix + ' NCE acc': np.mean(nce_accs),
-                   prefix + " Reward Loss": np.mean(reward_losses),
-                   prefix + ' Value Loss': np.mean(value_losses),
-                   prefix + " Reward Error": np.mean(reward_errors),
-                   prefix + " Policy loss": np.mean(policy_losses),
-                   prefix + " Value Error": np.mean(value_errors),
-                   prefix + " Pred Rewards".format(jump): np.mean(pred_rewards),
-                   prefix + " Pred Values".format(jump): np.mean(pred_values),
-                   prefix + " Target Rewards".format(jump): np.mean(target_rewards),
-                   prefix + " Target Values".format(jump): np.mean(target_values),
-                   prefix + " Pred Entropies".format(jump): np.mean(pred_entropies),
-                   prefix + " Target Entropies".format(jump): np.mean(target_entropies),
-                   'FM epoch': self.epochs_till_now})
+            if log:
+                update_trackers(self.train_trackers,
+                                reward_losses,
+                                nce_losses,
+                                nce_accs,
+                                policy_losses,
+                                value_losses,
+                                total_losses,
+                                value_errors,
+                                reward_errors,
+                                mean_values,
+                                mean_rewards,
+                                target_values,
+                                target_rewards,
+                                pred_entropies,
+                                target_entropies)
 
     def step(self, step=True):
         """
@@ -575,7 +432,7 @@ class MCTSModel(nn.Module):
                                                   num_actions=num_actions,
                                                   blocks=args.dynamics_blocks,
                                                   args=args)
-        self.value_model = ValueNetwork(args.hidden_size, init_weight_scale=args.init_value_scale)
+        self.value_model = ValueNetwork(args.hidden_size)
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         self.target_encoder = SmallEncoder(args)
@@ -697,8 +554,7 @@ class TransitionModel(nn.Module):
         self.action_embedding = nn.Embedding(num_actions, latent_size*action_dim)
 
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = ValueNetwork(channels,
-                                             init_weight_scale=args.init_value_scale)
+        self.reward_predictor = ValueNetwork(channels)
         self.train()
 
     def _make_layer(self, in_channels, depth):
@@ -860,12 +716,9 @@ class QNetwork(nn.Module):
 
 
 class ValueNetwork(nn.Module):
-    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300,
-                 init_weight_scale=1.):
+    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300):
         super().__init__()
         self.hidden_size = hidden_size
-        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
-                               constant_(x, 0), gain=nn.init.calculate_gain('relu'))
         init_2 = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
                                constant_(x, 0), gain=0.01)
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
@@ -875,8 +728,6 @@ class ValueNetwork(nn.Module):
                   nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
                   init_2(nn.Linear(256, limit*2 + 1))]
-        # with torch.no_grad():
-        #     layers[-1].weight *= init_weight_scale
         self.network = nn.Sequential(*layers)
         self.train()
 
@@ -888,11 +739,10 @@ class PolicyNetwork(nn.Module):
     def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
         super().__init__()
         self.hidden_size = hidden_size
-        init_ = lambda m: init(
-            m,
-            nn.init.orthogonal_,
-            lambda x: nn.init.constant_(x, 0),
-            gain=0.01)
+        init_ = lambda m: init(m,
+                               nn.init.orthogonal_,
+                               lambda x: nn.init.constant_(x, 0),
+                               gain=0.01)
         layers = [Conv2dSame(input_channels, hidden_size, 3),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
