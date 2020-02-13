@@ -124,7 +124,19 @@ class AsyncReanalyze:
             results = [p.sample_for_reanalysis() for p in self.processes]
             successes = [True]*len(self.processes)
         else:
-            results, successes = zip(*[receive_queue.get() for receive_queue in self.receive_queues])
+            successes = []
+            results = []
+            for q in self.receive_queues:
+                result = None
+                while not result:
+                    try:
+                        result, success = q.receive()
+                    except:
+                        traceback.print_exc()
+                    finally:
+                        results.append(result)
+                        successes.append(success)
+
         self._raise_if_errors(successes)
 
         obs, actions, reward, done, policy_probs, values = map(torch.cat, zip(*results))
