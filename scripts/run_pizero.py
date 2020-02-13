@@ -132,7 +132,15 @@ def run_pizero(args):
                 print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
                 wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
-        if env_steps % args.evaluation_interval == 0 and not args.debug_reanalyze:
+        if 100e3 < env_steps < 300e3:
+            vectorized_mcts.visit_temp = 0.5
+            eval_vectorized_mcts.visit_temp = 0.5
+
+        if env_steps > 300e3:
+            vectorized_mcts.visit_temp = 0.25
+            eval_vectorized_mcts.visit_temp = 0.25
+
+        if env_steps % args.evaluation_interval == 0 and env_steps > 0:
             async_eval.send_queue.put(('evaluate', env_steps))
 
         obs.copy_(torch.from_numpy(next_obs))
@@ -141,7 +149,7 @@ def run_pizero(args):
 
 if __name__ == '__main__':
     args = get_args()
-    tags = []
+    tags = ['']
     try:
         if len(args.name) == 0:
             run = wandb.init(project=args.wandb_proj,
