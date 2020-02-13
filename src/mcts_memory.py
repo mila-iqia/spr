@@ -5,10 +5,12 @@ import numpy as np
 import torch
 from recordclass import recordclass
 
+from src.envs import get_example_outputs
+
 from rlpyt.replays.non_sequence.frame import AsyncPrioritizedReplayFrameBuffer
 from rlpyt.replays.sequence.n_step import SamplesFromReplay
 from rlpyt.replays.sequence.frame import AsyncPrioritizedSequenceReplayFrameBuffer, \
-    AsyncUniformSequenceReplayFrameBuffer
+    AsyncUniformSequenceReplayFrameBuffer, PrioritizedSequenceReplayFrameBuffer
 from rlpyt.utils.buffer import torchify_buffer
 from rlpyt.utils.collections import namedarraytuple
 from rlpyt.utils.misc import extract_sequences
@@ -17,9 +19,50 @@ Transition = recordclass('Transition', ('timestep', 'state', 'action', 'reward',
 blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)  # TODO: Set appropriate default policy value
 blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)
 
+SamplesToBuffer = namedarraytuple("SamplesToBuffer",
+                                  ["observation", "action", "reward", "done", "policy_probs", "value"])
 SamplesFromReplayPriExt = namedarraytuple("SamplesFromReplayPriExt",
                                        SamplesFromReplay._fields + ("policy_probs", "values"))
 EPS = 1e-6
+
+
+def initialize_replay_buffer(args):
+    examples = get_example_outputs(args)
+    batch_size = args.num_envs
+    if args.reanalyze:
+        batch_size = batch_size + args.num_reanalyze_envs
+    example_to_buffer = SamplesToBuffer(
+        observation=examples["observation"],
+        action=examples["action"],
+        reward=examples["reward"],
+        done=examples["done"],
+        policy_probs=examples['policy_probs'],
+        value=examples['value']
+    )
+    replay_kwargs = dict(
+        example=example_to_buffer,
+        size=args.buffer_size,
+        B=batch_size,
+        batch_T=args.jumps + args.multistep + 1,
+        # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
+        rnn_state_interval=0,
+        discount=args.discount,
+        n_step_return=1,
+    )
+    buffer = PrioritizedSequenceReplayFrameBuffer(**replay_kwargs)
+
+    return buffer
+
+
+def samples_to_buffer(observation, action, reward, done, policy_probs, value):
+    return SamplesToBuffer(
+        observation=observation,
+        action=action,
+        reward=reward,
+        done=done,
+        policy_probs=policy_probs,
+        value=value
+    )
 
 
 class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFrameBuffer):
