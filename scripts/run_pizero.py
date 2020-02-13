@@ -1,50 +1,65 @@
 from collections import deque
-from multiprocessing import Queue
+import torch.multiprocessing as mp
 
+from gym.vector.utils import CloudpickleWrapper
 from src.async_mcts import AsyncMCTS
-from src.mcts_memory import LocalBuffer
+from src.mcts_memory import LocalBuffer, initialize_replay_buffer, samples_to_buffer
 from src.model_trainer import TrainingWorker
-from src.pizero import PiZero
 from src.async_reanalyze import AsyncReanalyze
 from src.utils import get_args
+from src.logging import log_results
 
 import os
 import copy
 import torch
 import wandb
 import numpy as np
-from apex import amp
-import time
 import gym
 
 from src.vectorized_mcts import VectorizedMCTS
 
 
 def run_pizero(args):
-    pizero = PiZero(args)
+    buffer = initialize_replay_buffer(args)
+    devices = torch.cuda.device_count()
+    ctx = mp.get_context("spawn")
+    error_queue = ctx.Queue()
+    send_queue = ctx.Queue()
+    receive_queues = []
+    for i in range(devices):
+        receive_queue = mp.Queue()
+        worker = TrainingWorker(i,
+                                devices,
+                                devices,
+                                args,
+                                send_queue,
+                                error_queue,
+                                receive_queue,
+                                CloudpickleWrapper(buffer))
+        process = ctx.Process(target=worker.optimize, args=())
+        process.start()
+        receive_queues.append(receive_queue)
 
-    env_steps = 0
-    training_worker = TrainingWorker(args, model=pizero.network)
-
+    # Need to get the target network from the training agent that created it.
+    network = send_queue.get(block=True, timeout=None)
     if args.target_update_interval > 0:
-        target_network = copy.deepcopy(pizero.network)
+        target_network = copy.deepcopy(network)
     else:
-        target_network = pizero.network
+        target_network = network
     target_network.share_memory()
 
-    if args.fp16:
-        amp.initialize([pizero.network, target_network],
-                       pizero.network.optimizer)
     if args.reanalyze:
         async_reanalyze = AsyncReanalyze(args, target_network, debug=args.debug_reanalyze)
 
     local_buf = LocalBuffer()
+    env_steps = 0
     eprets = np.zeros(args.num_envs, 'f')
     episode_rewards = deque(maxlen=10)
     wandb.log({'env_steps': 0})
 
     env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
                           asynchronous=not args.sync_envs)
+
     # TODO return int observations
     obs = env.reset()
     obs = torch.from_numpy(obs)
@@ -95,30 +110,27 @@ def run_pizero(args):
 
         if env_steps % args.jumps == 0 and env_steps > 0:
             # Send transitions from the local buffer to the replay buffer
-            samples_to_buffer = training_worker.samples_to_buffer(*local_buf.stack())
-            training_worker.buffer.append_samples(samples_to_buffer)
+            buffer.append_samples(samples_to_buffer(*local_buf.stack()))
             local_buf.clear()
 
-        if env_steps % args.training_interval == 0 and env_steps > args.num_envs*100:
-            target_train_steps = env_steps // args.training_interval
-            steps = target_train_steps - total_train_steps
-            training_worker.train(steps)  # TODO: Make this async
+        if not send_queue.empty():
+            steps, log = send_queue.get()
+            log_results(log, steps)
+            target_train_steps = steps
 
-            if ((total_train_steps % args.epoch_steps >
-                 target_train_steps % args.epoch_steps) or
-                 steps >= args.epoch_steps):
-
-                training_worker.log_results()
-
-            # Need to be careful when we check whether or not to reset:
             if (args.target_update_interval > 0 and
                 (total_train_steps % args.target_update_interval >
                  target_train_steps % args.target_update_interval or
-                 steps >= args.target_update_interval)):
+                 target_train_steps - total_train_steps >=
+                 args.target_update_interval)):
 
                 print("Updated target weights at step {}".format(target_train_steps))
-                target_network.load_state_dict(pizero.network.state_dict())
+                target_network.load_state_dict(network.state_dict())
             total_train_steps = target_train_steps
+
+        # Send a command to start training if ready
+        if args.env_steps*101 >= env_steps > args.num_envs*100:
+            [q.put("train") for q in receive_queues]
 
         if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
             print('Env Steps: {}, Mean Reward: {}, Median Reward: {}'.format(env_steps, np.mean(episode_rewards),
