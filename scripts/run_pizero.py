@@ -15,6 +15,7 @@ import torch
 import wandb
 import numpy as np
 import gym
+import dill
 
 from src.vectorized_mcts import VectorizedMCTS
 
@@ -34,9 +35,8 @@ def run_pizero(args):
                                 args,
                                 send_queue,
                                 error_queue,
-                                receive_queue,
-                                CloudpickleWrapper(buffer))
-        process = ctx.Process(target=worker.optimize, args=())
+                                receive_queue)
+        process = ctx.Process(target=worker.optimize, args=(None,))
         process.start()
         receive_queues.append(receive_queue)
 
