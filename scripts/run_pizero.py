@@ -26,7 +26,7 @@ def run_pizero(args):
     send_queue = ctx.Queue()
     receive_queues = []
     for i in range(devices):
-        receive_queue = mp.Queue()
+        receive_queue = ctx.Queue()
         worker = TrainingWorker(i,
                                 devices,
                                 devices,
