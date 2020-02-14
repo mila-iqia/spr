@@ -21,6 +21,7 @@ def get_args():
     parser.add_argument('--sync-envs', action='store_true')
     parser.add_argument('--debug-reanalyze', action='store_true')
     parser.add_argument('--fp16', action='store_true')
+    parser.add_argument('--ddp', action='store_true')
     parser.add_argument('--buffer-size', type=int, default=100000)
     parser.add_argument('--target-update-interval', type=int, default=1000,
                         help="Number of gradient steps for each update to the "

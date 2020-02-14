@@ -14,6 +14,7 @@ import sys
 import traceback
 import gym
 import os
+import dill
 
 NetworkOutput = namedarraytuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 
@@ -52,20 +53,18 @@ def create_network(args):
 
 class TrainingWorker(object):
     def __init__(self, rank, size, devices, args, squeue, error_queue,
-                     receive_queue, buffer, backend="gloo",):
+                     receive_queue,  backend="gloo",):
         super().__init__()
         self.devices = devices
         self.size = size
         self.rank = rank
         self.backend = backend
-        self.buffer = buffer
 
         self.squeue = squeue
         self.error_queue = error_queue
-        self.recieve_queue = receive_queue,
+        self.receive_queue = receive_queue,
 
         self.args = args
-        self.buffer = buffer
         self.maximum_length = args.jumps
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
@@ -74,9 +73,9 @@ class TrainingWorker(object):
 
         self.train_trackers = reset_trackers(self.maximum_length)
 
-    def startup(self):
+    def startup(self, buffer):
         setup(self.rank, self.size, self.args.seed, self.backend)
-        self.buffer = self.buffer.fn
+        self.buffer = buffer
         self.model = create_network(self.args)
         if self.rank == 0:
             self.squeue.put(self.model)
@@ -86,21 +85,21 @@ class TrainingWorker(object):
         if self.args.ddp:
             self.model = DDP(self.model, self.devices)
 
-    def optimize(worker):
-        worker.startup()
-        command = worker.receive_queue.get()
+    def optimize(self, buffer):
+        self.startup(buffer)
+        command = self.receive_queue.get()
         try:
             while True:
-                if not worker.receive_queue.empty():
-                    command = worker.receive_queue.get()
+                if not self.receive_queue.empty():
+                    command = self.receive_queue.get()
                     if not command:
                         return
-                worker.train(worker.args.epoch_steps, log=worker.rank == 0)
-                if worker.rank == 0:
-                    worker.squeue.put((worker.epochs_till_now, worker.train_trackers))
-                    worker.train_trackers = reset_trackers(worker.maximum_length)
+                self.train(self.args.epoch_steps, log=self.rank == 0)
+                if self.rank == 0:
+                    self.squeue.put((self.epochs_till_now, self.train_trackers))
+                    self.train_trackers = reset_trackers(self.maximum_length)
         except (KeyboardInterrupt, Exception):
-            worker.error_queue.put((worker.rank,) + sys.exc_info())
+            self.error_queue.put((self.rank,) + sys.exc_info())
             traceback.print_exc()
         finally:
             return
