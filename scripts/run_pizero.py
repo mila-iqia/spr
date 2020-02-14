@@ -1,12 +1,11 @@
 from collections import deque
 import torch.multiprocessing as mp
 
-from gym.vector.utils import CloudpickleWrapper
 from src.async_mcts import AsyncMCTS
 from src.mcts_memory import LocalBuffer, initialize_replay_buffer, samples_to_buffer
 from src.model_trainer import TrainingWorker
 from src.async_reanalyze import AsyncReanalyze
-from src.utils import get_args
+from src.utils import get_args, DillWrapper
 from src.logging import log_results
 
 import os
@@ -17,26 +16,25 @@ import numpy as np
 import gym
 import dill
 
-from src.vectorized_mcts import VectorizedMCTS
+from src.vectorized_mcts import VectorizedMCTS, AsyncEval
 
 
 def run_pizero(args):
     buffer = initialize_replay_buffer(args)
-    devices = torch.cuda.device_count()
-    ctx = mp.get_context("spawn")
+    ctx = mp.get_context("fork")
     error_queue = ctx.Queue()
     send_queue = ctx.Queue()
     receive_queues = []
-    for i in range(devices):
+    for i in range(args.num_trainers):
         receive_queue = mp.Queue()
         worker = TrainingWorker(i,
-                                devices,
-                                devices,
+                                args.num_trainers,
                                 args,
                                 send_queue,
                                 error_queue,
                                 receive_queue)
-        process = ctx.Process(target=worker.optimize, args=(None,))
+        process = ctx.Process(target=worker.optimize, args=(
+                                DillWrapper(buffer),))
         process.start()
         receive_queues.append(receive_queue)
 
@@ -65,6 +63,7 @@ def run_pizero(args):
     obs = torch.from_numpy(obs)
     vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
     eval_vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.evaluation_episodes, target_network, eval=True)
+    async_eval = AsyncEval(eval_vectorized_mcts)
     total_episodes = 0.
     total_train_steps = 0
     while env_steps < args.total_env_steps:
@@ -129,7 +128,7 @@ def run_pizero(args):
             total_train_steps = target_train_steps
 
         # Send a command to start training if ready
-        if args.env_steps*101 >= env_steps > args.num_envs*100:
+        if args.num_envs*101 >= env_steps > args.num_envs*100:
             [q.put("train") for q in receive_queues]
 
         if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
@@ -137,11 +136,22 @@ def run_pizero(args):
                                                                              np.median(episode_rewards)))
             wandb.log({'Mean Reward': np.mean(episode_rewards), 'Median Reward': np.median(episode_rewards),
                        'env_steps': env_steps})
+            eval_result = async_eval.get_eval_results()
+            if eval_result:
+                eval_env_step, avg_reward = eval_result
+                print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
+                wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
-        if env_steps % args.evaluation_interval == 0 and not args.debug_reanalyze:
-            avg_reward = eval_vectorized_mcts.evaluate()
-            print('Env steps: {}, Avg_Reward: {}'.format(env_steps, avg_reward))
-            wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
+        if 100e3 < env_steps < 300e3:
+            vectorized_mcts.visit_temp = 0.5
+            eval_vectorized_mcts.visit_temp = 0.5
+
+        if env_steps > 300e3:
+            vectorized_mcts.visit_temp = 0.25
+            eval_vectorized_mcts.visit_temp = 0.25
+
+        if env_steps % args.evaluation_interval == 0 and env_steps > 0:
+            async_eval.send_queue.put(('evaluate', env_steps))
 
         obs.copy_(torch.from_numpy(next_obs))
         env_steps += args.num_envs
@@ -149,7 +159,7 @@ def run_pizero(args):
 
 if __name__ == '__main__':
     args = get_args()
-    tags = []
+    tags = ['']
     try:
         if len(args.name) == 0:
             run = wandb.init(project=args.wandb_proj,

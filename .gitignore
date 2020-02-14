@@ -107,4 +107,6 @@ venv.bak/
 .idea
 *.pt
 tmp/
-wandb/
+wandb
+philly/
+results/
