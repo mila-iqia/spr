@@ -75,7 +75,7 @@ class TrainingWorker(object):
 
     def startup(self):
         setup(self.rank, self.size, self.args.seed, self.backend)
-        self.buffer = self.buffer.fn
+        self.buffer = self.buffer.x
         self.model = create_network(self.args)
         if self.rank == 0:
             self.squeue.put(self.model)
