@@ -9,7 +9,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from rlpyt.utils.collections import namedarraytuple
 from src.logging import update_trackers, reset_trackers
 import numpy as np
-from apex import amp
 import sys
 import traceback
 import gym
@@ -52,19 +51,18 @@ def create_network(args):
 
 
 class TrainingWorker(object):
-    def __init__(self, rank, size, devices, args, squeue, error_queue,
+    def __init__(self, rank, size, args, squeue, error_queue,
                      receive_queue,  backend="gloo",):
         super().__init__()
-        self.devices = devices
+        self.args = args
         self.size = size
         self.rank = rank
         self.backend = backend
 
         self.squeue = squeue
         self.error_queue = error_queue
-        self.receive_queue = receive_queue,
+        self.receive_queue = receive_queue
 
-        self.args = args
         self.maximum_length = args.jumps
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
@@ -74,13 +72,18 @@ class TrainingWorker(object):
         self.train_trackers = reset_trackers(self.maximum_length)
 
     def startup(self, buffer):
+        torch.cuda.init()
+        self.devices = torch.cuda.device_count()
+        self.args.device = self.rank % self.devices
+        print(self.args.device)
         setup(self.rank, self.size, self.args.seed, self.backend)
-        self.buffer = buffer
+        self.buffer = buffer.x
         self.model = create_network(self.args)
         if self.rank == 0:
             self.squeue.put(self.model)
 
         if self.args.fp16:
+            from apex import amp
             amp.initialize(self.model, self.model.optimizer)
         if self.args.ddp:
             self.model = DDP(self.model, self.devices)
@@ -719,7 +722,7 @@ class ValueNetwork(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         init_2 = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
-                               constant_(x, 0))
+                               constant_(x, 0), gain=0.01)
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),

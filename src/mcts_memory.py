@@ -50,7 +50,6 @@ def initialize_replay_buffer(args):
         n_step_return=1,
     )
     buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
-
     return buffer
 
 

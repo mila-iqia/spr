@@ -8,6 +8,7 @@ import wandb
 import matplotlib.pyplot as plt
 import io
 from PIL import Image
+import dill
 
 
 def get_args():
@@ -15,6 +16,7 @@ def get_args():
     parser.add_argument('--total-env-steps', type=int, default=1000000,
                         help='Total number to env steps to train (default: 100000)')
     parser.add_argument('--num-envs', type=int, default=64, help='Number of parallel envs to run')
+    parser.add_argument('--num-trainers', type=int, default=1, help='Number of training workers')
     parser.add_argument('--num-reanalyze-envs', type=int, default=64, help='Number of parallel envs to run')
     parser.add_argument('--num-workers', type=int, default=1, help='Number of parallel envs to run')
     parser.add_argument('--num-reanalyze-workers', type=int, default=1, help='Number of parallel envs to run')
@@ -43,6 +45,7 @@ def get_args():
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
     parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
+    parser.add_argument('--visit-temp', type=float, default=1.0, help='Visit counts softmax temperature for sampling actions')
 
     # PiZero arguments
     parser.add_argument('--training-interval', type=int, default=64,
@@ -53,7 +56,7 @@ def get_args():
     parser.add_argument('--lr-decay-steps', type=float, default=350.e3, help='Learning rate decay time constant')
     parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
-    parser.add_argument('--adam-eps', type=float, default=1e-4, help='Adam epsilon')
+    parser.add_argument('--adam-eps', type=float, default=1e-5, help='Adam epsilon')
     parser.add_argument('--weight-decay', type=float, default=1e-3, help='Weight decay regularization constant')
     parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
     parser.add_argument('--dynamics-blocks', type=int, default=16, help='# of resblocks in dynamics model')
@@ -76,7 +79,7 @@ def get_args():
     parser.add_argument('--no-search-value-targets', action='store_true')
     parser.add_argument('--evaluation-interval', type=int, default=100000,
                         help='Evaluate after every {evaluation-interval} env steps')
-    parser.add_argument('--log-interval', type=int, default=4000,
+    parser.add_argument('--log-interval', type=int, default=3200,
                         help='Evaluate after every {evaluation-interval} env steps')
 
     parser.add_argument('--wandb-proj', type=str, default='pizero')
@@ -200,3 +203,15 @@ def save_to_pil():
     im = Image.open(buf)
     im.load()
     return im
+
+class DillWrapper(object):
+    def __init__(self, x):
+        self.x = x
+
+    def __getstate__(self):
+        import dill
+        return dill.dumps(self.x)
+
+    def __setstate__(self, ob):
+        self.x = dill.loads(ob)
+
