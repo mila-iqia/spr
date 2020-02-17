@@ -27,11 +27,10 @@ def torch_set_device(args):
 
 
 def run_pizero(args):
-    buffer, lock = initialize_replay_buffer(args)
+    buffer = initialize_replay_buffer(args)
     ctx = mp.get_context("fork")
     error_queue = ctx.Queue()
     send_queue = ctx.Queue()
-    buffer.rw_lock = lock
     receive_queues = []
     for i in range(args.num_trainers):
         receive_queue = ctx.Queue()
@@ -42,7 +41,7 @@ def run_pizero(args):
                                 error_queue,
                                 receive_queue)
         process = ctx.Process(target=worker.optimize,
-                              args=(lock, DillWrapper(buffer)))
+                              args=(DillWrapper(buffer),))
         process.start()
         receive_queues.append(receive_queue)
 
@@ -71,7 +70,11 @@ def run_pizero(args):
     obs = env.reset()
     obs = torch.from_numpy(obs)
     vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
-    eval_vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.evaluation_episodes, target_network, eval=True)
+    eval_vectorized_mcts = VectorizedMCTS(args,
+                                          env.action_space[0].n,
+                                          args.evaluation_episodes,
+                                          target_network,
+                                          eval=True)
     async_eval = AsyncEval(eval_vectorized_mcts)
     total_episodes = 0
     total_train_steps = 0
@@ -159,7 +162,7 @@ def run_pizero(args):
             vectorized_mcts.visit_temp = 0.25
             eval_vectorized_mcts.visit_temp = 0.25
 
-        if env_steps % args.evaluation_interval == 0 and env_steps > 0:
+        if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
             async_eval.send_queue.put(('evaluate', env_steps))
 
         obs.copy_(torch.from_numpy(next_obs))
