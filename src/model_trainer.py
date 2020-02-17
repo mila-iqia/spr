@@ -29,7 +29,7 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def setup(rank, world_size, seed, backend):
+def setup(rank, world_size, seed, backend="nccl"):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
 
@@ -53,7 +53,7 @@ def create_network(args):
 
 class TrainingWorker(object):
     def __init__(self, rank, size, args, squeue, error_queue,
-                     receive_queue,  backend="gloo",):
+                     receive_queue,  backend="nccl",):
         super().__init__()
         self.args = args
         self.size = size
@@ -77,6 +77,7 @@ class TrainingWorker(object):
             self.devices = torch.cuda.device_count()
             device_id = self.rank % self.devices
             self.args.device = torch.device('cuda:{}'.format(device_id))
+            torch.cuda.set_device(self.args.device)
             torch.cuda.manual_seed(self.args.seed)
             torch.backends.cudnn.enabled = True
         else:
@@ -91,11 +92,12 @@ class TrainingWorker(object):
             from apex import amp
             amp.initialize(self.model, self.model.optimizer)
         if self.args.ddp:
-            self.model = DDP(self.model, self.devices)
+            self.model = DDP(self.model,
+                             device_ids=[self.args.device],
+                             output_device=self.args.device)
 
     def optimize(self, buffer):
-        with open("buffer.pkl", "rb") as f:
-            self.buffer = buffer.x
+        self.buffer = buffer.x
         self.startup()
         _ = self.receive_queue.get()
         try:
