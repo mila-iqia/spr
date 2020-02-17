@@ -8,6 +8,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from rlpyt.utils.collections import namedarraytuple
 from src.logging import update_trackers, reset_trackers
+from src.mcts_memory import AsyncPrioritizedSequenceReplayFrameBufferExtended, initialize_replay_buffer
 import numpy as np
 import sys
 import traceback
@@ -71,13 +72,17 @@ class TrainingWorker(object):
 
         self.train_trackers = reset_trackers(self.maximum_length)
 
-    def startup(self, buffer):
-        torch.cuda.init()
-        self.devices = torch.cuda.device_count()
-        self.args.device = self.rank % self.devices
-        print(self.args.device)
+    def startup(self):
+        if torch.cuda.is_available():
+            self.devices = torch.cuda.device_count()
+            device_id = self.rank % self.devices
+            self.args.device = torch.device('cuda:{}'.format(device_id))
+            torch.cuda.manual_seed(self.args.seed)
+            torch.backends.cudnn.enabled = True
+        else:
+            self.args.device = torch.device('cpu')
+
         setup(self.rank, self.size, self.args.seed, self.backend)
-        self.buffer = buffer.x
         self.model = create_network(self.args)
         if self.rank == 0:
             self.squeue.put(self.model)
@@ -88,9 +93,12 @@ class TrainingWorker(object):
         if self.args.ddp:
             self.model = DDP(self.model, self.devices)
 
-    def optimize(self, buffer):
-        self.startup(buffer)
-        command = self.receive_queue.get()
+    def optimize(self, lock, buffer):
+        with open("buffer.pkl", "rb") as f:
+            self.buffer = buffer.x
+        self.buffer.rw_lock = lock
+        self.startup()
+        _ = self.receive_queue.get()
         try:
             while True:
                 if not self.receive_queue.empty():
