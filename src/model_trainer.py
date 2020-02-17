@@ -7,6 +7,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from rlpyt.utils.collections import namedarraytuple
+from rlpyt.utils.synchronize import find_port
 from src.logging import update_trackers, reset_trackers
 from src.mcts_memory import AsyncPrioritizedSequenceReplayFrameBufferExtended, initialize_replay_buffer
 import numpy as np
@@ -15,6 +16,12 @@ import traceback
 import gym
 import os
 import dill
+
+try:
+    from apex import amp
+except ModuleNotFoundError as e:
+    print("Could not import AMP: mixed precision will fail.")
+
 
 NetworkOutput = namedarraytuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 
@@ -29,12 +36,16 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def setup(rank, world_size, seed, backend="nccl"):
+def setup(rank, world_size, seed, port, backend="nccl"):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
 
     # initialize the process group
-    dist.init_process_group(backend, rank=rank, world_size=world_size)
+    dist.init_process_group(backend,
+                            rank=rank,
+                            world_size=world_size,
+                            init_method=f"tcp://127.0.0.1:{port}",
+                            )
 
     # Explicitly setting seed to make sure that models created in two processes
     # start from same random weights and biases.
@@ -52,24 +63,25 @@ def create_network(args):
 
 
 class TrainingWorker(object):
-    def __init__(self, rank, size, args, squeue, error_queue,
+    def __init__(self, rank, size, args, port, squeue, error_queue,
                      receive_queue,  backend="nccl",):
         super().__init__()
         self.args = args
         self.size = size
         self.rank = rank
         self.backend = backend
+        self.port = port
 
         self.squeue = squeue
         self.error_queue = error_queue
         self.receive_queue = receive_queue
 
+        self.epochs_till_now = 0
+
         self.maximum_length = args.jumps
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
         self.nce = LocalNCE() if not args.use_all_targets else BlockNCE()
-        self.epochs_till_now = 0
-
         self.train_trackers = reset_trackers(self.maximum_length)
 
     def startup(self):
@@ -83,15 +95,14 @@ class TrainingWorker(object):
         else:
             self.args.device = torch.device('cpu')
 
-        setup(self.rank, self.size, self.args.seed, self.backend)
+        setup(self.rank, self.size, self.args.seed, self.port, self.backend)
         self.model = create_network(self.args)
         if self.rank == 0:
             self.squeue.put(self.model)
 
         if self.args.fp16:
-            from apex import amp
             amp.initialize(self.model, self.model.optimizer)
-        if self.args.ddp:
+        if self.args.num_trainers > 1:
             self.model = DDP(self.model,
                              device_ids=[self.args.device],
                              output_device=self.args.device)
@@ -107,6 +118,9 @@ class TrainingWorker(object):
                     if not command:
                         return
                 self.train(self.args.epoch_steps, log=self.rank == 0)
+
+                self.epochs_till_now += self.args.epoch_steps
+
                 if self.rank == 0:
                     self.squeue.put((self.epochs_till_now, self.train_trackers))
                     self.train_trackers = reset_trackers(self.maximum_length)
@@ -122,7 +136,7 @@ class TrainingWorker(object):
             total_losses, reward_losses, nce_losses, nce_accs, policy_losses,\
             value_losses, value_errors, reward_errors, mean_values, target_values,\
             mean_rewards, target_rewards, pred_entropies, target_entropies\
-                = self.step()
+                = self.model(self.buffer)
 
             if log:
                 update_trackers(self.train_trackers,
@@ -140,168 +154,6 @@ class TrainingWorker(object):
                                 target_rewards,
                                 pred_entropies,
                                 target_entropies)
-
-    def step(self, step=True):
-        """
-        Do one update of the model on data drawn from a buffer.
-        :param step: whether or not to actually take a gradient step.
-        :return: Updated weights for prioritized experience replay.
-        """
-        with torch.no_grad():
-            states, actions, rewards, return_, done, done_n, unk, \
-            policies, values = self.buffer.sample_batch(self.args.batch_size)
-
-            states = states.float().to(self.args.device) / 255.
-            actions = actions.long().to(self.args.device)
-            rewards = rewards.float().to(self.args.device)
-            policies = torch.from_numpy(policies).float().to(self.args.device)
-            values = torch.from_numpy(values).float().to(self.args.device)
-            initial_states = states[1]
-            initial_actions = actions[0]
-            is_weights = 1.
-
-            target_images = states[1:self.maximum_length+2, :, 0].transpose(0, 1)
-            target_images = target_images.reshape(-1, *states.shape[-3:])
-
-        # Get into the shape used by the NCE code.
-        if not self.args.no_nce:
-            target_images = self.model.target_encoder(target_images)
-            target_images = target_images.view(states.shape[1], -1, *target_images.shape[1:])
-            target_images = target_images.flatten(3, 4).permute(3, 0, 1, 2)
-
-        current_state, pred_reward,\
-        pred_policy, pred_value = self.model.initial_inference(initial_states,
-                                                               initial_actions,
-                                                               logits=True)
-
-        # This represents s_1, r_0, pi_1, v_1
-        predictions = [(1.0, pred_reward, pred_policy, pred_value)]
-        pred_states = [current_state]
-
-        pred_values, pred_rewards, pred_policies = [], [], []
-        loss = torch.zeros(1, device=self.args.device)
-        reward_losses, value_losses, policy_losses, \
-            nce_losses, value_targets = [], [], [], [], []
-        total_losses, nce_accs = np.zeros(self.maximum_length + 1),\
-                                 np.zeros(self.maximum_length + 1)
-        target_entropies, pred_entropies = [], []
-
-        discounts = torch.ones_like(rewards)[:self.multistep]*self.args.discount
-        discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[:, None].float()
-
-        value_errors, reward_errors = [], []
-
-        for i in range(1, self.maximum_length+1):
-            action = actions[i]
-            current_state, pred_reward, pred_policy, pred_value = self.model(current_state, action)
-
-            current_state = ScaleGradient.apply(current_state, 0.5)
-
-            predictions.append((1. / self.maximum_length,
-                                pred_reward,
-                                pred_policy,
-                                pred_value))
-            pred_states.append(current_state)
-
-        for i, prediction in enumerate(predictions):
-            # recall that predictions_i is r_i, pi_i+1, v_i+1
-            loss_scale, pred_reward, pred_policy, pred_value = prediction
-
-            # Calculate the value target for v_i+1
-            j = i+1
-            value_target = torch.sum(discounts*rewards[j:j+self.multistep], 0)
-            value_target = value_target + self.args.discount ** self.multistep \
-                           * values[j+self.multistep]
-
-            value_targets.append(value_target)
-            value_target = to_categorical(transform(value_target))
-            reward_target = to_categorical(transform(rewards[i]))
-
-            pred_rewards.append(inverse_transform(from_categorical(
-                pred_reward.detach(), logits=True)))
-            pred_values.append(inverse_transform(from_categorical(
-                pred_value.detach(), logits=True)))
-
-            pred_entropy = Categorical(logits=pred_policy).entropy()
-            target_entropy = Categorical(probs=policies[j]).entropy()
-            pred_entropies.append(pred_entropy.mean().cpu().detach().item())
-            target_entropies.append(target_entropy.mean().cpu().detach().item())
-
-            value_errors.append(torch.abs(pred_values[-1] - value_targets[-1]).detach().cpu().numpy())
-            reward_errors.append(torch.abs(pred_rewards[-1] - rewards[i]).detach().cpu().numpy())
-
-            pred_value = F.log_softmax(pred_value, -1)
-            pred_reward = F.log_softmax(pred_reward, -1)
-            pred_policy = F.log_softmax(pred_policy, -1)
-
-            current_reward_loss = -torch.sum(reward_target * pred_reward, -1)
-            current_value_loss = -torch.sum(value_target * pred_value, -1)
-            current_policy_loss = -torch.sum(policies[j] * pred_policy, -1)
-
-            loss = loss + loss_scale * (is_weights * (
-                       current_value_loss*self.args.value_loss_weight +
-                       current_policy_loss*self.args.policy_loss_weight +
-                       current_reward_loss*self.args.reward_loss_weight).mean())
-
-            total_losses[i] += (current_value_loss*self.args.value_loss_weight +
-                                current_policy_loss*self.args.policy_loss_weight +
-                                current_reward_loss*self.args.reward_loss_weight).detach().mean().cpu().item()
-
-            reward_losses.append(current_reward_loss.detach().mean().cpu().item())
-            value_losses.append(current_value_loss.detach().mean().cpu().item())
-            policy_losses.append(current_policy_loss.detach().mean().cpu().item())
-
-        if not self.args.no_nce:
-            if self.use_all_targets:
-                target_images = target_images.permute(0, 2, 1, 3)
-                nce_input = torch.stack(pred_states, 1).flatten(3, 4).permute(3, 1, 0, 2)
-                nce_loss, nce_accs = self.nce(nce_input, target_images)
-                nce_losses = nce_loss.mean(-1).detach().cpu().numpy()
-                nce_loss = (nce_loss*is_weights).mean(-1)
-            else:
-                nce_loss = []
-                for i, pred_state in enumerate(pred_states):
-                    current_targets = target_images[:, :, i]
-                    nce_input = pred_state.flatten(2, 3).permute(2, 0, 1)
-                    current_nce_loss, current_nce_acc = self.nce(nce_input, current_targets)
-                    nce_loss.append((current_nce_loss*is_weights).mean())
-                    nce_losses.append(current_nce_loss.detach().cpu().mean().item())
-                    nce_accs[i] = current_nce_acc
-
-            for i, current_nce_loss in enumerate(nce_loss):
-                loss_scale = predictions[i][0]
-                loss = loss + loss_scale*self.args.contrastive_loss_weight*current_nce_loss
-                total_losses[i] += current_nce_loss.mean().detach().cpu().item()
-
-        else:
-            nce_losses = np.zeros(self.maximum_length + 1)
-
-        # self.buffer.update_batch_priorities(value_errors[0] + 1e-6)
-
-        mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
-        mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
-        target_values = torch.mean(torch.stack(value_targets, 0), -1).detach().cpu().numpy()
-        target_rewards = torch.mean(rewards, -1)[:self.maximum_length+1].detach().cpu().numpy()
-        value_errors = np.mean(value_errors, -1)
-        reward_errors = np.mean(reward_errors, -1)
-
-        loss = loss.mean()
-        if step:
-            self.model.optimizer.zero_grad()
-            if self.args.fp16:
-                with amp.scale_loss(loss, self.model.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
-            self.model.optimizer.step()
-            self.model.scheduler.step()
-
-        self.epochs_till_now += 1
-
-        return total_losses, reward_losses, nce_losses, nce_accs,\
-               policy_losses, value_losses, value_errors, reward_errors, \
-               mean_values, target_values, mean_rewards, target_rewards, \
-               pred_entropies, target_entropies
 
 
 class LocalNCE(nn.Module):
@@ -448,6 +300,11 @@ class MCTSModel(nn.Module):
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         self.target_encoder = SmallEncoder(args)
         self.args = args
+        self.jumps = args.jumps
+        self.multistep = args.multistep
+        self.use_all_targets = args.use_all_targets
+        self.no_nce = args.no_nce
+        self.nce = LocalNCE() if not args.use_all_targets else BlockNCE()
 
         params = list(self.dynamics_model.parameters()) + \
             list(self.value_model.parameters()) +\
@@ -491,7 +348,7 @@ class MCTSModel(nn.Module):
 
     def inference(self, state, action):
         next_state, reward_logits, \
-        policy_logits, value_logits = self.forward(state, action)
+        policy_logits, value_logits = self.step(state, action)
         value = inverse_transform(from_categorical(value_logits,
                                                    logits=True))
         reward = inverse_transform(from_categorical(reward_logits,
@@ -499,12 +356,173 @@ class MCTSModel(nn.Module):
 
         return NetworkOutput(next_state, reward, policy_logits, value)
 
-    def forward(self, state, action):
+    def step(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)
         policy_logits = self.policy_model(next_state)
         value_logits = self.value_model(next_state)
 
         return next_state, reward_logits, policy_logits, value_logits
+
+    def forward(self, buffer, step=True):
+        """
+        Do one update of the model on data drawn from a buffer.
+        :param step: whether or not to actually take a gradient step.
+        :return: Updated weights for prioritized experience replay.
+        """
+        with torch.no_grad():
+            states, actions, rewards, return_, done, done_n, unk, \
+            policies, values = buffer.sample_batch(self.args.batch_size)
+
+            states = states.float().to(self.args.device) / 255.
+            actions = actions.long().to(self.args.device)
+            rewards = rewards.float().to(self.args.device)
+            policies = torch.from_numpy(policies).float().to(self.args.device)
+            values = torch.from_numpy(values).float().to(self.args.device)
+            initial_states = states[1]
+            initial_actions = actions[0]
+            is_weights = 1.
+
+            target_images = states[1:self.jumps+2, :, 0].transpose(0, 1)
+            target_images = target_images.reshape(-1, *states.shape[-3:])
+
+        # Get into the shape used by the NCE code.
+        if not self.no_nce:
+            target_images = self.target_encoder(target_images)
+            target_images = target_images.view(states.shape[1], -1, *target_images.shape[1:])
+            target_images = target_images.flatten(3, 4).permute(3, 0, 1, 2)
+
+        current_state, pred_reward,\
+        pred_policy, pred_value = self.initial_inference(initial_states,
+                                                         initial_actions,
+                                                         logits=True)
+
+        # This represents s_1, r_0, pi_1, v_1
+        predictions = [(1.0, pred_reward, pred_policy, pred_value)]
+        pred_states = [current_state]
+
+        pred_values, pred_rewards, pred_policies = [], [], []
+        loss = torch.zeros(1, device=self.args.device)
+        reward_losses, value_losses, policy_losses, \
+            nce_losses, value_targets = [], [], [], [], []
+        total_losses, nce_accs = np.zeros(self.jumps + 1),\
+                                 np.zeros(self.jumps + 1)
+        target_entropies, pred_entropies = [], []
+
+        discounts = torch.ones_like(rewards)[:self.multistep]*self.args.discount
+        discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[:, None].float()
+
+        value_errors, reward_errors = [], []
+
+        for i in range(1, self.jumps+1):
+            action = actions[i]
+            current_state, pred_reward, pred_policy, pred_value = \
+                self.step(current_state, action)
+
+            current_state = ScaleGradient.apply(current_state, 0.5)
+
+            predictions.append((1. / self.jumps,
+                                pred_reward,
+                                pred_policy,
+                                pred_value))
+            pred_states.append(current_state)
+
+        for i, prediction in enumerate(predictions):
+            # recall that predictions_i is r_i, pi_i+1, v_i+1
+            loss_scale, pred_reward, pred_policy, pred_value = prediction
+
+            # Calculate the value target for v_i+1
+            j = i+1
+            value_target = torch.sum(discounts*rewards[j:j+self.multistep], 0)
+            value_target = value_target + self.args.discount ** self.multistep \
+                           * values[j+self.multistep]
+
+            value_targets.append(value_target)
+            value_target = to_categorical(transform(value_target))
+            reward_target = to_categorical(transform(rewards[i]))
+
+            pred_rewards.append(inverse_transform(from_categorical(
+                pred_reward.detach(), logits=True)))
+            pred_values.append(inverse_transform(from_categorical(
+                pred_value.detach(), logits=True)))
+
+            pred_entropy = Categorical(logits=pred_policy).entropy()
+            target_entropy = Categorical(probs=policies[j]).entropy()
+            pred_entropies.append(pred_entropy.mean().cpu().detach().item())
+            target_entropies.append(target_entropy.mean().cpu().detach().item())
+
+            value_errors.append(torch.abs(pred_values[-1] - value_targets[-1]).detach().cpu().numpy())
+            reward_errors.append(torch.abs(pred_rewards[-1] - rewards[i]).detach().cpu().numpy())
+
+            pred_value = F.log_softmax(pred_value, -1)
+            pred_reward = F.log_softmax(pred_reward, -1)
+            pred_policy = F.log_softmax(pred_policy, -1)
+
+            current_reward_loss = -torch.sum(reward_target * pred_reward, -1)
+            current_value_loss = -torch.sum(value_target * pred_value, -1)
+            current_policy_loss = -torch.sum(policies[j] * pred_policy, -1)
+
+            loss = loss + loss_scale * (is_weights * (
+                       current_value_loss*self.args.value_loss_weight +
+                       current_policy_loss*self.args.policy_loss_weight +
+                       current_reward_loss*self.args.reward_loss_weight).mean())
+
+            total_losses[i] += (current_value_loss*self.args.value_loss_weight +
+                                current_policy_loss*self.args.policy_loss_weight +
+                                current_reward_loss*self.args.reward_loss_weight).detach().mean().cpu().item()
+
+            reward_losses.append(current_reward_loss.detach().mean().cpu().item())
+            value_losses.append(current_value_loss.detach().mean().cpu().item())
+            policy_losses.append(current_policy_loss.detach().mean().cpu().item())
+
+        if not self.no_nce:
+            if self.use_all_targets:
+                target_images = target_images.permute(0, 2, 1, 3)
+                nce_input = torch.stack(pred_states, 1).flatten(3, 4).permute(3, 1, 0, 2)
+                nce_loss, nce_accs = self.nce(nce_input, target_images)
+                nce_losses = nce_loss.mean(-1).detach().cpu().numpy()
+                nce_loss = (nce_loss*is_weights).mean(-1)
+            else:
+                nce_loss = []
+                for i, pred_state in enumerate(pred_states):
+                    current_targets = target_images[:, :, i]
+                    nce_input = pred_state.flatten(2, 3).permute(2, 0, 1)
+                    current_nce_loss, current_nce_acc = self.nce(nce_input, current_targets)
+                    nce_loss.append((current_nce_loss*is_weights).mean())
+                    nce_losses.append(current_nce_loss.detach().cpu().mean().item())
+                    nce_accs[i] = current_nce_acc
+
+            for i, current_nce_loss in enumerate(nce_loss):
+                loss_scale = predictions[i][0]
+                loss = loss + loss_scale*self.args.contrastive_loss_weight*current_nce_loss
+                total_losses[i] += current_nce_loss.mean().detach().cpu().item()
+
+        else:
+            nce_losses = np.zeros(self.jumps + 1)
+
+        # self.buffer.update_batch_priorities(value_errors[0] + 1e-6)
+
+        mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
+        mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
+        target_values = torch.mean(torch.stack(value_targets, 0), -1).detach().cpu().numpy()
+        target_rewards = torch.mean(rewards, -1)[:self.jumps+1].detach().cpu().numpy()
+        value_errors = np.mean(value_errors, -1)
+        reward_errors = np.mean(reward_errors, -1)
+
+        loss = loss.mean()
+        if step:
+            self.optimizer.zero_grad()
+            if self.args.fp16:
+                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+            self.optimizer.step()
+            self.scheduler.step()
+
+        return total_losses, reward_losses, nce_losses, nce_accs,\
+               policy_losses, value_losses, value_errors, reward_errors, \
+               mean_values, target_values, mean_rewards, target_rewards, \
+               pred_entropies, target_entropies
 
 
 def init(module, weight_init, bias_init, gain=1):
