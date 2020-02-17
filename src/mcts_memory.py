@@ -14,6 +14,7 @@ from rlpyt.replays.sequence.frame import AsyncPrioritizedSequenceReplayFrameBuff
 from rlpyt.utils.buffer import torchify_buffer
 from rlpyt.utils.collections import namedarraytuple
 from rlpyt.utils.misc import extract_sequences
+from rlpyt.utils.synchronize import RWLock
 
 Transition = recordclass('Transition', ('timestep', 'state', 'action', 'reward', 'value', 'policy', 'nonterminal'))
 blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)  # TODO: Set appropriate default policy value
@@ -69,6 +70,7 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncUniformSequenceRepl
     Extends AsyncPrioritizedSequenceReplayFrameBuffer to return policy_logits and values too during sampling.
     """
     def sample_batch(self, batch_B):
+        self._async_pull()  # Updates from writers.
         batch_T = self.batch_T
         T_idxs, B_idxs = self.sample_idxs(batch_B, batch_T)
         # (T_idxs, B_idxs), priorities = self.priority_tree.sample(

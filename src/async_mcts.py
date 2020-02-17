@@ -6,7 +6,6 @@ import sys
 from enum import Enum
 import time
 import gym
-from gym.vector.utils import CloudpickleWrapper
 from torch.multiprocessing.queue import Queue
 
 from src.pizero import MinMaxStats, Node, MCTS

@@ -118,7 +118,7 @@ class AsyncReanalyze:
         return obs, actions, rewards, dones, policies, values
 
     def get_transitions(self, total_episodes):
-        if total_episodes <= 0:
+        if total_episodes <= 1:
             return self.get_blank_transitions()
         if self.debug:
             results = [p.sample_for_reanalysis() for p in self.processes]
@@ -130,12 +130,11 @@ class AsyncReanalyze:
                 result = None
                 while not result:
                     try:
-                        result, success = q.receive()
+                        result, success = q.get()
                     except:
                         traceback.print_exc()
-                    finally:
-                        results.append(result)
-                        successes.append(success)
+                results.append(result)
+                successes.append(success)
 
         self._raise_if_errors(successes)
 
@@ -203,7 +202,7 @@ class ReanalyzeWorker:
                 if self.can_reanalyze and self.receive_queue.qsize() < 100:
                     new_samples = self.sample_for_reanalysis()
                     self.receive_queue.put((new_samples, True))
-                elif not forever:
+                elif forever:
                     time.sleep(1.)  # Don't just spin the processor
                 else:
                     return
@@ -218,7 +217,6 @@ class ReanalyzeWorker:
     def write_to_buffer(self):
         while not self.send_queue.empty():
             obs, action, reward, done = self.send_queue.get()
-            print("Received transition")
             self.save_data(obs, action, reward, done)
 
     def save_data(self, obs, action, reward, done):

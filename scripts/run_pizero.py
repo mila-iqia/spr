@@ -1,7 +1,6 @@
 from collections import deque
 import torch.multiprocessing as mp
 
-from src.async_mcts import AsyncMCTS
 from src.mcts_memory import LocalBuffer, initialize_replay_buffer, samples_to_buffer
 from src.model_trainer import TrainingWorker
 from src.async_reanalyze import AsyncReanalyze
@@ -14,31 +13,41 @@ import torch
 import wandb
 import numpy as np
 import gym
-import dill
 
 from src.vectorized_mcts import VectorizedMCTS, AsyncEval
 
 
+def torch_set_device(args):
+    if torch.cuda.is_available():
+        args.device = torch.device('cuda:0')
+        torch.cuda.manual_seed(args.seed)
+        torch.backends.cudnn.enabled = True
+    else:
+        args.device = torch.device('cpu')
+
+
 def run_pizero(args):
-    buffer = initialize_replay_buffer(args)
+    buffer, lock = initialize_replay_buffer(args)
     ctx = mp.get_context("fork")
     error_queue = ctx.Queue()
     send_queue = ctx.Queue()
+    buffer.rw_lock = lock
     receive_queues = []
     for i in range(args.num_trainers):
-        receive_queue = mp.Queue()
+        receive_queue = ctx.Queue()
         worker = TrainingWorker(i,
                                 args.num_trainers,
                                 args,
                                 send_queue,
                                 error_queue,
                                 receive_queue)
-        process = ctx.Process(target=worker.optimize, args=(
-                                DillWrapper(buffer),))
+        process = ctx.Process(target=worker.optimize,
+                              args=(lock, DillWrapper(buffer)))
         process.start()
         receive_queues.append(receive_queue)
 
     # Need to get the target network from the training agent that created it.
+    torch_set_device(args)
     network = send_queue.get(block=True, timeout=None)
     if args.target_update_interval > 0:
         target_network = copy.deepcopy(network)
@@ -64,7 +73,7 @@ def run_pizero(args):
     vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
     eval_vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.evaluation_episodes, target_network, eval=True)
     async_eval = AsyncEval(eval_vectorized_mcts)
-    total_episodes = 0.
+    total_episodes = 0
     total_train_steps = 0
     while env_steps < args.total_env_steps:
         # Run MCTS for the vectorized observation
@@ -76,7 +85,6 @@ def run_pizero(args):
                                                            done.cpu(), policy_probs.cpu(), values.cpu()
 
         eprets += np.array(reward)
-
         for i in range(args.num_envs):
             if done[i]:
                 episode_rewards.append(eprets[i])
@@ -129,6 +137,7 @@ def run_pizero(args):
 
         # Send a command to start training if ready
         if args.num_envs*101 >= env_steps > args.num_envs*100:
+            print("Started Training")
             [q.put("train") for q in receive_queues]
 
         if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
@@ -183,11 +192,5 @@ if __name__ == '__main__':
 
     print("Saving episode data in {}".format(args.savedir))
 
-    if torch.cuda.is_available():
-        args.device = torch.device('cuda')
-        torch.cuda.manual_seed(args.seed)
-        torch.backends.cudnn.enabled = True
-    else:
-        args.device = torch.device('cpu')
 
     run_pizero(args)
