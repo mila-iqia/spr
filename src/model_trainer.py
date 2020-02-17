@@ -93,10 +93,9 @@ class TrainingWorker(object):
         if self.args.ddp:
             self.model = DDP(self.model, self.devices)
 
-    def optimize(self, lock, buffer):
+    def optimize(self, buffer):
         with open("buffer.pkl", "rb") as f:
             self.buffer = buffer.x
-        self.buffer.rw_lock = lock
         self.startup()
         _ = self.receive_queue.get()
         try:
