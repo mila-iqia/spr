@@ -496,7 +496,7 @@ class MCTSModel(nn.Module):
             update_trackers(trackers, reward_losses, nce_losses, nce_accs,
                             policy_losses, value_losses, total_losses,
                             value_errors, reward_errors, mean_values,
-                            target_values, mean_rewards, target_rewards,
+                            mean_rewards, target_values, target_rewards,
                             pred_entropies, target_entropies)
 
         return loss
