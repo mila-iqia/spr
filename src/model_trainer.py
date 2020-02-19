@@ -117,9 +117,11 @@ class TrainingWorker(object):
         if self.args.fp16:
             amp.initialize(self.model, self.optimizer)
         if self.args.num_trainers > 1:
+            print("{} initializing DDP".format(self.rank))
             self.model = DDP(self.model,
                              device_ids=[self.args.device],
-                             output_device=self.args.device)
+                             output_device=self.args.device,
+                             find_unused_parameters=True)
 
     def optimize(self, buffer):
         self.buffer = buffer.x
@@ -557,7 +559,6 @@ class TransitionModel(nn.Module):
     def __init__(self,
                  channels,
                  num_actions,
-                 args,
                  blocks=16,
                  hidden_size=256,
                  latent_size=36,
