@@ -627,11 +627,11 @@ class FiLMTransitionModel(nn.Module):
                       nn.ReLU()])
 
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = ValueNetwork(channels,
-                                             init_weight_scale=args.init_value_scale)
+        self.reward_predictor = ValueNetwork(channels)
         self.train()
 
     def forward(self, x, action):
+        action = action.view(x.shape[0],)
         x = self.network[:3](x)
         for resblock in self.network[3:-2]:
             x = resblock(x, action)
