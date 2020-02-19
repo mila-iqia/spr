@@ -516,8 +516,6 @@ class MCTSModel(nn.Module):
                             value_errors, reward_errors, mean_values,
                             mean_rewards, target_values, target_rewards,
                             pred_entropies, target_entropies)
-
-        print(loss.shape)
         return loss
 
 
