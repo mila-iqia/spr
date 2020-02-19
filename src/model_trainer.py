@@ -121,7 +121,7 @@ class TrainingWorker(object):
             self.model = DDP(self.model,
                              device_ids=[self.args.device],
                              output_device=self.args.device,
-                             find_unused_parameters=True)
+                             find_unused_parameters=self.args.film)
 
     def optimize(self, buffer):
         self.buffer = buffer.x
@@ -372,7 +372,7 @@ class MCTSModel(nn.Module):
         """
         with torch.no_grad():
             states, actions, rewards, return_, done, done_n, unk, \
-            policies, values = buffer.sample_batch(self.args.batch_size)
+            policies, values = buffer.sample_batch(self.args.batch_size_per_worker)
 
             states = states.float().to(self.args.device) / 255.
             actions = actions.long().to(self.args.device)
@@ -516,6 +516,7 @@ class MCTSModel(nn.Module):
                             mean_rewards, target_values, target_rewards,
                             pred_entropies, target_entropies)
 
+        print(loss.shape)
         return loss
 
 
