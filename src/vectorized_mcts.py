@@ -29,7 +29,7 @@ class VectorizedMCTS:
         if eval:
             self.n_sims = 50
         self.id_null = self.n_sims + 1
-        self.warmup_sims = min(self.n_sims // 3 + 1, 10)
+        self.warmup_sims = min(self.n_sims // 3 + 1, n_actions)
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
@@ -222,11 +222,6 @@ class VectorizedMCTS:
         return self.args.visit_temp
 
     def evaluate(self, env_step=None):
-        if 100e3 < env_step < 300e3:
-            self.visit_temp = 0.5
-
-        if env_step > 300e3:
-            self.visit_temp = 0.25
         env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)
         for e in env.envs:
             e.eval()
@@ -270,7 +265,7 @@ class AsyncEval:
 
     def get_eval_results(self):
         try:
-            result, success = self.receive_queue.get_nowait()
+            result, success = self.receive_queue.get()
             return result
         except:
             return None
@@ -284,7 +279,7 @@ def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
                 avg_reward = eval_mcts.evaluate(env_step)
                 recieve_queue.put(((env_step, avg_reward), True))
             else:
-                time.sleep(100.)
+                time.sleep(10.)
     except (KeyboardInterrupt, Exception):
         error_queue.put((name,) + sys.exc_info())
         traceback.print_exc()
