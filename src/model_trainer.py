@@ -105,6 +105,7 @@ class TrainingWorker(object):
             torch.backends.cudnn.enabled = True
         else:
             self.args.device = torch.device('cpu')
+            self.backend = 'gloo'
 
         setup(self.rank, self.size, self.args.seed, self.port, self.backend)
         self.model, self.optimizer, self.scheduler = create_network(self.args)
