@@ -24,11 +24,15 @@ def get_args():
     parser.add_argument('--debug-reanalyze', action='store_true')
     parser.add_argument('--fp16', action='store_true')
     parser.add_argument('--buffer-size', type=int, default=100000)
-    parser.add_argument('--target-update-interval', type=int, default=1000,
+    parser.add_argument('--target-update-interval', type=int, default=10,
                         help="Number of gradient steps for each update to the "
                              "target network.  <=0 to disable target network.")
     parser.add_argument('--epoch-steps', type=int, default=50,
                         help="Number of gradient steps between loggings.")
+    parser.add_argument('--replay-ratio-upper', type=float, default=-1.,
+                        help="Upper bound of async replay ratio.  -1 disables.")
+    parser.add_argument('--replay-ratio-lower', type=float, default=-1.,
+                        help="Lower bound of async replay ratio.  -1 disables.")
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
     parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')
