@@ -265,7 +265,7 @@ class AsyncEval:
 
     def get_eval_results(self):
         try:
-            result, success = self.receive_queue.get()
+            result, success = self.receive_queue.get_nowait()
             return result
         except:
             return None
