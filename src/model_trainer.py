@@ -559,6 +559,7 @@ class TransitionModel(nn.Module):
     def __init__(self,
                  channels,
                  num_actions,
+                 args,
                  blocks=16,
                  hidden_size=256,
                  latent_size=36,
