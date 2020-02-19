@@ -57,9 +57,20 @@ def create_network(args):
                                 asynchronous=False)
     dummy_env.seed(args.seed)
     model = MCTSModel(args, dummy_env.action_space[0].n)
+    if args.optim == "adam":
+        optimizer = torch.optim.AdamW(model.parameters(),
+                                      lr=args.learning_rate,
+                                      weight_decay=args.weight_decay,
+                                      eps=args.adam_eps)
+    elif args.optim == "sgd":
+        optimizer = torch.optim.SGD(model.parameters(),
+                                    lr=args.learning_rate,
+                                    momentum=args.momentum,
+                                    weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, args.lr_decay ** (1. / args.lr_decay_steps),)
     model.to(args.device)
     model.share_memory()
-    return model
+    return model, optimizer, scheduler
 
 
 class TrainingWorker(object):
@@ -96,12 +107,12 @@ class TrainingWorker(object):
             self.args.device = torch.device('cpu')
 
         setup(self.rank, self.size, self.args.seed, self.port, self.backend)
-        self.model = create_network(self.args)
+        self.model, self.optimizer, self.scheduler = create_network(self.args)
         if self.rank == 0:
             self.squeue.put(self.model)
 
         if self.args.fp16:
-            amp.initialize(self.model, self.model.optimizer)
+            amp.initialize(self.model, self.optimizer)
         if self.args.num_trainers > 1:
             self.model = DDP(self.model,
                              device_ids=[self.args.device],
@@ -133,27 +144,18 @@ class TrainingWorker(object):
     def train(self, steps, log=True):
 
         for step in range(steps):
-            total_losses, reward_losses, nce_losses, nce_accs, policy_losses,\
-            value_losses, value_errors, reward_errors, mean_values, target_values,\
-            mean_rewards, target_rewards, pred_entropies, target_entropies\
-                = self.model(self.buffer)
+            loss = self.model(self.buffer,
+                              self.train_trackers if log else None)
 
-            if log:
-                update_trackers(self.train_trackers,
-                                reward_losses,
-                                nce_losses,
-                                nce_accs,
-                                policy_losses,
-                                value_losses,
-                                total_losses,
-                                value_errors,
-                                reward_errors,
-                                mean_values,
-                                mean_rewards,
-                                target_values,
-                                target_rewards,
-                                pred_entropies,
-                                target_entropies)
+            loss = loss.mean()
+            self.optimizer.zero_grad()
+            if self.args.fp16:
+                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+            self.optimizer.step()
+            self.scheduler.step()
 
 
 class LocalNCE(nn.Module):
@@ -285,6 +287,11 @@ class BlockNCE(nn.Module):
 class MCTSModel(nn.Module):
     def __init__(self, args, num_actions):
         super().__init__()
+        self.args = args
+        self.jumps = args.jumps
+        self.multistep = args.multistep
+        self.use_all_targets = args.use_all_targets
+        self.no_nce = args.no_nce
         if args.film:
             self.dynamics_model = FiLMTransitionModel(channels=args.hidden_size,
                                                       cond_size=num_actions,
@@ -298,32 +305,9 @@ class MCTSModel(nn.Module):
         self.value_model = ValueNetwork(args.hidden_size)
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
-        self.target_encoder = SmallEncoder(args)
-        self.args = args
-        self.jumps = args.jumps
-        self.multistep = args.multistep
-        self.use_all_targets = args.use_all_targets
-        self.no_nce = args.no_nce
-        self.nce = LocalNCE() if not args.use_all_targets else BlockNCE()
-
-        params = list(self.dynamics_model.parameters()) + \
-            list(self.value_model.parameters()) +\
-            list(self.policy_model.parameters()) +\
-            list(self.encoder.parameters()) +\
-            list(self.target_encoder.parameters())
-
-        if args.optim == "adam":
-            self.optimizer = torch.optim.AdamW(params,
-                                               lr=args.learning_rate,
-                                               weight_decay=args.weight_decay,
-                                               eps=args.adam_eps)
-        elif args.optim == "sgd":
-            self.optimizer = torch.optim.SGD(params,
-                                             lr=args.learning_rate,
-                                             momentum=args.momentum,
-                                             weight_decay=args.weight_decay)
-        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
-                                                                args.lr_decay ** (1. / args.lr_decay_steps),)
+        if not self.no_nce:
+            self.target_encoder = SmallEncoder(args)
+            self.nce = LocalNCE() if not args.use_all_targets else BlockNCE()
 
     def encode(self, images, actions):
         return self.encoder(images, actions)
@@ -363,7 +347,7 @@ class MCTSModel(nn.Module):
 
         return next_state, reward_logits, policy_logits, value_logits
 
-    def forward(self, buffer, step=True):
+    def forward(self, buffer, trackers=None, step=True,):
         """
         Do one update of the model on data drawn from a buffer.
         :param step: whether or not to actually take a gradient step.
@@ -508,21 +492,14 @@ class MCTSModel(nn.Module):
         value_errors = np.mean(value_errors, -1)
         reward_errors = np.mean(reward_errors, -1)
 
-        loss = loss.mean()
-        if step:
-            self.optimizer.zero_grad()
-            if self.args.fp16:
-                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
-            self.optimizer.step()
-            self.scheduler.step()
+        if trackers:
+            update_trackers(trackers, reward_losses, nce_losses, nce_accs,
+                            policy_losses, value_losses, total_losses,
+                            value_errors, reward_errors, mean_values,
+                            target_values, mean_rewards, target_rewards,
+                            pred_entropies, target_entropies)
 
-        return total_losses, reward_losses, nce_losses, nce_accs,\
-               policy_losses, value_losses, value_errors, reward_errors, \
-               mean_values, target_values, mean_rewards, target_rewards, \
-               pred_entropies, target_entropies
+        return loss
 
 
 def init(module, weight_init, bias_init, gain=1):

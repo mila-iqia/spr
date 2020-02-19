@@ -18,7 +18,7 @@ def reset_trackers(jumps):
     trackers["mean_target_rewards"] = np.zeros(jumps + 1)
     trackers["pred_entropy"] = np.zeros(jumps + 1)
     trackers["target_entropy"] = np.zeros(jumps + 1)
-    trackers["iterations"] = 0
+    trackers["iterations"] = np.zeros(1)
 
     return trackers
 
