@@ -11,6 +11,7 @@ from src.utils import get_args, DillWrapper
 from src.logging import log_results
 
 import os
+import time
 import copy
 import torch
 import wandb
@@ -52,7 +53,8 @@ def run_pizero(args):
 
     # Need to get the target network from the training agent that created it.
     torch_set_device(args)
-    network = send_queue.get(block=True, timeout=None)
+    network = send_queue.get()
+    print("Received target network from trainer")
     if args.target_update_interval > 0:
         target_network = copy.deepcopy(network)
     else:
@@ -83,6 +85,7 @@ def run_pizero(args):
     async_eval = AsyncEval(eval_vectorized_mcts)
     total_episodes = 0
     total_train_steps = 0
+    training_started = False
     try:
         while env_steps < args.total_env_steps:
             # Run MCTS for the vectorized observation
@@ -129,7 +132,17 @@ def run_pizero(args):
                 buffer.append_samples(samples_to_buffer(*local_buf.stack()))
                 local_buf.clear()
 
-            if not send_queue.empty():
+            force_wait = (total_train_steps *
+                          args.batch_size*args.num_trainers < env_steps*args.replay_ratio_lower) and \
+                         args.replay_ratio_lower > 0 and training_started
+
+            if force_wait:
+                print("Runner waiting; needs {} more train steps to continue".format(
+                                      -args.batch_size * args.num_trainers
+                                      * total_train_steps +
+                                      args.replay_ratio_lower * env_steps))
+
+            if force_wait or not send_queue.empty():
                 steps, log = send_queue.get()
                 log_results(log, steps)
                 target_train_steps = steps
@@ -148,6 +161,11 @@ def run_pizero(args):
             if args.num_envs*101 >= env_steps > args.num_envs*100:
                 print("Started Training")
                 [q.put("train") for q in receive_queues]
+                training_started = True
+
+            if args.replay_ratio_upper > 0 and training_started:
+                [q.put(env_steps) for q in receive_queues]
+
 
             if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
                 print('Env Steps: {}, Mean Reward: {}, Median Reward: {}'.format(env_steps, np.mean(episode_rewards),

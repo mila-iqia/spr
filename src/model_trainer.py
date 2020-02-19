@@ -14,6 +14,7 @@ import numpy as np
 import sys
 import traceback
 import gym
+import time
 import os
 import dill
 
@@ -109,29 +110,51 @@ class TrainingWorker(object):
 
         setup(self.rank, self.size, self.args.seed, self.port, self.backend)
         self.model, self.optimizer, self.scheduler = create_network(self.args)
+        print("{} started".format(self.rank))
         if self.rank == 0:
+            print("{} sending model".format(self.rank))
             self.squeue.put(self.model)
 
         if self.args.fp16:
             amp.initialize(self.model, self.optimizer)
         if self.args.num_trainers > 1:
+            print("{} initializing DDP".format(self.rank))
             self.model = DDP(self.model,
                              device_ids=[self.args.device],
-                             output_device=self.args.device)
+                             output_device=self.args.device,
+                             find_unused_parameters=True)
 
     def optimize(self, buffer):
         self.buffer = buffer.x
+        print("{} starting up".format(self.rank))
         self.startup()
         _ = self.receive_queue.get()
+        env_steps = 0
+        force_wait = False
         try:
             while True:
-                if not self.receive_queue.empty():
+                if not self.receive_queue.empty() or force_wait:
                     command = self.receive_queue.get()
                     if not command:
                         return
+                    else:
+                        env_steps = command
+
+                if self.args.replay_ratio_upper > 0:
+                    force_wait = (self.args.replay_ratio_upper * env_steps <
+                                  self.args.batch_size * self.args.num_trainers
+                                  * self.epochs_till_now)
+                    if force_wait:
+                        print("Worker {} waiting; needs {} more env steps to continue".format(self.rank,
+                                      self.args.batch_size * self.args.num_trainers
+                                      * self.epochs_till_now -
+                                      self.args.replay_ratio_upper * env_steps))
+                        continue
+
                 self.train(self.args.epoch_steps, log=self.rank == 0)
 
                 self.epochs_till_now += self.args.epoch_steps
+
 
                 if self.rank == 0:
                     self.squeue.put((self.epochs_till_now, self.train_trackers))
@@ -159,10 +182,7 @@ class TrainingWorker(object):
             self.scheduler.step()
 
 
-class LocalNCE(nn.Module):
-    def __init__(self):
-        super().__init__()
-
+class LocalNCE:
     def calculate_accuracy(self, preds):
         labels = torch.arange(preds.shape[1], dtype=torch.long, device=preds.device)
         preds = torch.argmax(-preds, dim=-1)
@@ -220,10 +240,7 @@ class LocalNCE(nn.Module):
         return loss_nce, acc
 
 
-class BlockNCE(nn.Module):
-    def __init__(self):
-        super().__init__()
-
+class BlockNCE:
     def calculate_accuracy(self, preds):
         labels = torch.arange(preds.shape[-2], dtype=torch.long, device=preds.device)
         preds = torch.argmax(-preds, dim=-1)
@@ -463,7 +480,7 @@ class MCTSModel(nn.Module):
             if self.use_all_targets:
                 target_images = target_images.permute(0, 2, 1, 3)
                 nce_input = torch.stack(pred_states, 1).flatten(3, 4).permute(3, 1, 0, 2)
-                nce_loss, nce_accs = self.nce(nce_input, target_images)
+                nce_loss, nce_accs = self.nce.forward(nce_input, target_images)
                 nce_losses = nce_loss.mean(-1).detach().cpu().numpy()
                 nce_loss = (nce_loss*is_weights).mean(-1)
             else:
@@ -471,7 +488,7 @@ class MCTSModel(nn.Module):
                 for i, pred_state in enumerate(pred_states):
                     current_targets = target_images[:, :, i]
                     nce_input = pred_state.flatten(2, 3).permute(2, 0, 1)
-                    current_nce_loss, current_nce_acc = self.nce(nce_input, current_targets)
+                    current_nce_loss, current_nce_acc = self.nce.forward(nce_input, current_targets)
                     nce_loss.append((current_nce_loss*is_weights).mean())
                     nce_losses.append(current_nce_loss.detach().cpu().mean().item())
                     nce_accs[i] = current_nce_acc
@@ -497,7 +514,7 @@ class MCTSModel(nn.Module):
             update_trackers(trackers, reward_losses, nce_losses, nce_accs,
                             policy_losses, value_losses, total_losses,
                             value_errors, reward_errors, mean_values,
-                            target_values, mean_rewards, target_rewards,
+                            mean_rewards, target_values, target_rewards,
                             pred_entropies, target_entropies)
 
         return loss
@@ -628,11 +645,11 @@ class FiLMTransitionModel(nn.Module):
                       nn.ReLU()])
 
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = ValueNetwork(channels,
-                                             init_weight_scale=args.init_value_scale)
+        self.reward_predictor = ValueNetwork(channels)
         self.train()
 
     def forward(self, x, action):
+        action = action.view(x.shape[0],)
         x = self.network[:3](x)
         for resblock in self.network[3:-2]:
             x = resblock(x, action)
