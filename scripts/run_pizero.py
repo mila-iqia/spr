@@ -133,7 +133,7 @@ def run_pizero(args):
                 local_buf.clear()
 
             force_wait = (total_train_steps *
-                          args.batch_size*args.num_trainers < env_steps*args.replay_ratio_lower) and \
+                          args.batch_size < env_steps*args.replay_ratio_lower) and \
                          args.replay_ratio_lower > 0 and training_started
 
             if force_wait:
