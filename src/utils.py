@@ -54,7 +54,7 @@ def get_args():
     parser.add_argument('--training-interval', type=int, default=64,
                         help='Perform training after every {training-interval} env steps ')
     parser.add_argument('--batch-size-per-worker', type=int, default=128, help='Batch size per GPU to use during training')
-    parser.add_argument('--learning-rate', type=float, default=0.05, metavar='η', help='Learning rate')
+    parser.add_argument('--learning-rate', type=float, default=0.001, metavar='η', help='Learning rate')
     parser.add_argument('--optim', type=str, default='sgd', choices=["adam", "sgd"], help='Optimizer')
     parser.add_argument('--lr-decay-steps', type=float, default=350.e3, help='Learning rate decay time constant')
     parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
