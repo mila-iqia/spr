@@ -213,8 +213,8 @@ class VectorizedMCTS:
 
     def select_action(self):
         t = self.visit_temp
-        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t))
-        action = policy.sample()
+        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
+        action = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t)).sample()
         return action, policy
 
     def visit_softmax_temperature(self, training_steps=0):

@@ -1,11 +1,11 @@
 description: AWM
 
 target:
-  cluster: eu2
+  cluster: wu2
   vc: msrlabs
 
 environment:
-  image: microsoft_pytorch:v1.2.0_gpu_cuda10.0_py36_release_gpuenv_hvd0.16.2
+  image: philly/jobs/custom/pytorch:pytorch1.3.1-py36-cuda10.0
   registry: phillyregistry.azurecr.io
 
 
@@ -25,7 +25,7 @@ storage:
 search:
   job_template:
     name: awm
-    sku: G1
+    sku: G4
     command:
       - export PATH=$$PATH:~/.local/bin
       - export LC_ALL=C.UTF-8
@@ -34,30 +34,29 @@ search:
 #      - cd apex
 #      - pip install --user -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 #      - cd ..
-      - pip install --user dill
-      - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly recordclass pyprind psutil
+      - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly recordclass pyprind psutil dill
       - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
       - pip install --user git+git://github.com/astooke/rlpyt
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
-      - python -m scripts.run_pizero --grayscale --game {game} {search-targets} --training-interval {training-interval} --batch-size 128 {nce} {envs} --num-simulations 10 --total-env-steps 5000000 {reanalyze} --target-update-interval {uti} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 10 --num-simulations 10 --c1 {c1} --evaluation-interval 80000 --visit-temp {visit-temp}
+      - python -m scripts.run_pizero --grayscale --game {game} {search-targets} --training-interval {training-interval} --batch-size 200 {nce} {envs} --num-simulations 10 --total-env-steps 10000000 {reanalyze} --target-update-interval {uti} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 10 --num-simulations 10 --c1 {c1} --evaluation-interval 80000 --visit-temp {visit-temp}  --discount 0.997  --num-trainers 4
   type: grid
-  max_trials: 1
+  max_trials: 100
   params:
     - name: game
       spec: discrete
-      values: ['ms_pacman', 'space_invaders']
+      values: ['ms_pacman']
     - name: nce
       spec: discrete
-      values: ['--no-nce']
+      values: ['--value-loss-weight 0.1']
     - name: envs
       spec: discrete
       values: ['--num-envs 64 --num-workers 1']
     - name: reanalyze
       spec: discrete
-      values: ['--reanalyze  --num-reanalyze-workers 1 --num-reanalyze-envs 128 --debug-reanalyze', '']
+      values: ['']
     - name: uti
       spec: discrete
-      values: [0]
+      values: [64]
     - name: multistep
       spec: discrete
       values: [10]
@@ -69,7 +68,7 @@ search:
       values: [1.25]
     - name: search-targets
       spec: discrete
-      values: ['--no-search-value-targets', '']
+      values: ['']
     - name: visit-temp
       spec: discrete
-      values: [1.0]
+      values: [0.25]
