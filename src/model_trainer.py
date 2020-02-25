@@ -142,13 +142,9 @@ class TrainingWorker(object):
 
                 if self.args.replay_ratio_upper > 0:
                     force_wait = (self.args.replay_ratio_upper * env_steps <
-                                  self.args.batch_size * self.args.num_trainers
+                                  self.args.batch_size
                                   * self.epochs_till_now)
                     if force_wait:
-                        print("Worker {} waiting; needs {} more env steps to continue".format(self.rank,
-                                      self.args.batch_size * self.args.num_trainers
-                                      * self.epochs_till_now -
-                                      self.args.replay_ratio_upper * env_steps))
                         continue
 
                 self.train(self.args.epoch_steps, log=self.rank == 0)
