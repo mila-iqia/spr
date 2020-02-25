@@ -76,11 +76,15 @@ def run_pizero(args):
     # TODO return int observations
     obs = env.reset()
     obs = torch.from_numpy(obs)
-    vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs, target_network)
+    vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs,
+                                     args.num_simulations,
+                                     target_network)
     eval_vectorized_mcts = VectorizedMCTS(args,
                                           env.action_space[0].n,
                                           args.evaluation_episodes,
+                                          args.eval_simulations,
                                           target_network,
+
                                           eval=True)
     async_eval = AsyncEval(eval_vectorized_mcts)
     total_episodes = 0
@@ -179,6 +183,7 @@ def run_pizero(args):
                     wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
             if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
+                print("Starting evaluation run")
                 async_eval.send_queue.put(('evaluate', env_steps))
 
             obs.copy_(torch.from_numpy(next_obs))

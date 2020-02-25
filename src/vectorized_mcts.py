@@ -14,7 +14,7 @@ MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
 
 
 class VectorizedMCTS:
-    def __init__(self, args, n_actions, n_runs, network, eval=False):
+    def __init__(self, args, n_actions, n_runs, n_sims, network, eval=False):
         self.num_actions = n_actions
         self.n_runs = n_runs
         self.network = network
@@ -25,9 +25,8 @@ class VectorizedMCTS:
         self.root_dirichlet_alpha = 0.25
         self.visit_temp = args.visit_temp
         self.device = args.device
-        self.n_runs, self.n_sims = n_runs, args.num_simulations
-        if eval:
-            self.n_sims = 50
+        self.n_runs = n_runs
+        self.n_sims = n_sims
         self.id_null = self.n_sims + 1
         self.warmup_sims = min(self.n_sims // 3 + 1, n_actions)
 
@@ -130,6 +129,9 @@ class VectorizedMCTS:
 
                 self.id_current = id_next
 
+                if torch.all(done_mask):
+                    break
+
             input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, 6, 6)).squeeze()
             hidden_state, reward, policy_logits, value = self.network.inference(
                input_state, self.actions_final)
@@ -191,6 +193,7 @@ class VectorizedMCTS:
             values *= not_done_mask.squeeze()
             self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] = values
             values = values.squeeze()
+
             mins = torch.where(not_done_mask.squeeze() > 0, values, self.init_min_q)
             maxes = torch.where(not_done_mask.squeeze() > 0, values, self.init_max_q)
             self.min_q = torch.min(self.min_q, mins)
@@ -202,6 +205,9 @@ class VectorizedMCTS:
             self.search_depths.clamp_min_(0)
 
             id_current = parent_id
+
+            if torch.all(parent_id == self.id_null):
+                break
 
     def ucb_select_child(self, depth):
         # We have one extra visit of only the parent node that must be added
@@ -221,7 +227,7 @@ class VectorizedMCTS:
         # TODO: Change the temperature schedule
         return self.args.visit_temp
 
-    def evaluate(self, env_step=None):
+    def evaluate(self, env_step):
         env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)
         for e in env.envs:
             e.eval()
@@ -286,4 +292,3 @@ def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
         recieve_queue.put((None, False))
     finally:
         return
-
