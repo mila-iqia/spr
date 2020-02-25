@@ -36,7 +36,7 @@ class VectorizedMCTS:
         self.q = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
         self.prior = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
         self.visit_count = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
-        self.reward = torch.zeros((n_runs, self.n_sims + 2), device=self.device)
+        self.reward = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
         self.hidden_state = torch.zeros((n_runs, self.n_sims + 2, args.hidden_size, 6, 6), device=self.device)
         self.min_q, self.max_q = torch.zeros((n_runs,), device=self.device).fill_(MAXIMUM_FLOAT_VALUE), \
                                  torch.zeros((n_runs,), device=self.device).fill_(MINIMUM_FLOAT_VALUE)
@@ -64,13 +64,14 @@ class VectorizedMCTS:
         # A helper tensor used in indexing.
         self.batch_range = torch.arange(self.n_runs, device=self.device)
 
-    def normalize(self, sim_id):
-        """Normalize Q-values to be b/w 0 and 1 for each search tree."""
+    def value_score(self, sim_id):
+        """r(s,a) + gamma * normalized_q(s,a)."""
         valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
         if sim_id <= self.warmup_sims:
             return -self.visit_count
         values = self.q - valid_indices * self.min_q[:, None, None]
         values /= (self.max_q - self.min_q)[:, None, None]
+        values = valid_indices * (self.reward + self.args.discount * values)
         return values
 
     def reset_tensors(self):
@@ -138,7 +139,7 @@ class VectorizedMCTS:
 
             # The new node is stored at entry sim_id
             self.hidden_state[:, sim_id, :] = hidden_state
-            self.reward[:, sim_id] = reward
+            self.reward[self.batch_range, sim_id, self.actions_final.squeeze()] = reward
             self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1)
 
             # Store the pointers from parent to new node and back.
@@ -175,15 +176,16 @@ class VectorizedMCTS:
 
             # Determine the parent of the current node
             parent_id = self.id_parent.gather(1, id_current)
+            actions = self.search_actions.gather(1, self.search_depths)
 
             # A backup has terminated if the parent id is null
             not_done_mask = (parent_id != self.id_null).float()
 
             # Get the rewards observed when transitioning to the current node
-            reward = self.reward.gather(1, id_current).squeeze()
+            reward = self.reward[self.batch_range, parent_id.squeeze(), actions.squeeze()]
             # Calculate the return as observed by the new parent.
             returns = returns*self.args.discount + reward
-            actions = self.search_actions.gather(1, self.search_depths)
+
 
             # Update q and count at the parent for the actions taken then
             self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
@@ -214,13 +216,13 @@ class VectorizedMCTS:
         # to the sum.  Otherwise, all values will be 0.
         total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True) + 1
         pb_c = self.pb_c_init * (torch.sqrt(total_visits) / (1 + self.visit_count[:, :depth])) * self.prior[:, :depth]
-        normalized_q = self.normalize(depth)
-        return torch.argmax(pb_c + normalized_q[:, :depth], dim=-1)
+        value_score = self.value_score(depth)
+        return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
     def select_action(self):
         t = self.visit_temp
-        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t))
-        action = policy.sample()
+        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
+        action = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t)).sample()
         return action, policy
 
     def visit_softmax_temperature(self, training_steps=0):

@@ -88,7 +88,7 @@ def run_pizero(args):
                                           eval=True)
     async_eval = AsyncEval(eval_vectorized_mcts)
     total_episodes = 0
-    total_train_steps = 0
+    total_train_steps, target_train_steps = 0, 0
     training_started = False
     try:
         while env_steps < args.total_env_steps:
@@ -142,34 +142,27 @@ def run_pizero(args):
 
             if force_wait:
                 print("Runner waiting; needs {} more train steps to continue".format(
-                                      -args.batch_size * args.num_trainers
+                                      -args.batch_size
                                       * total_train_steps +
                                       args.replay_ratio_lower * env_steps))
 
             if force_wait or not send_queue.empty():
                 steps, log = send_queue.get()
                 log_results(log, steps)
-                target_train_steps = steps
+                total_train_steps = steps
 
-                if (args.target_update_interval > 0 and
-                    (total_train_steps % args.target_update_interval >
-                     target_train_steps % args.target_update_interval or
-                     target_train_steps - total_train_steps >=
-                     args.target_update_interval)):
-
-                    print("Updated target weights at step {}".format(target_train_steps))
+                if 0 < args.target_update_interval <= total_train_steps - target_train_steps:
+                    print("Updated target weights at step {}".format(total_train_steps))
                     target_network.load_state_dict(network.state_dict())
-                total_train_steps = target_train_steps
+                    target_train_steps = total_train_steps
 
             # Send a command to start training if ready
             if args.num_envs*101 >= env_steps > args.num_envs*100:
-                print("Started Training")
                 [q.put("train") for q in receive_queues]
                 training_started = True
 
             if args.replay_ratio_upper > 0 and training_started:
                 [q.put(env_steps) for q in receive_queues]
-
 
             if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
                 print('Env Steps: {}, Mean Reward: {}, Median Reward: {}'.format(env_steps, np.mean(episode_rewards),
