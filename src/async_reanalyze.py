@@ -185,7 +185,8 @@ class ReanalyzeWorker:
         self.directory = args.savedir
         self.index = index
         self.total_episodes = 0
-        self.mcts = MCTS(args, n_actions, self.read_heads, network)
+        self.mcts = MCTS(args, n_actions, self.read_heads,
+                         args.num_simulations, network)
         self.obs_shape = obs_shape
         self.args = args
 

@@ -47,6 +47,7 @@ def get_args():
 
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
+    parser.add_argument('--eval-simulations', type=int, default=50)
     parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
     parser.add_argument('--visit-temp', type=float, default=1.0, help='Visit counts softmax temperature for sampling actions')
 
