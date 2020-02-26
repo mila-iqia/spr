@@ -368,8 +368,13 @@ class MCTSModel(nn.Module):
         :return: Updated weights for prioritized experience replay.
         """
         with torch.no_grad():
-            states, actions, rewards, return_, done, done_n, unk, \
-            policies, values = buffer.sample_batch(self.args.batch_size_per_worker)
+            is_weights = 1.
+            if self.args.prioritized:
+                states, actions, rewards, return_, done, done_n, unk, \
+                is_weights, policies, values = buffer.sample_batch(self.args.batch_size_per_worker)
+            else:
+                states, actions, rewards, return_, done, done_n, unk, \
+                policies, values = buffer.sample_batch(self.args.batch_size_per_worker)
 
             states = states.float().to(self.args.device) / 255.
             actions = actions.long().to(self.args.device)
@@ -378,7 +383,6 @@ class MCTSModel(nn.Module):
             values = torch.from_numpy(values).float().to(self.args.device)
             initial_states = states[1]
             initial_actions = actions[0]
-            is_weights = 1.
 
             target_images = states[1:self.jumps+2, :, 0].transpose(0, 1)
             target_images = target_images.reshape(-1, *states.shape[-3:])
@@ -497,7 +501,7 @@ class MCTSModel(nn.Module):
         else:
             nce_losses = np.zeros(self.jumps + 1)
 
-        # self.buffer.update_batch_priorities(value_errors[0] + 1e-6)
+        buffer.update_batch_priorities(value_errors[0] + 1e-6)
 
         mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
         mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()

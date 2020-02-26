@@ -1,7 +1,7 @@
 description: AWM
 
 target:
-  cluster: wu2
+  cluster: eu2
   vc: msrlabs
 
 environment:
@@ -38,7 +38,7 @@ search:
       - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
       - pip install --user git+git://github.com/astooke/rlpyt
       - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
-      - python -m scripts.run_pizero --grayscale --game {game} {search-targets} --training-interval {training-interval} --batch-size-per-worker 200 {nce} {envs} --num-simulations 10 --total-env-steps 10000000 {reanalyze} --target-update-interval {uti} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 10 --num-simulations 10 --c1 {c1} --evaluation-interval 80000 --visit-temp {visit-temp}  --discount 0.997  --num-trainers 4
+      - python -m scripts.run_pizero --grayscale --game {game} {search-targets} --training-interval {training-interval} --batch-size-per-worker 200 {nce} {envs} --num-simulations 10 --total-env-steps 10000000 {reanalyze} --target-update-interval {uti} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 10 --num-simulations 10 --c1 {c1} --evaluation-interval 80000 --visit-temp {visit-temp}  --discount 0.997  --num-trainers 4  --replay-ratio-upper {replay-ratio} --eval-simulations 25  --virtual-threads {virtual-threads}
   type: grid
   max_trials: 100
   params:
@@ -47,7 +47,7 @@ search:
       values: ['ms_pacman']
     - name: nce
       spec: discrete
-      values: ['--no-nce']
+      values: ['--no-nce --value-loss-weight 0.1', '--no-nce']
     - name: envs
       spec: discrete
       values: ['--num-envs 64 --num-workers 1']
@@ -56,7 +56,7 @@ search:
       values: ['']
     - name: uti
       spec: discrete
-      values: [100]
+      values: [50]
     - name: multistep
       spec: discrete
       values: [10]
@@ -65,10 +65,16 @@ search:
       values: [64]
     - name: c1
       spec: discrete
-      values: [1.25, 2.5]
+      values: [1.25]
     - name: search-targets
       spec: discrete
       values: ['']
     - name: visit-temp
       spec: discrete
-      values: [0.25, 0.5]
+      values: [1,0]
+    - name: replay-ratio
+      spec: discrete
+      values: [2, -1]
+    - name: virtual-threads
+      spec: discrete
+      values: [3]

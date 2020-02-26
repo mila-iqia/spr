@@ -84,7 +84,6 @@ def run_pizero(args):
                                           args.evaluation_episodes,
                                           args.eval_simulations,
                                           target_network,
-
                                           eval=True)
     async_eval = AsyncEval(eval_vectorized_mcts)
     total_episodes = 0
@@ -157,7 +156,7 @@ def run_pizero(args):
                     target_train_steps = total_train_steps
 
             # Send a command to start training if ready
-            if args.num_envs*101 >= env_steps > args.num_envs*100:
+            if args.num_envs*101 >= env_steps > args.num_envs*50:
                 [q.put("train") for q in receive_queues]
                 training_started = True
 
@@ -181,6 +180,8 @@ def run_pizero(args):
 
             obs.copy_(torch.from_numpy(next_obs))
             env_steps += args.num_envs
+            vectorized_mcts.env_steps = env_steps
+            eval_vectorized_mcts.env_steps = env_steps
 
     except (KeyboardInterrupt, Exception):
         traceback.print_exc()
