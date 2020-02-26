@@ -93,13 +93,15 @@ class TrainingWorker(object):
         self.maximum_length = args.jumps
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
-        self.nce = LocalNCE() if not args.use_all_targets else BlockNCE()
         self.train_trackers = reset_trackers(self.maximum_length)
 
     def startup(self):
         if torch.cuda.is_available():
             self.devices = torch.cuda.device_count()
-            device_id = self.rank % self.devices
+            if not self.args.no_gpu_0_train:
+                device_id = self.rank % self.devices
+            else:
+                device_id = (self.rank % (self.devices - 1))+1
             self.args.device = torch.device('cuda:{}'.format(device_id))
             torch.cuda.set_device(self.args.device)
             torch.cuda.manual_seed(self.args.seed)
@@ -110,7 +112,7 @@ class TrainingWorker(object):
 
         setup(self.rank, self.size, self.args.seed, self.port, self.backend)
         self.model, self.optimizer, self.scheduler = create_network(self.args)
-        print("{} started".format(self.rank))
+        print("{} started on gpu {}".format(self.rank, self.args.device))
         if self.rank == 0:
             print("{} sending model".format(self.rank))
             self.squeue.put(self.model)
@@ -179,6 +181,11 @@ class TrainingWorker(object):
 
 
 class LocalNCE:
+
+    def __init__(self, classifier, temperature=0.1):
+        self.classifier = classifier
+        self.inv_temp = 1/temperature
+
     def calculate_accuracy(self, preds):
         labels = torch.arange(preds.shape[1], dtype=torch.long, device=preds.device)
         preds = torch.argmax(-preds, dim=-1)
@@ -205,15 +212,18 @@ class LocalNCE:
         """
         # reshaping for big matrix multiply
         # f_x1 = f_x1.permute(2, 0, 1)  # (n_locs, n_batch, n_rkhs)
+        f_x1 = self.classifier(f_x1)
         f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
 
-        new_target = f_x2
+        f_x1 = f_x1/(torch.norm(f_x1, dim=-1, keepdim=True) + 1.e-3)
+        f_x2 = f_x2/(torch.norm(f_x2, dim=-1, keepdim=True) + 1.e-3)
+
         n_batch = f_x1.size(1)
-        neg_batch = new_target.size(-1)
+        neg_batch = f_x2.size(-1)
 
         # compute dot(f_glb[i, :, l], f_lcl[j, :, l]) for all i, j, l
         # -- after matmul: raw_scores[l, i, j] = dot(f_x1[i, :, l], f_x2[j, :, l])
-        raw_scores = torch.matmul(f_x1, new_target)  # (n_locs, n_batch, n_batch)
+        raw_scores = torch.matmul(f_x1, f_x2)*self.inv_temp  # (n_locs, n_batch, n_batch)
         # We get NCE log softmax by normalizing over dim 1 or 2 of raw_scores...
         # -- normalizing over dim 1 gives scores for predicting x2->x1
         # -- normalizing over dim 2 gives scores for predicting x1->x2
@@ -237,6 +247,11 @@ class LocalNCE:
 
 
 class BlockNCE:
+    def __init__(self, classifier, temperature=0.1, use_self_targets=False):
+        self.classifier = classifier
+        self.inv_temp = 1/temperature
+        self.use_self_targets = use_self_targets
+
     def calculate_accuracy(self, preds):
         labels = torch.arange(preds.shape[-2], dtype=torch.long, device=preds.device)
         preds = torch.argmax(-preds, dim=-1)
@@ -265,28 +280,53 @@ class BlockNCE:
         # f_x1 = f_x1.permute(2, 0, 1)  # (n_locs, n_batch, n_rkhs)
         f_x1 = f_x1s.flatten(1, 2)
         f_x2 = f_x2s.flatten(1, 2)
+        f_x1 = self.classifier(f_x1)
+        f_x1 = f_x1/(torch.norm(f_x1, dim=-1, keepdim=True) + 1.e-3)
+        f_x2 = f_x2/(torch.norm(f_x2, dim=-1, keepdim=True) + 1.e-3)
         f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
-
-        new_target = f_x2
         n_batch = f_x1.size(1)
-        neg_batch = new_target.size(-1)
+        neg_batch = f_x2.size(-1)
 
         # compute dot(f_glb[i, :, l], f_lcl[j, :, l]) for all i, j, l
         # -- after matmul: raw_scores[l, i, j] = dot(f_x1[i, :, l], f_x2[j, :, l])
-        raw_scores = torch.matmul(f_x1, new_target)  # (n_locs, n_batch, n_batch)
-        # We get NCE log softmax by normalizing over dim 1 or 2 of raw_scores...
-        # -- normalizing over dim 1 gives scores for predicting x2->x1
-        # -- normalizing over dim 2 gives scores for predicting x1->x2
-        lsmax_x1_to_x2 = -F.log_softmax(raw_scores, dim=2)  # (n_locs, n_batch, n_batch)
-        lsmax_x2_to_x1 = -F.log_softmax(raw_scores, dim=1)  # (n_locs, n_batch, n_batch)
+        raw_scores = torch.matmul(f_x1, f_x2)*self.inv_temp  # (n_locs, n_batch, n_batch)
+
         # make a mask for picking out the NCE scores for positive pairs
+
         pos_mask = torch.eye(n_batch, dtype=f_x1.dtype, device=f_x1.device)
         if n_batch != neg_batch:
             with torch.no_grad():
-                mask = torch.zeros((n_batch, neg_batch), dtype=f_x1.dtype, device=f_x1.device)
+                mask = torch.zeros((n_batch, neg_batch),
+                                   dtype=f_x1.dtype,
+                                   device=f_x1.device)
                 mask[:n_batch, :n_batch] += pos_mask
                 pos_mask = mask
+
         pos_mask = pos_mask.unsqueeze(dim=0)
+        if not self.use_self_targets:
+            t = f_x1s.shape[1]
+            batch_mask = torch.eye(f_x1s.shape[2],
+                                   dtype=f_x1.dtype,
+                                   device=f_x1.device)
+            batch_mask = batch_mask[None, :, None, :].expand(t, -1, t, -1)
+            batch_mask = batch_mask.flatten(0, 1).flatten(1, 2)
+            if n_batch != neg_batch:
+                with torch.no_grad():
+                    mask = torch.zeros((n_batch, neg_batch),
+                                       dtype=f_x1.dtype,
+                                       device=f_x1.device)
+                    mask[:n_batch, :n_batch] += batch_mask
+                    batch_mask = mask
+            batch_mask = batch_mask.unsqueeze(dim=0)
+            weight_mask = 1 - (batch_mask - pos_mask)
+            raw_scores = raw_scores * weight_mask
+
+        # We get NCE log softmax by normalizing over dim 1 or 2 of raw_scores...
+        # -- normalizing over dim 1 gives scores for predicting x2->x1
+        # -- normalizing over dim 2 gives scores for predicting x1->x2
+
+        lsmax_x1_to_x2 = -F.log_softmax(raw_scores, dim=2)  # (n_locs, n_batch, n_batch)
+        lsmax_x2_to_x1 = -F.log_softmax(raw_scores, dim=1)  # (n_locs, n_batch, n_batch)
         # use masked sums to select NCE scores for positive pairs
         loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=2)  # (n_locs, n_batch)
         loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)[:, :n_batch]  # (n_locs, n_batch)
@@ -321,7 +361,10 @@ class MCTSModel(nn.Module):
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         if not self.no_nce:
             self.target_encoder = SmallEncoder(args)
-            self.nce = LocalNCE() if not args.use_all_targets else BlockNCE()
+            self.classifier = nn.Sequential(nn.Linear(args.hidden_size,
+                                                      args.hidden_size),
+                                            nn.ReLU())
+            self.nce = BlockNCE(self.classifier, use_self_targets=args.use_all_targets)
 
     def encode(self, images, actions):
         return self.encoder(images, actions)
@@ -420,7 +463,8 @@ class MCTSModel(nn.Module):
             current_state, pred_reward, pred_policy, pred_value = \
                 self.step(current_state, action)
 
-            current_state = ScaleGradient.apply(current_state, 0.5)
+            current_state = ScaleGradient.apply(current_state,
+                                                self.args.grad_scale_factor)
 
             predictions.append((1. / self.jumps,
                                 pred_reward,
@@ -477,21 +521,21 @@ class MCTSModel(nn.Module):
             policy_losses.append(current_policy_loss.detach().mean().cpu().item())
 
         if not self.no_nce:
-            if self.use_all_targets:
-                target_images = target_images.permute(0, 2, 1, 3)
-                nce_input = torch.stack(pred_states, 1).flatten(3, 4).permute(3, 1, 0, 2)
-                nce_loss, nce_accs = self.nce.forward(nce_input, target_images)
-                nce_losses = nce_loss.mean(-1).detach().cpu().numpy()
-                nce_loss = (nce_loss*is_weights).mean(-1)
-            else:
-                nce_loss = []
-                for i, pred_state in enumerate(pred_states):
-                    current_targets = target_images[:, :, i]
-                    nce_input = pred_state.flatten(2, 3).permute(2, 0, 1)
-                    current_nce_loss, current_nce_acc = self.nce.forward(nce_input, current_targets)
-                    nce_loss.append((current_nce_loss*is_weights).mean())
-                    nce_losses.append(current_nce_loss.detach().cpu().mean().item())
-                    nce_accs[i] = current_nce_acc
+            # if self.use_all_targets:
+            target_images = target_images.permute(0, 2, 1, 3)
+            nce_input = torch.stack(pred_states, 1).flatten(3, 4).permute(3, 1, 0, 2)
+            nce_loss, nce_accs = self.nce.forward(nce_input, target_images)
+            nce_losses = nce_loss.mean(-1).detach().cpu().numpy()
+            nce_loss = (nce_loss*is_weights).mean(-1)
+            # else:
+            #     nce_loss = []
+            #     for i, pred_state in enumerate(pred_states):
+            #         current_targets = target_images[:, :, i]
+            #         nce_input = pred_state.flatten(2, 3).permute(2, 0, 1)
+            #         current_nce_loss, current_nce_acc = self.nce.forward(nce_input, current_targets)
+            #         nce_loss.append((current_nce_loss*is_weights).mean())
+            #         nce_losses.append(current_nce_loss.detach().cpu().mean().item())
+            #         nce_accs[i] = current_nce_acc
 
             for i, current_nce_loss in enumerate(nce_loss):
                 loss_scale = predictions[i][0]
@@ -547,6 +591,8 @@ class SmallEncoder(nn.Module):
             nn.ReLU(),
             nn.BatchNorm2d(128),
             init_(nn.Conv2d(128, self.feature_size, 4, stride=2, padding=1)),  # 6 x 6
+            nn.ReLU(),
+            init_(nn.Conv2d(self.feature_size, self.feature_size, 1, stride=1, padding=0)),
             nn.ReLU())
         self.train()
 
@@ -566,6 +612,7 @@ class TransitionModel(nn.Module):
                  action_dim=6,):
         super().__init__()
         self.hidden_size = hidden_size
+        self.args = args
         layers = [Conv2dSame(channels+action_dim, hidden_size, 3),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size)]
@@ -631,16 +678,17 @@ def renormalize(tensor, first_dim=1):
 
 
 class FiLMTransitionModel(nn.Module):
-    def __init__(self, channels, cond_size, args, blocks=16, hidden_size=256, output_size=256,):
+    def __init__(self, channels, cond_size, args, blocks=16, hidden_size=256,):
         super().__init__()
         self.hidden_size = hidden_size
+        self.args = args
         layers = nn.ModuleList()
         layers.append(Conv2dSame(channels, hidden_size, 3))
         layers.append(nn.ReLU())
         layers.append(nn.BatchNorm2d(hidden_size))
         for _ in range(blocks):
             layers.append(FiLMResidualBlock(hidden_size, hidden_size, cond_size))
-        layers.extend([Conv2dSame(hidden_size, output_size, 3),
+        layers.extend([Conv2dSame(hidden_size, channels, 3),
                       nn.ReLU()])
 
         self.network = nn.Sequential(*layers)
