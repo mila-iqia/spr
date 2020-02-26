@@ -27,6 +27,7 @@ def get_args():
     parser.add_argument('--target-update-interval', type=int, default=10,
                         help="Number of gradient steps for each update to the "
                              "target network.  <=0 to disable target network.")
+    parser.add_argument('--no-gpu-0-train', action='store_true')
     parser.add_argument('--epoch-steps', type=int, default=50,
                         help="Number of gradient steps between loggings.")
     parser.add_argument('--replay-ratio-upper', type=float, default=-1.,
@@ -62,6 +63,7 @@ def get_args():
     parser.add_argument('--lr-decay-steps', type=float, default=350.e3, help='Learning rate decay time constant')
     parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
+    parser.add_argument('--grad-scale-factor', type=float, default=0.5, help='Rollout gradient downscaling. 1 disables')
     parser.add_argument('--adam-eps', type=float, default=1e-5, help='Adam epsilon')
     parser.add_argument('--weight-decay', type=float, default=1e-3, help='Weight decay regularization constant')
     parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
