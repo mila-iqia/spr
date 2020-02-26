@@ -55,10 +55,9 @@ def run_pizero(args):
     torch_set_device(args)
     network = send_queue.get()
     print("Received target network from trainer")
-    if args.target_update_interval > 0:
-        target_network = copy.deepcopy(network)
-    else:
-        target_network = network
+    target_network = copy.deepcopy(network)
+    args.device = torch.device('cuda:{}'.format(0))
+    target_network.to(args.device)
     target_network.share_memory()
 
     if args.reanalyze:

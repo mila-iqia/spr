@@ -98,7 +98,10 @@ class TrainingWorker(object):
     def startup(self):
         if torch.cuda.is_available():
             self.devices = torch.cuda.device_count()
-            device_id = self.rank % self.devices
+            if not self.args.no_gpu_0_train:
+                device_id = self.rank % self.devices
+            else:
+                device_id = (self.rank % (self.devices - 1))+1
             self.args.device = torch.device('cuda:{}'.format(device_id))
             torch.cuda.set_device(self.args.device)
             torch.cuda.manual_seed(self.args.seed)
@@ -109,7 +112,7 @@ class TrainingWorker(object):
 
         setup(self.rank, self.size, self.args.seed, self.port, self.backend)
         self.model, self.optimizer, self.scheduler = create_network(self.args)
-        print("{} started".format(self.rank))
+        print("{} started on gpu {}".format(self.rank, self.args.device))
         if self.rank == 0:
             print("{} sending model".format(self.rank))
             self.squeue.put(self.model)
@@ -456,7 +459,8 @@ class MCTSModel(nn.Module):
             current_state, pred_reward, pred_policy, pred_value = \
                 self.step(current_state, action)
 
-            current_state = ScaleGradient.apply(current_state, 0.5)
+            current_state = ScaleGradient.apply(current_state,
+                                                self.args.grad_scale_factor)
 
             predictions.append((1. / self.jumps,
                                 pred_reward,
@@ -604,6 +608,7 @@ class TransitionModel(nn.Module):
                  action_dim=6,):
         super().__init__()
         self.hidden_size = hidden_size
+        self.args = args
         layers = [Conv2dSame(channels+action_dim, hidden_size, 3),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size)]
@@ -669,16 +674,17 @@ def renormalize(tensor, first_dim=1):
 
 
 class FiLMTransitionModel(nn.Module):
-    def __init__(self, channels, cond_size, args, blocks=16, hidden_size=256, output_size=256,):
+    def __init__(self, channels, cond_size, args, blocks=16, hidden_size=256,):
         super().__init__()
         self.hidden_size = hidden_size
+        self.args = args
         layers = nn.ModuleList()
         layers.append(Conv2dSame(channels, hidden_size, 3))
         layers.append(nn.ReLU())
         layers.append(nn.BatchNorm2d(hidden_size))
         for _ in range(blocks):
             layers.append(FiLMResidualBlock(hidden_size, hidden_size, cond_size))
-        layers.extend([Conv2dSame(hidden_size, output_size, 3),
+        layers.extend([Conv2dSame(hidden_size, channels, 3),
                       nn.ReLU()])
 
         self.network = nn.Sequential(*layers)
