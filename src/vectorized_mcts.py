@@ -29,6 +29,9 @@ class VectorizedMCTS:
         self.n_sims = n_sims
         self.id_null = self.n_sims + 1
         self.warmup_sims = min(self.n_sims // 3 + 1, n_actions)
+        self.virtual_threads = args.virtual_threads
+        self.vl_c = args.virtual_loss_c
+        self.env_steps = 0
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
@@ -36,6 +39,7 @@ class VectorizedMCTS:
         self.q = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
         self.prior = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
         self.visit_count = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
+        self.virtual_loss = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
         self.reward = torch.zeros((n_runs, self.n_sims + 2, self.num_actions), device=self.device)
         self.hidden_state = torch.zeros((n_runs, self.n_sims + 2, args.hidden_size, 6, 6), device=self.device)
         self.min_q, self.max_q = torch.zeros((n_runs,), device=self.device).fill_(MAXIMUM_FLOAT_VALUE), \
@@ -65,13 +69,17 @@ class VectorizedMCTS:
         self.batch_range = torch.arange(self.n_runs, device=self.device)
 
     def value_score(self, sim_id):
-        """r(s,a) + gamma * normalized_q(s,a)."""
+        """normalized_q(s,a)."""
+        if (sim_id - 1) % self.virtual_threads == 0:
+            self.virtual_loss.fill_(0)
+        if sim_id <= 2:
+            return -self.virtual_loss
         valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
-        if sim_id <= self.warmup_sims:
-            return -self.visit_count
-        values = self.q - valid_indices * self.min_q[:, None, None]
+        # if sim_id <= self.warmup_sims:
+        #     return -self.visit_count
+        values = self.q - (valid_indices * self.min_q[:, None, None])
         values /= (self.max_q - self.min_q)[:, None, None]
-        values = valid_indices * (self.reward + self.args.discount * values)
+        values = valid_indices * (values - self.virtual_loss)
         return values
 
     def reset_tensors(self):
@@ -189,6 +197,7 @@ class VectorizedMCTS:
 
             # Update q and count at the parent for the actions taken then
             self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
+            self.virtual_loss[self.batch_range, parent_id.squeeze(), actions.squeeze()] += (self.vl_c * not_done_mask.squeeze())
             values = ((self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] *
                      self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()]) + returns) \
                      / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] + 1)
@@ -220,14 +229,18 @@ class VectorizedMCTS:
         return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
     def select_action(self):
-        t = self.visit_temp
+        t = self.visit_softmax_temperature()
         policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
         action = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t)).sample()
         return action, policy
 
-    def visit_softmax_temperature(self, training_steps=0):
+    def visit_softmax_temperature(self):
         # TODO: Change the temperature schedule
-        return self.args.visit_temp
+        if self.env_steps < 2.5e6:
+            return 1.
+        if self.env_steps < 3.75e6:
+            return 0.5
+        return 0.25
 
     def evaluate(self, env_step):
         env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)

@@ -5,13 +5,14 @@ import numpy as np
 import torch
 from recordclass import recordclass
 
+from rlpyt.replays.sequence.prioritized import SamplesFromReplayPri
 from src.envs import get_example_outputs
 
 from rlpyt.replays.non_sequence.frame import AsyncPrioritizedReplayFrameBuffer
 from rlpyt.replays.sequence.n_step import SamplesFromReplay
 from rlpyt.replays.sequence.frame import AsyncPrioritizedSequenceReplayFrameBuffer, \
     AsyncUniformSequenceReplayFrameBuffer, PrioritizedSequenceReplayFrameBuffer
-from rlpyt.utils.buffer import torchify_buffer
+from rlpyt.utils.buffer import torchify_buffer, numpify_buffer
 from rlpyt.utils.collections import namedarraytuple
 from rlpyt.utils.misc import extract_sequences
 from rlpyt.utils.synchronize import RWLock
@@ -22,8 +23,10 @@ blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 
 
 SamplesToBuffer = namedarraytuple("SamplesToBuffer",
                                   ["observation", "action", "reward", "done", "policy_probs", "value"])
-SamplesFromReplayPriExt = namedarraytuple("SamplesFromReplayPriExt",
+SamplesFromReplayExt = namedarraytuple("SamplesFromReplayPriExt",
                                        SamplesFromReplay._fields + ("policy_probs", "values"))
+SamplesFromReplayPriExt = namedarraytuple("SamplesFromReplayPriExt",
+                                       SamplesFromReplayPri._fields + ("policy_probs", "values"))
 EPS = 1e-6
 
 
@@ -50,7 +53,10 @@ def initialize_replay_buffer(args):
         discount=args.discount,
         n_step_return=1,
     )
-    buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
+    if args.prioritized:
+        buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
+    else:
+        buffer = AsyncUniformSequenceReplayFrameBufferExtended(**replay_kwargs)
     return buffer
 
 
@@ -65,7 +71,7 @@ def samples_to_buffer(observation, action, reward, done, policy_probs, value):
     )
 
 
-class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFrameBuffer):
+class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFrameBuffer):
     """
     Extends AsyncPrioritizedSequenceReplayFrameBuffer to return policy_logits and values too during sampling.
     """
@@ -85,8 +91,50 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncUniformSequenceRepl
 
         policy_probs = extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T + self.n_step_return)
         values = extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T + self.n_step_return)
-        batch = SamplesFromReplayPriExt(*batch, policy_probs=policy_probs, values=values)
+        batch = SamplesFromReplayExt(*batch, policy_probs=policy_probs, values=values)
         return self.sanitize_batch(batch)
+
+    def sanitize_batch(self, batch):
+        has_dones, inds = torch.max(batch.done, 0)
+        for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
+            if not has_done:
+                continue
+            batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
+            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
+            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
+            batch.policy_probs[ind+1:, i] = batch.policy_probs[ind, i]
+            batch.all_reward[ind+1:, i] = 0
+            batch.values[ind+1:, i] = 0
+        return batch
+
+
+class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequenceReplayFrameBuffer):
+    """
+    Extends AsyncPrioritizedSequenceReplayFrameBuffer to return policy_logits and values too during sampling.
+    """
+    def sample_batch(self, batch_B):
+        self._async_pull()  # Updates from writers.
+        batch_T = self.batch_T
+        (T_idxs, B_idxs), priorities = self.priority_tree.sample(
+            batch_B, unique=self.unique)
+        if self.rnn_state_interval > 1:
+            T_idxs = T_idxs * self.rnn_state_interval
+
+        batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
+        is_weights = (1. / priorities) ** self.beta
+        is_weights /= max(is_weights)  # Normalize.
+        is_weights = torchify_buffer(is_weights).float()
+
+        policy_probs = extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T + self.n_step_return)
+        values = extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T + self.n_step_return)
+        batch = SamplesFromReplayPriExt(*batch, is_weights=is_weights, policy_probs=policy_probs, values=values)
+        return self.sanitize_batch(batch)
+
+    def update_batch_priorities(self, priorities):
+        priorities = numpify_buffer(priorities)
+        self.default_priority = max(priorities)
+        print(max(priorities))
+        self.priority_tree.update_batch_priorities(priorities ** self.alpha)
 
     def sanitize_batch(self, batch):
         has_dones, inds = torch.max(batch.done, 0)
