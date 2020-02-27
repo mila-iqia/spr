@@ -55,10 +55,6 @@ def run_pizero(args):
     network = send_queue.get()
     print("Received target network from trainer")
     target_network = copy.deepcopy(network)
-    if torch.cuda.is_available():
-        args.device = torch.device('cuda:{}'.format(0))
-    else:
-        args.device = torch.device('cpu')
     target_network.to(args.device)
     target_network.share_memory()
 
@@ -168,7 +164,7 @@ def run_pizero(args):
                     target_train_steps = total_train_steps
 
             # Send a command to start training if ready
-            if args.num_envs*101 >= env_steps > args.num_envs*25:
+            if args.num_envs*101 >= env_steps > args.num_envs*100:
                 [q.put("train") for q in receive_queues]
                 training_started = True
 
