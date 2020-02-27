@@ -57,6 +57,7 @@ def initialize_replay_buffer(args):
         buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
     else:
         buffer = AsyncUniformSequenceReplayFrameBufferExtended(**replay_kwargs)
+
     return buffer
 
 
@@ -131,9 +132,10 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
         return self.sanitize_batch(batch)
 
     def update_batch_priorities(self, priorities):
-        priorities = numpify_buffer(priorities)
-        self.default_priority = max(priorities)
-        self.priority_tree.update_batch_priorities(priorities ** self.alpha)
+        with self.rw_lock.write_lock:
+            priorities = numpify_buffer(priorities)
+            self.default_priority = max(priorities)
+            self.priority_tree.update_batch_priorities(priorities ** self.alpha)
 
     def sanitize_batch(self, batch):
         has_dones, inds = torch.max(batch.done, 0)
