@@ -124,7 +124,7 @@ class TrainingWorker(object):
             self.model = DDP(self.model,
                              device_ids=[self.args.device],
                              output_device=self.args.device,
-                             find_unused_parameters=self.args.film or self.args.q_learning)
+                             find_unused_parameters=False)#self.args.film or self.args.q_learning)
 
     def optimize(self, buffer):
         self.buffer = buffer.x
@@ -152,7 +152,6 @@ class TrainingWorker(object):
                 self.train(self.args.epoch_steps, log=self.rank == 0)
 
                 self.epochs_till_now += self.args.epoch_steps
-
 
                 if self.rank == 0:
                     self.squeue.put((self.epochs_till_now, self.train_trackers))
@@ -361,7 +360,7 @@ class MCTSModel(nn.Module):
             self.value_model = QNetwork(args.hidden_size, num_actions)
         else:
             self.value_model = ValueNetwork(args.hidden_size)
-        self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
+            self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         if not self.no_nce:
             self.target_encoder = SmallEncoder(args)
@@ -378,7 +377,10 @@ class MCTSModel(nn.Module):
             obs = obs.unsqueeze(0)
         obs = obs.flatten(1, 2)
         hidden_state = self.encoder(obs, actions)
-        policy_logits = self.policy_model(hidden_state)
+        if not self.args.q_learning:
+            policy_logits = self.policy_model(hidden_state)
+        else:
+            policy_logits = None
         value_logits = self.value_model(hidden_state)
         reward_logits = self.dynamics_model.reward_predictor(hidden_state)
 
@@ -403,7 +405,10 @@ class MCTSModel(nn.Module):
 
     def step(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)
-        policy_logits = self.policy_model(next_state)
+        if not self.args.q_learning:
+            policy_logits = self.policy_model(next_state)
+        else:
+            policy_logits = None
         value_logits = self.value_model(next_state)
 
         return next_state, reward_logits, policy_logits, value_logits
