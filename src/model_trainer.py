@@ -415,13 +415,14 @@ class MCTSModel(nn.Module):
         :return: Updated weights for prioritized experience replay.
         """
         with torch.no_grad():
-            is_weights = 1.
             if self.args.prioritized:
                 states, actions, rewards, return_, done, done_n, unk, \
                 is_weights, policies, values = buffer.sample_batch(self.args.batch_size_per_worker)
+                is_weights = is_weights.float().to(self.args.device)
             else:
                 states, actions, rewards, return_, done, done_n, unk, \
                 policies, values = buffer.sample_batch(self.args.batch_size_per_worker)
+                is_weights = 1.
 
             states = states.float().to(self.args.device) / 255.
             actions = actions.long().to(self.args.device)
