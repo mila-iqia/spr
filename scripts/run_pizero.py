@@ -18,7 +18,7 @@ import wandb
 import numpy as np
 import gym
 
-from src.vectorized_mcts import VectorizedMCTS, AsyncEval
+from src.vectorized_mcts import VectorizedMCTS, AsyncEval, VectorizedQMCTS
 
 
 def torch_set_device(args):
@@ -28,7 +28,6 @@ def torch_set_device(args):
         torch.backends.cudnn.enabled = True
     else:
         args.device = torch.device('cpu')
-
 
 def run_pizero(args):
     buffer = initialize_replay_buffer(args)
@@ -56,7 +55,10 @@ def run_pizero(args):
     network = send_queue.get()
     print("Received target network from trainer")
     target_network = copy.deepcopy(network)
-    args.device = torch.device('cuda:{}'.format(0))
+    if torch.cuda.is_available():
+        args.device = torch.device('cuda:{}'.format(0))
+    else:
+        args.device = torch.device('cpu')
     target_network.to(args.device)
     target_network.share_memory()
 
@@ -75,15 +77,27 @@ def run_pizero(args):
     # TODO return int observations
     obs = env.reset()
     obs = torch.from_numpy(obs)
-    vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs,
-                                     args.num_simulations,
-                                     target_network)
-    eval_vectorized_mcts = VectorizedMCTS(args,
-                                          env.action_space[0].n,
-                                          args.evaluation_episodes,
-                                          args.eval_simulations,
-                                          target_network,
-                                          eval=True)
+    if args.q_learning:
+        vectorized_mcts = VectorizedQMCTS(args, env.action_space[0].n, args.num_envs,
+                                         args.num_simulations,
+                                         target_network)
+        eval_vectorized_mcts = VectorizedQMCTS(args,
+                                              env.action_space[0].n,
+                                              args.evaluation_episodes,
+                                              args.eval_simulations,
+                                              target_network,
+                                              eval=True)
+    else:
+        vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs,
+                                         args.num_simulations,
+                                         target_network)
+        eval_vectorized_mcts = VectorizedMCTS(args,
+                                              env.action_space[0].n,
+                                              args.evaluation_episodes,
+                                              args.eval_simulations,
+                                              target_network,
+                                              eval=True)
+
     async_eval = AsyncEval(eval_vectorized_mcts)
     total_episodes = 0
     total_train_steps, target_train_steps = 0, 0
@@ -92,11 +106,10 @@ def run_pizero(args):
         while env_steps < args.total_env_steps:
             # Run MCTS for the vectorized observation
             actions, policies, values = vectorized_mcts.run(obs)
-            policy_probs = policies.probs
             next_obs, reward, done, infos = env.step(actions.cpu().numpy())
             reward, done = torch.from_numpy(reward).float(), torch.from_numpy(done).float()
-            obs, actions, reward, done, policy_probs, values = obs.cpu(), actions.cpu(), reward.cpu(),\
-                                                               done.cpu(), policy_probs.cpu(), values.cpu()
+            obs, actions, reward, done, policies, values = obs.cpu(), actions.cpu(), reward.cpu(),\
+                                                               done.cpu(), policies.cpu(), values.cpu()
 
             eprets += np.array(reward)
             for i in range(args.num_envs):
@@ -122,12 +135,12 @@ def run_pizero(args):
                 actions = torch.cat([actions, new_samples[1]], 0)
                 reward = torch.cat([reward, new_samples[2]], 0)
                 done = torch.cat([done, new_samples[3]], 0)
-                policy_probs = torch.cat([policy_probs, new_samples[4]], 0)
+                policies = torch.cat([policies, new_samples[4]], 0)
                 values = torch.cat([values, new_samples[5]], 0)
-                local_buf.append(cat_obs, actions, reward, done, policy_probs, values)
+                local_buf.append(cat_obs, actions, reward, done, policies, values)
 
             else:
-                local_buf.append(obs, actions, reward, done, policy_probs, values)
+                local_buf.append(obs, actions, reward, done, policies, values)
 
             if env_steps % args.jumps == 0 and env_steps > 0:
                 # Send transitions from the local buffer to the replay buffer
@@ -155,7 +168,7 @@ def run_pizero(args):
                     target_train_steps = total_train_steps
 
             # Send a command to start training if ready
-            if args.num_envs*101 >= env_steps > args.num_envs*50:
+            if args.num_envs*101 >= env_steps > args.num_envs*25:
                 [q.put("train") for q in receive_queues]
                 training_started = True
 
@@ -173,7 +186,7 @@ def run_pizero(args):
                     print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
                     wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
 
-            if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
+            if env_steps % args.evaluation_interval == 0 and env_steps > 0:
                 print("Starting evaluation run")
                 async_eval.send_queue.put(('evaluate', env_steps))
 
