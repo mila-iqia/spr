@@ -415,8 +415,8 @@ class VectorizedQMCTS(VectorizedMCTS):
         return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
     def select_action(self):
-        e_action = (torch.rand_like(self.q[:, 0, 0]) < self.args.epsilon).long()
-        random_actions = torch.randint(self.num_actions, size=(self.n_runs,))
+        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.device) < self.args.epsilon).long()
+        random_actions = torch.randint(self.num_actions, size=(self.n_runs,), device=self.device)
         max_actions = self.q[:, 0].argmax(dim=-1)
         actions = e_action * random_actions + (1-e_action) * max_actions
         return actions
