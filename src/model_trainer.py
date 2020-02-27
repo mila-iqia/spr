@@ -346,6 +346,7 @@ class MCTSModel(nn.Module):
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
         self.no_nce = args.no_nce
+        self.batch_range = torch.arange(args.batch_size_per_worker).to(self.args.device)
         if args.film:
             self.dynamics_model = FiLMTransitionModel(channels=args.hidden_size,
                                                       cond_size=num_actions,
@@ -356,7 +357,10 @@ class MCTSModel(nn.Module):
                                                   num_actions=num_actions,
                                                   blocks=args.dynamics_blocks,
                                                   args=args)
-        self.value_model = ValueNetwork(args.hidden_size)
+        if self.args.q_learning:
+            self.value_model = QNetwork(args.hidden_size, num_actions)
+        else:
+            self.value_model = ValueNetwork(args.hidden_size)
         self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         if not self.no_nce:
@@ -441,6 +445,12 @@ class MCTSModel(nn.Module):
                                                          initial_actions,
                                                          logits=True)
 
+        if self.args.q_learning:
+            pred_policy = pred_value
+            pred_value = pred_value[self.batch_range, actions[1], :]
+            pred_policy = inverse_transform(from_categorical(pred_policy,
+                                                             logits=True))
+
         # This represents s_1, r_0, pi_1, v_1
         predictions = [(1.0, pred_reward, pred_policy, pred_value)]
         pred_states = [current_state]
@@ -462,6 +472,11 @@ class MCTSModel(nn.Module):
             action = actions[i]
             current_state, pred_reward, pred_policy, pred_value = \
                 self.step(current_state, action)
+            if self.args.q_learning:
+                pred_policy = pred_value
+                pred_policy = inverse_transform(from_categorical(pred_policy,
+                                                   logits=True))
+                pred_value = pred_value[self.batch_range, actions[i+1], :]
 
             current_state = ScaleGradient.apply(current_state,
                                                 self.args.grad_scale_factor)
@@ -765,13 +780,15 @@ class QNetwork(nn.Module):
                  init_weight_scale=1.):
         super().__init__()
         self.hidden_size = hidden_size
+        init_2 = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                                constant_(x, 0), gain=0.01)
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, 256),
+                  nn.Linear(pixels*hidden_size, 512),
                   nn.ReLU(),
-                  nn.Linear(256, (num_actions)*(limit*2 + 1))]
+                  init_2(nn.Linear(512, (num_actions)*(limit*2 + 1)))]
         with torch.no_grad():
             layers[-1].weight *= init_weight_scale
         self.network = nn.Sequential(*layers)
@@ -780,7 +797,7 @@ class QNetwork(nn.Module):
         self.train()
 
     def forward(self, x):
-        distributions = self.network(x).view(*x.shape[:-1],
+        distributions = self.network(x).view(*(x.shape[:-3]),
                                              self.num_actions,
                                              self.dist_size)
         return distributions

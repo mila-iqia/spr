@@ -133,7 +133,6 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
     def update_batch_priorities(self, priorities):
         priorities = numpify_buffer(priorities)
         self.default_priority = max(priorities)
-        print(max(priorities))
         self.priority_tree.update_batch_priorities(priorities ** self.alpha)
 
     def sanitize_batch(self, batch):
