@@ -410,7 +410,7 @@ class VectorizedQMCTS(VectorizedMCTS):
         # total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True) + 1
         # pb_c = self.pb_c_init * (torch.sqrt(total_visits) / (1 + self.visit_count[:, :depth])) * self.prior[:, :depth]
         total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True)
-        pb_c = self.pb_c_init * torch.sqrt((torch.log(total_visits) / (1 + self.visit_count[:, :depth])))
+        pb_c = self.pb_c_init * torch.sqrt((torch.log(total_visits) / (self.visit_count[:, :depth])))
         value_score = self.value_score(depth)
         return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
