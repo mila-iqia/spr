@@ -17,6 +17,7 @@ import torch
 import wandb
 import numpy as np
 import gym
+import socket
 
 from src.vectorized_mcts import VectorizedMCTS, AsyncEval, VectorizedQMCTS
 
@@ -24,10 +25,19 @@ from src.vectorized_mcts import VectorizedMCTS, AsyncEval, VectorizedQMCTS
 def torch_set_device(args):
     if torch.cuda.is_available():
         args.device = torch.device('cuda:0')
+        torch.cuda.set_device('cuda:0')
         torch.cuda.manual_seed(args.seed)
         torch.backends.cudnn.enabled = True
     else:
         args.device = torch.device('cpu')
+
+def find_free_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(('localhost', 0))
+    sockname = sock.getsockname()
+    sock.close()
+    return sockname[1]
 
 def run_pizero(args):
     buffer = initialize_replay_buffer(args)
@@ -35,7 +45,8 @@ def run_pizero(args):
     error_queue = ctx.Queue()
     send_queue = ctx.Queue()
     receive_queues = []
-    port = find_port(args.seed)
+    workers = []
+    port = find_free_port()
     for i in range(args.num_trainers):
         receive_queue = ctx.Queue()
         worker = TrainingWorker(i,
@@ -45,11 +56,12 @@ def run_pizero(args):
                                 send_queue,
                                 error_queue,
                                 receive_queue)
-        process = ctx.Process(target=worker.optimize,
-                              args=(DillWrapper(buffer),))
-        process.start()
+        workers.append(worker)
         receive_queues.append(receive_queue)
-
+    procs = [ctx.Process(target=worker.optimize,
+                         args=(DillWrapper(buffer),)) for worker in workers]
+    for p in procs:
+        p.start()
     # Need to get the target network from the training agent that created it.
     torch_set_device(args)
     network = send_queue.get()

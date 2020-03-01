@@ -38,8 +38,8 @@ def cleanup():
 
 
 def setup(rank, world_size, seed, port, backend="nccl"):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    # os.environ['MASTER_ADDR'] = 'localhost'
+    # os.environ['MASTER_PORT'] = '12355'
 
     # initialize the process group
     dist.init_process_group(backend,
@@ -531,11 +531,13 @@ class MCTSModel(nn.Module):
             loss = loss + loss_scale * (is_weights * (
                        current_value_loss*self.args.value_loss_weight +
                        current_policy_loss*self.args.policy_loss_weight +
-                       current_reward_loss*self.args.reward_loss_weight).mean())
+                       current_reward_loss*self.args.reward_loss_weight -
+                        pred_entropy * self.args.entropy_loss_weight).mean())
 
             total_losses[i] += (current_value_loss*self.args.value_loss_weight +
                                 current_policy_loss*self.args.policy_loss_weight +
-                                current_reward_loss*self.args.reward_loss_weight).detach().mean().cpu().item()
+                                current_reward_loss*self.args.reward_loss_weight +
+                                pred_entropy*self.args.entropy_loss_weight).detach().mean().cpu().item()
 
             reward_losses.append(current_reward_loss.detach().mean().cpu().item())
             value_losses.append(current_value_loss.detach().mean().cpu().item())
