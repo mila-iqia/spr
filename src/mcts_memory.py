@@ -54,6 +54,8 @@ def initialize_replay_buffer(args):
         n_step_return=1,
     )
     if args.prioritized:
+        replay_kwargs['alpha'] = args.priority_exponent
+        replay_kwargs['beta'] = args.priority_weight
         buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
     else:
         buffer = AsyncUniformSequenceReplayFrameBufferExtended(**replay_kwargs)
@@ -122,7 +124,7 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             T_idxs = T_idxs * self.rnn_state_interval
 
         batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
-        is_weights = (1. / priorities) ** self.beta
+        is_weights = (1. / (priorities + 1e-5)) ** self.beta
         is_weights /= max(is_weights)  # Normalize.
         is_weights = torchify_buffer(is_weights).float()
 
