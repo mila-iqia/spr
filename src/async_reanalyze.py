@@ -111,11 +111,12 @@ class AsyncReanalyze:
         actions = torch.zeros(self.args.num_reanalyze_envs, dtype=torch.long)
         rewards = torch.zeros(self.args.num_reanalyze_envs)
         values = torch.zeros(self.args.num_reanalyze_envs)
+        value_estimates = torch.zeros(self.args.num_reanalyze_envs)
         dones = torch.ones(self.args.num_reanalyze_envs)
         policies = torch.ones(self.args.num_reanalyze_envs, self.n_actions)
         policies = policies/torch.sum(policies, -1, keepdim=True)
 
-        return obs, actions, rewards, dones, policies, values
+        return obs, actions, rewards, dones, policies, values, value_estimates
 
     def get_transitions(self, total_episodes):
         if total_episodes <= 1:
@@ -138,8 +139,8 @@ class AsyncReanalyze:
 
         self._raise_if_errors(successes)
 
-        obs, actions, reward, done, policy_probs, values = map(torch.cat, zip(*results))
-        return obs, actions, reward, done, policy_probs.cpu(), values.cpu()
+        obs, actions, reward, done, policy_probs, values, value_estimates = map(torch.cat, zip(*results))
+        return obs, actions, reward, done, policy_probs.cpu(), values.cpu(), value_estimates.cpu()
 
     def _raise_if_errors(self, successes):
         if all(successes):
@@ -302,8 +303,8 @@ class ReanalyzeWorker:
                 self.current_read_episodes[i] = \
                     self.load_episode()
 
-        _, policies, values = self.mcts.run(observations)
+        _, policies, values, value_estimates = self.mcts.run(observations)
         policies = policies.probs
 
-        return observations, actions, rewards, dones, policies, values
+        return observations, actions, rewards, dones, policies, values, value_estimates
 
