@@ -21,6 +21,8 @@ Transition = recordclass('Transition', ('timestep', 'state', 'action', 'reward',
 blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)  # TODO: Set appropriate default policy value
 blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)
 
+PrioritizedSamples = namedarraytuple("PrioritizedSamples",
+                                  ["samples", "priorities"])
 SamplesToBuffer = namedarraytuple("SamplesToBuffer",
                                   ["observation", "action", "reward", "done", "policy_probs", "value"])
 SamplesFromReplayExt = namedarraytuple("SamplesFromReplayPriExt",
@@ -53,7 +55,9 @@ def initialize_replay_buffer(args):
         discount=args.discount,
         n_step_return=1,
     )
+
     if args.prioritized:
+        replay_kwargs["input_priorities"]=args.input_priorities,
         buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
     else:
         buffer = AsyncUniformSequenceReplayFrameBufferExtended(**replay_kwargs)
@@ -61,16 +65,20 @@ def initialize_replay_buffer(args):
     return buffer
 
 
-def samples_to_buffer(observation, action, reward, done, policy_probs, value):
-    return SamplesToBuffer(
+def samples_to_buffer(observation, action, reward, done, policy_probs, value, priorities=None):
+    samples = SamplesToBuffer(
         observation=observation,
         action=action,
         reward=reward,
         done=done,
         policy_probs=policy_probs,
         value=value
-    )
-
+        )
+    if priorities is not None:
+        return PrioritizedSamples(samples=samples,
+                                  priorities=priorities)
+    else:
+        return samples
 
 class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFrameBuffer):
     """
@@ -155,25 +163,67 @@ class LocalBuffer:
     """
     Helper class to store locally a single [num_timesteps (T), num_envs (B)] segment
     """
-    def __init__(self):
-        self.clear()
+    def __init__(self, args):
+        self.observations, self.actions, self.rewards, self.dones = [], [], [], []
+        self.policy_logits, self.values, self.value_estimates = [], [], []
+        self.args = args
 
     def clear(self):
-        self.observations, self.actions, self.rewards, self.dones = [], [], [], []
-        self.policy_logits, self.values = [], []
+        if self.args.input_priorities:
+            self.observations, self.actions, self.rewards, self.dones, \
+            self.policy_logits, self.values, self.value_estimates \
+                = (t[-self.args.multistep:] for t in [self.observations,
+                                                      self.actions,
+                                                      self.rewards,
+                                                      self.dones,
+                                                      self.policy_logits,
+                                                      self.values,
+                                                      self.value_estimates])
+        else:
+            self.observations, self.actions, self.rewards, self.dones = [], [], [], []
+            self.policy_logits, self.values, self.value_estimates = [], [], []
 
-    def append(self, vec_obs, vec_a, vec_r, vec_d, vec_pl, vec_v):
+    def append(self, vec_obs, vec_a, vec_r, vec_d, vec_pl, vec_v, vec_v_est):
         self.observations.append(vec_obs)
         self.actions.append(vec_a)
         self.rewards.append(vec_r)
         self.dones.append(vec_d)
         self.policy_logits.append(vec_pl)
         self.values.append(vec_v)
+        self.value_estimates.append(vec_v_est)
+
+    def calculate_initial_priorities(self, rewards, values, value_estimates):
+        """
+        :param rewards: Stacked rewards for the buffer.
+        :param value_targets: Stacked value targets for the buffer.
+        :param value_estimates: Stacked initial value estimates for the buffer.
+        :return: Value errors.
+        """
+        discounts = torch.ones_like(rewards)[:self.args.multistep]*self.args.discount
+        discounts = discounts ** torch.arange(0, self.args.multistep)[:, None].float()
+
+        valid_range = rewards[:-self.args.multistep].shape[0]
+        discounted_rewards = torch.cat([rewards[i:i+self.args.multistep]*discounts for i in range(valid_range)], 0)
+        value_targets = values[self.args.multistep:]*(self.args.discount ** self.args.multistep)
+
+        value_targets = discounted_rewards + value_targets
+
+        errors = torch.abs(value_estimates[:self.args.multistep] - value_targets) + 0.001
+
+        return errors
 
     def stack(self):
-        return [torch.stack(x) for x in [self.observations, self.actions, self.rewards, self.dones,
-                                         self.policy_logits, self.values]]
+        samples = [torch.stack(x) for x in [self.observations, self.actions,
+                                            self.rewards, self.dones,
+                                            self.policy_logits, self.values]]
+        if self.args.input_priorities:
+            priorities = self.calculate_initial_priorities(samples[2],
+                                                           samples[5],
+                                                           torch.stack(self.value_estimates))
+            samples = [t[:-self.args.multistep] for t in samples]
+            samples.append(priorities)
 
+        return samples
 
 # Segment tree data structure where parent node values are sum/max of children node values
 class SegmentTree:

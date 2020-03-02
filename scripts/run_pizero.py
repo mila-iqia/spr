@@ -61,7 +61,7 @@ def run_pizero(args):
     if args.reanalyze:
         async_reanalyze = AsyncReanalyze(args, target_network, debug=args.debug_reanalyze)
 
-    local_buf = LocalBuffer()
+    local_buf = LocalBuffer(args)
     env_steps = 0
     eprets = np.zeros(args.num_envs, 'f')
     episode_rewards = deque(maxlen=10)
@@ -101,11 +101,12 @@ def run_pizero(args):
     try:
         while env_steps < args.total_env_steps:
             # Run MCTS for the vectorized observation
-            actions, policies, values = vectorized_mcts.run(obs)
+            actions, policies, values, value_estimates = vectorized_mcts.run(obs)
             next_obs, reward, done, infos = env.step(actions.cpu().numpy())
             reward, done = torch.from_numpy(reward).float(), torch.from_numpy(done).float()
-            obs, actions, reward, done, policies, values = obs.cpu(), actions.cpu(), reward.cpu(),\
-                                                               done.cpu(), policies.cpu(), values.cpu()
+            obs, actions, reward, done, policies, values, value_estimates = obs.cpu(), actions.cpu(), reward.cpu(),\
+                                                                            done.cpu(), policies.cpu(),\
+                                                                            values.cpu(), value_estimates.cpu()
 
             eprets += np.array(reward)
             for i in range(args.num_envs):
@@ -133,12 +134,13 @@ def run_pizero(args):
                 done = torch.cat([done, new_samples[3]], 0)
                 policies = torch.cat([policies, new_samples[4]], 0)
                 values = torch.cat([values, new_samples[5]], 0)
-                local_buf.append(cat_obs, actions, reward, done, policies, values)
+                value_estimates = torch.cat([value_estimates, new_samples[6]], 0)
+                local_buf.append(cat_obs, actions, reward, done, policies, values, value_estimates)
 
             else:
-                local_buf.append(obs, actions, reward, done, policies, values)
+                local_buf.append(obs, actions, reward, done, policies, values, value_estimates)
 
-            if env_steps % args.jumps == 0 and env_steps > 0:
+            if env_steps % (args.jumps + args.multistep) == 0 and env_steps > 0:
                 # Send transitions from the local buffer to the replay buffer
                 buffer.append_samples(samples_to_buffer(*local_buf.stack()))
                 local_buf.clear()
