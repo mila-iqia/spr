@@ -31,6 +31,7 @@ def torch_set_device(args):
     else:
         args.device = torch.device('cpu')
 
+
 def find_free_port():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -38,6 +39,7 @@ def find_free_port():
     sockname = sock.getsockname()
     sock.close()
     return sockname[1]
+
 
 def run_pizero(args):
     buffer = initialize_replay_buffer(args)
@@ -75,8 +77,10 @@ def run_pizero(args):
 
     local_buf = LocalBuffer(args)
     env_steps = 0
+    eplens = np.zeros(args.num_envs,)
     eprets = np.zeros(args.num_envs, 'f')
     episode_rewards = deque(maxlen=10)
+    episode_lengths = deque(maxlen=10)
     wandb.log({'env_steps': 0})
 
     env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
@@ -119,14 +123,17 @@ def run_pizero(args):
             obs, actions, reward, done, policies, values, value_estimates = obs.cpu(), actions.cpu(), reward.cpu(),\
                                                                             done.cpu(), policies.cpu(),\
                                                                             values.cpu(), value_estimates.cpu()
-
             eprets += np.array(reward)
+            eplens += 1
             for i in range(args.num_envs):
                 if done[i]:
+                    episode_lengths.append(eplens[i])
                     episode_rewards.append(eprets[i])
                     wandb.log({'Episode Reward': eprets[i],
+                               "Episode Length": eplens[i],
                                'env_steps': env_steps})
                     eprets[i] = 0
+                    eplens[i] = 0
 
             if args.reanalyze:
                 async_reanalyze.store_transitions(
@@ -186,9 +193,14 @@ def run_pizero(args):
                 [q.put(env_steps) for q in receive_queues]
 
             if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
-                print('Env Steps: {}, Mean Reward: {}, Median Reward: {}'.format(env_steps, np.mean(episode_rewards),
-                                                                                 np.median(episode_rewards)))
-                wandb.log({'Mean Reward': np.mean(episode_rewards), 'Median Reward': np.median(episode_rewards),
+                print('Env Steps: {}, Mean Reward: {}, Median Reward: {}, Mean Length: {}, Median Length: {}'.format(env_steps, np.mean(episode_rewards),
+                                                                                                                     np.median(episode_rewards),
+                                                                                                                     np.mean(episode_lengths),
+                                                                                                                     np.median(episode_lengths)))
+                wandb.log({'Mean Reward': np.mean(episode_rewards),
+                           'Median Reward': np.median(episode_rewards),
+                           'Mean Length': np.mean(episode_lengths),
+                           'Median Length': np.median(episode_lengths),
                            'env_steps': env_steps})
                 eval_result = async_eval.get_eval_results()
                 if eval_result:

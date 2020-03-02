@@ -29,6 +29,7 @@ def get_args():
                              "target network.  <=0 to disable target network.")
     parser.add_argument('--no-gpu-0-train', action='store_true')
     parser.add_argument('--input-priorities', action='store_true')
+    parser.add_argument('--q-dirichlet', action='store_true')
     parser.add_argument('--cpu-search', action='store_true', help="Put everything except MCTS inference calls on CPU")
     parser.add_argument('--epoch-steps', type=int, default=50,
                         help="Number of gradient steps between loggings.")

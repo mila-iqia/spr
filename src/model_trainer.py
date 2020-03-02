@@ -132,7 +132,7 @@ class TrainingWorker(object):
             self.model = DDP(self.model,
                              device_ids=[self.args.device],
                              output_device=self.args.device,
-                             find_unused_parameters=False)#self.args.film or self.args.q_learning)
+                             find_unused_parameters=False)
 
     def optimize(self, buffer):
         self.buffer = buffer.x
