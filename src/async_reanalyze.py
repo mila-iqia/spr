@@ -9,6 +9,7 @@ import numpy as np
 import traceback
 
 from src.vectorized_mcts import VectorizedMCTS as MCTS
+from src.vectorized_mcts import VectorizedQMCTS as QMCTS
 from recordclass import dataobject
 
 
@@ -186,8 +187,9 @@ class ReanalyzeWorker:
         self.directory = args.savedir
         self.index = index
         self.total_episodes = 0
-        self.mcts = MCTS(args, n_actions, self.read_heads,
-                         args.num_simulations, network)
+        mcts_class = QMCTS if args.q_learning else MCTS
+        self.mcts = mcts_class(args, n_actions, self.read_heads,
+                               args.num_simulations, network)
         self.obs_shape = obs_shape
         self.args = args
 
@@ -304,7 +306,5 @@ class ReanalyzeWorker:
                     self.load_episode()
 
         _, policies, values, value_estimates = self.mcts.run(observations)
-        policies = policies.probs
-
         return observations, actions, rewards, dones, policies, values, value_estimates
 
