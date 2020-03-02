@@ -80,6 +80,7 @@ def get_args():
     parser.add_argument('--policy-loss-weight', type=float, default=1.)
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
     parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
+    parser.add_argument('--entropy-loss-weight', type=float, default=0.01)
     parser.add_argument('--init-value-scale', type=float, default=1.)
     parser.add_argument('--film', action='store_true')
     parser.add_argument('--profile', action='store_true')

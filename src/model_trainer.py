@@ -33,13 +33,21 @@ def init(module, weight_init, bias_init, gain=1):
     return module
 
 
+init_small = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                            constant_(x, 0), gain=0.01)
+init_0 = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                        constant_(x, 0))
+init_relu = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                           constant_(x, 0), nn.init.calculate_gain('relu'))
+
+
 def cleanup():
     dist.destroy_process_group()
 
 
 def setup(rank, world_size, seed, port, backend="nccl"):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    # os.environ['MASTER_ADDR'] = 'localhost'
+    # os.environ['MASTER_PORT'] = '12355'
 
     # initialize the process group
     dist.init_process_group(backend,
@@ -112,15 +120,15 @@ class TrainingWorker(object):
 
         setup(self.rank, self.size, self.args.seed, self.port, self.backend)
         self.model, self.optimizer, self.scheduler = create_network(self.args)
-        print("{} started on gpu {}".format(self.rank, self.args.device))
+        print("{} started on gpu {}".format(self.rank, self.args.device),flush=True)
         if self.rank == 0:
-            print("{} sending model".format(self.rank))
+            print("{} sending model".format(self.rank),flush=True)
             self.squeue.put(self.model)
 
         if self.args.fp16:
             amp.initialize(self.model, self.optimizer)
         if self.args.num_trainers > 1:
-            print("{} initializing DDP".format(self.rank))
+            print("{} initializing DDP".format(self.rank), flush=True)
             self.model = DDP(self.model,
                              device_ids=[self.args.device],
                              output_device=self.args.device,
@@ -128,7 +136,7 @@ class TrainingWorker(object):
 
     def optimize(self, buffer):
         self.buffer = buffer.x
-        print("{} starting up".format(self.rank))
+        print("{} starting up".format(self.rank), flush=True)
         self.startup()
         _ = self.receive_queue.get()
         env_steps = 0
@@ -157,7 +165,7 @@ class TrainingWorker(object):
                     self.squeue.put((self.epochs_till_now, self.train_trackers))
                     self.train_trackers = reset_trackers(self.maximum_length)
         except (KeyboardInterrupt, Exception):
-            self.error_queue.put((self.rank,) + sys.exc_info())
+            print(sys.exc_info(), flush=True)
             traceback.print_exc()
         finally:
             return
@@ -531,11 +539,13 @@ class MCTSModel(nn.Module):
             loss = loss + loss_scale * (is_weights * (
                        current_value_loss*self.args.value_loss_weight +
                        current_policy_loss*self.args.policy_loss_weight +
-                       current_reward_loss*self.args.reward_loss_weight).mean())
+                       current_reward_loss*self.args.reward_loss_weight -
+                        pred_entropy * self.args.entropy_loss_weight).mean())
 
             total_losses[i] += (current_value_loss*self.args.value_loss_weight +
                                 current_policy_loss*self.args.policy_loss_weight +
-                                current_reward_loss*self.args.reward_loss_weight).detach().mean().cpu().item()
+                                current_reward_loss*self.args.reward_loss_weight +
+                                pred_entropy*self.args.entropy_loss_weight).detach().mean().cpu().item()
 
             reward_losses.append(current_reward_loss.detach().mean().cpu().item())
             value_losses.append(current_value_loss.detach().mean().cpu().item())
@@ -787,15 +797,13 @@ class QNetwork(nn.Module):
                  init_weight_scale=1.):
         super().__init__()
         self.hidden_size = hidden_size
-        init_2 = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
-                                constant_(x, 0), gain=0.01)
-        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+        layers = [init_relu(nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1)),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, 512),
+                  init_relu(nn.Linear(pixels*hidden_size, 512)),
                   nn.ReLU(),
-                  init_2(nn.Linear(512, (num_actions)*(limit*2 + 1)))]
+                  init_0(nn.Linear(512, (num_actions)*(limit*2 + 1)))]
         with torch.no_grad():
             layers[-1].weight *= init_weight_scale
         self.network = nn.Sequential(*layers)
@@ -814,15 +822,13 @@ class ValueNetwork(nn.Module):
     def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300):
         super().__init__()
         self.hidden_size = hidden_size
-        init_2 = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
-                               constant_(x, 0), gain=0.01)
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, 256),
+                  init_relu(nn.Linear(pixels*hidden_size, 256)),
                   nn.ReLU(),
-                  init_2(nn.Linear(256, limit*2 + 1))]
+                  init_0(nn.Linear(256, limit*2 + 1))]
         self.network = nn.Sequential(*layers)
         self.train()
 
@@ -834,15 +840,11 @@ class PolicyNetwork(nn.Module):
     def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
         super().__init__()
         self.hidden_size = hidden_size
-        init_ = lambda m: init(m,
-                               nn.init.orthogonal_,
-                               lambda x: nn.init.constant_(x, 0),
-                               gain=0.01)
-        layers = [Conv2dSame(input_channels, hidden_size, 3),
+        layers = [init_relu(Conv2dSame(input_channels, hidden_size, 3)),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  init_(nn.Linear(pixels * hidden_size, num_actions))]
+                  init_small(nn.Linear(pixels * hidden_size, num_actions))]
         self.network = nn.Sequential(*layers)
         self.train()
 
