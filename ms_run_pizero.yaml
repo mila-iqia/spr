@@ -38,16 +38,16 @@ search:
     name: awm
     sku: G4
     command:
-      - NCCL_DEBUG=INFO NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=eth0,eth1 python -m scripts.run_pizero --grayscale --game {game} {search-targets} --training-interval {training-interval} --batch-size-per-worker 200 {nce} {envs} --num-simulations 10 --total-env-steps 10000000 {reanalyze} --target-update-interval {uti} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 10 --num-simulations 10 --c1 {c1} --evaluation-interval 80000 --visit-temp {visit-temp}  --discount 0.997  --num-trainers 3  --replay-ratio-upper {replay-ratio} --eval-simulations 25  --virtual-threads {virtual-threads} {prioritized} --entropy-loss-weight {elw} --q-learning  --no-gpu-0-train
+      - NCCL_DEBUG=INFO NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=eth0,eth1 python -m scripts.run_pizero --grayscale --game {game} {search-targets} --training-interval {training-interval} --batch-size-per-worker 200 {nce} {envs} --num-simulations 10 --total-env-steps 10000000 {reanalyze} --target-update-interval {uti} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 10 --num-simulations 10 --c1 {c1} --evaluation-interval 80000 --visit-temp {visit-temp}  --discount 0.997  --num-trainers 3  --replay-ratio-upper {replay-ratio} --eval-simulations 25  --virtual-threads {virtual-threads} {prioritized} --entropy-loss-weight {elw} --q-learning  --no-gpu-0-train  --learning-rate {lr}
   type: random
-  max_trials: 4
+  max_trials: 6
   params:
     - name: game
       spec: discrete
       values: ['ms_pacman']
     - name: nce
       spec: discrete
-      values: ['--no-nce --value-loss-weight 0.1']
+      values: ['--no-nce --value-loss-weight 0.5 --policy-loss-weight 0.1']
     - name: envs
       spec: discrete
       values: ['--num-envs 64 --num-workers 1']
@@ -56,7 +56,7 @@ search:
       values: ['']
     - name: uti
       spec: discrete
-      values: [100]
+      values: [100, 500, 1000]
     - name: multistep
       spec: discrete
       values: [10]
@@ -83,4 +83,7 @@ search:
       values: ['--prioritized']
     - name: elw
       spec: discrete
-      values: [0.01, 0.05]
+      values: [0.01]
+    - name: lr
+      spec: discrete
+      values: [0.0003, 0.001]
