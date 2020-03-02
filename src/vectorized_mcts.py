@@ -202,7 +202,6 @@ class VectorizedMCTS:
             # Calculate the return as observed by the new parent.
             returns = returns*self.args.discount + reward
 
-
             # Update q and count at the parent for the actions taken then
             self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
             self.virtual_loss[self.batch_range, parent_id.squeeze(), actions.squeeze()] += (self.vl_c * not_done_mask.squeeze())
@@ -276,6 +275,10 @@ class VectorizedMCTS:
 
 
 class VectorizedQMCTS(VectorizedMCTS):
+    # def __init__(self, *args, **kwargs):
+    #     super(VectorizedQMCTS, self).__init__(*args, **kwargs)
+    #     self.root_exploration_fraction = 0.05
+
     def reset_tensors(self):
         super().reset_tensors()
         self.visit_count.fill_(1)
@@ -290,8 +293,8 @@ class VectorizedQMCTS(VectorizedMCTS):
         self.q[:, 0] = initial_value.to(self.search_device)
         self.min_q = torch.min(self.q[:, 0], dim=-1)[0]
         self.max_q = torch.max(self.q[:, 0], dim=-1)[0]
-        # self.prior[:, 0] = F.softmax(policy_logits, dim=-1)
-        # self.add_exploration_noise()
+        if self.args.q_dirichlet:
+            self.add_exploration_noise()
 
         for sim_id in range(1, self.n_sims+1):
             # Pre-compute action to select at each node in case it is visited in this sim
@@ -369,6 +372,18 @@ class VectorizedQMCTS(VectorizedMCTS):
         values /= (self.max_q - self.min_q)[:, None, None]
         values = valid_indices * values
         return values
+
+    def add_exploration_noise(self):
+        concentrations = torch.tensor([self.root_dirichlet_alpha] * self.num_actions, device=self.search_device)
+        noise = torch.distributions.dirichlet.Dirichlet(concentrations).sample((self.n_runs,))
+        frac = self.root_exploration_fraction
+
+        q_dist = F.softmax(self.q[:, 0], -1)
+        mixed_dist = (q_dist * (1-frac)) + (noise * frac)
+        est_q = torch.log(mixed_dist)
+        mean_offset = self.q[:, 0].mean(-1, keepdim=True) - est_q.mean(-1, keepdim=True)
+
+        self.q[:, 0] = est_q + mean_offset
 
     def backup(self, id_final, depth, value_final):
         returns = value_final.max(dim=-1)[0]

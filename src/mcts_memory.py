@@ -57,7 +57,7 @@ def initialize_replay_buffer(args):
     )
 
     if args.prioritized:
-        replay_kwargs["input_priorities"]=args.input_priorities,
+        replay_kwargs["input_priorities"] = args.input_priorities,
         buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
     else:
         buffer = AsyncUniformSequenceReplayFrameBufferExtended(**replay_kwargs)
@@ -113,7 +113,7 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
             batch.all_action[ind+1:, i] = batch.all_action[ind, i]
             batch.policy_probs[ind+1:, i] = batch.policy_probs[ind, i]
             batch.all_reward[ind+1:, i] = 0
-            batch.values[ind+1:, i] = 0
+            batch.values[ind:, i] = 0
         return batch
 
 
@@ -192,19 +192,21 @@ class LocalBuffer:
         self.values.append(vec_v)
         self.value_estimates.append(vec_v_est)
 
-    def calculate_initial_priorities(self, rewards, values, value_estimates):
+    def calculate_initial_priorities(self, rewards, values, value_estimates, dones):
         """
         :param rewards: Stacked rewards for the buffer.
         :param value_targets: Stacked value targets for the buffer.
         :param value_estimates: Stacked initial value estimates for the buffer.
         :return: Value errors.
         """
-        discounts = torch.ones_like(rewards)[:self.args.multistep]*self.args.discount
-        discounts = discounts ** torch.arange(0, self.args.multistep)[:, None].float()
+        done_mask = torch.cumprod(1 - dones.float(), 0)
+        discounts = torch.ones_like(rewards)[:self.args.multistep+1]*self.args.discount
+        discounts = discounts ** torch.arange(0, self.args.multistep+1)[:, None].float()
+        discounts = discounts * done_mask[:-self.args.multistep-1]
 
         valid_range = rewards[:-self.args.multistep].shape[0]
-        discounted_rewards = torch.cat([rewards[i:i+self.args.multistep]*discounts for i in range(valid_range)], 0)
-        value_targets = values[self.args.multistep:]*(self.args.discount ** self.args.multistep)
+        discounted_rewards = torch.stack([torch.sum(rewards[i:i+self.args.multistep]*discounts, 0) for i in range(valid_range)], 0)
+        value_targets = values[self.args.multistep:]*discounts[-1]
 
         value_targets = discounted_rewards + value_targets
 
@@ -219,7 +221,8 @@ class LocalBuffer:
         if self.args.input_priorities:
             priorities = self.calculate_initial_priorities(samples[2],
                                                            samples[5],
-                                                           torch.stack(self.value_estimates))
+                                                           torch.stack(self.value_estimates),
+                                                           samples[3])
             samples = [t[:-self.args.multistep] for t in samples]
             samples.append(priorities)
 
