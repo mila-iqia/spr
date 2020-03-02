@@ -577,7 +577,7 @@ class MCTSModel(nn.Module):
             nce_losses = np.zeros(self.jumps + 1)
 
         if self.args.prioritized:
-            buffer.update_batch_priorities(value_errors[0] + 1e-6)
+            buffer.update_batch_priorities(value_errors[0] + 1e-5)
 
         mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
         mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
@@ -822,7 +822,7 @@ class ValueNetwork(nn.Module):
     def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300):
         super().__init__()
         self.hidden_size = hidden_size
-        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+        layers = [init_relu(nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1)),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
