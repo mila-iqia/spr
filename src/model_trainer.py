@@ -447,11 +447,10 @@ class MCTSModel(nn.Module):
             # Note that rewards are shifted right by one; r[i] is reward received when arriving at i.
             # Because of how this happens, we need to make sure that the first reward received isn't
             # actually from a different trajectory.  If it is, we just set it to 0.
-            rewards = torch.from_numpy(rewards)
-            rewards[0] = rewards[0] * done[0].float()
+            rewards[0] = rewards[0] * (1 - done[0].float())
             rewards = rewards.float().to(self.args.device)
-            policies = torch.from_numpy(policies).float().to(self.args.device)
-            values = torch.from_numpy(values).float().to(self.args.device)
+            policies = policies.float().to(self.args.device)
+            values = values.float().to(self.args.device)
             initial_actions = actions[0]
 
         # Get into the shape used by the NCE code.
