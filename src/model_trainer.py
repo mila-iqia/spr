@@ -437,16 +437,22 @@ class MCTSModel(nn.Module):
                 policies, values = buffer.sample_batch(self.args.batch_size_per_worker)
                 is_weights = 1.
 
-            states = states.float().to(self.args.device) / 255.
+            target_images = states[0:self.jumps+1, :, 0].transpose(0, 1)
+            target_images = target_images.reshape(-1, *states.shape[-3:])
+            initial_states = states[0]
+            target_images = target_images.to(self.args.device).float()/255.
+            initial_states = initial_states.to(self.args.device).float() / 255.
+
             actions = actions.long().to(self.args.device)
+            # Note that rewards are shifted right by one; r[i] is reward received when arriving at i.
+            # Because of how this happens, we need to make sure that the first reward received isn't
+            # actually from a different trajectory.  If it is, we just set it to 0.
+            rewards = torch.from_numpy(rewards)
+            rewards[0] = rewards[0] * done[0].float()
             rewards = rewards.float().to(self.args.device)
             policies = torch.from_numpy(policies).float().to(self.args.device)
             values = torch.from_numpy(values).float().to(self.args.device)
-            initial_states = states[1]
             initial_actions = actions[0]
-
-            target_images = states[1:self.jumps+2, :, 0].transpose(0, 1)
-            target_images = target_images.reshape(-1, *states.shape[-3:])
 
         # Get into the shape used by the NCE code.
         if not self.no_nce:
@@ -482,7 +488,7 @@ class MCTSModel(nn.Module):
 
         value_errors, reward_errors = [], []
 
-        for i in range(1, self.jumps+1):
+        for i in range(0, self.jumps):
             action = actions[i]
             current_state, pred_reward, pred_policy, pred_value = \
                 self.step(current_state, action)
@@ -506,10 +512,9 @@ class MCTSModel(nn.Module):
             loss_scale, pred_reward, pred_policy, pred_value = prediction
 
             # Calculate the value target for v_i+1
-            j = i+1
-            value_target = torch.sum(discounts*rewards[j:j+self.multistep], 0)
+            value_target = torch.sum(discounts*rewards[i+1:i+self.multistep+1], 0)
             value_target = value_target + self.args.discount ** self.multistep \
-                           * values[j+self.multistep]
+                           * values[i+self.multistep]
 
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
@@ -521,7 +526,7 @@ class MCTSModel(nn.Module):
                 pred_value.detach(), logits=True)))
 
             pred_entropy = Categorical(logits=pred_policy).entropy()
-            target_entropy = Categorical(probs=policies[j]).entropy()
+            target_entropy = Categorical(probs=policies[i]).entropy()
             pred_entropies.append(pred_entropy.mean().cpu().detach().item())
             target_entropies.append(target_entropy.mean().cpu().detach().item())
 
@@ -534,7 +539,7 @@ class MCTSModel(nn.Module):
 
             current_reward_loss = -torch.sum(reward_target * pred_reward, -1)
             current_value_loss = -torch.sum(value_target * pred_value, -1)
-            current_policy_loss = -torch.sum(policies[j] * pred_policy, -1)
+            current_policy_loss = -torch.sum(policies[i] * pred_policy, -1)
 
             loss = loss + loss_scale * (is_weights * (
                        current_value_loss*self.args.value_loss_weight +
@@ -793,8 +798,7 @@ class Conv2dSame(torch.nn.Module):
 
 
 class QNetwork(nn.Module):
-    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36, limit=300,
-                 init_weight_scale=1.):
+    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36, limit=300):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [init_relu(nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1)),
@@ -803,9 +807,7 @@ class QNetwork(nn.Module):
                   nn.Flatten(-3, -1),
                   init_relu(nn.Linear(pixels*hidden_size, 512)),
                   nn.ReLU(),
-                  init_0(nn.Linear(512, (num_actions)*(limit*2 + 1)))]
-        with torch.no_grad():
-            layers[-1].weight *= init_weight_scale
+                  init_0(nn.Linear(512, num_actions*(limit*2 + 1)))]
         self.network = nn.Sequential(*layers)
         self.num_actions = num_actions
         self.dist_size = limit*2 + 1
