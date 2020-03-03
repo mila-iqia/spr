@@ -256,7 +256,7 @@ class ReanalyzeWorker:
                 episodes = glob.glob(self.directory + "/ep*")
                 index = np.random.randint(0, len(episodes))
                 filename = episodes[index]
-                file = np.load(filename)
+                file = np.load(filename, allow_pickle=True)
                 episode = TensorEpisode(obs=torch.from_numpy(file["obs"]),
                                         actions=torch.from_numpy(file["actions"]),
                                         rewards=torch.from_numpy(file["rewards"]),

@@ -840,7 +840,7 @@ class PolicyNetwork(nn.Module):
     def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
         super().__init__()
         self.hidden_size = hidden_size
-        layers = [init_relu(Conv2dSame(input_channels, hidden_size, 3)),
+        layers = [init_relu(nn.Conv2d(input_channels, hidden_size, 3, padding=1)),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
