@@ -131,6 +131,7 @@ def run_pizero(args):
                     episode_rewards.append(eprets[i])
                     wandb.log({'Episode Reward': eprets[i],
                                "Episode Length": eplens[i],
+                               "Average Reward Per Step": eprets[i]/eplens[i],
                                'env_steps': env_steps})
                     eprets[i] = 0
                     eplens[i] = 0
@@ -206,7 +207,7 @@ def run_pizero(args):
                 if eval_result:
                     eval_env_step, avg_reward = eval_result
                     print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
-                    wandb.log({'env_steps': env_steps, 'avg_reward': avg_reward})
+                    wandb.log({'env_steps': env_steps, 'Average Eval Score': avg_reward})
 
             if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
                 print("Starting evaluation run")
