@@ -15,8 +15,7 @@ from rlpyt.replays.sequence.frame import AsyncPrioritizedSequenceReplayFrameBuff
 from rlpyt.utils.buffer import torchify_buffer, numpify_buffer
 from rlpyt.utils.collections import namedarraytuple
 from rlpyt.utils.misc import extract_sequences
-from rlpyt.utils.synchronize import RWLock
-import wandb
+import traceback
 
 Transition = recordclass('Transition', ('timestep', 'state', 'action', 'reward', 'value', 'policy', 'nonterminal'))
 blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)  # TODO: Set appropriate default policy value
@@ -99,11 +98,13 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                     T_idxs = T_idxs * self.rnn_state_interval
 
                 batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
-                rewards = extract_sequences(self.samples.rewards, T_idxs-1, B_idxs, self.batch_T)
-                policies = extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T)
-                values = extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T)
+                rewards = torch.from_numpy(extract_sequences(self.samples.reward, T_idxs-1, B_idxs, self.batch_T))
+                dones = torch.from_numpy(extract_sequences(self.samples.done, T_idxs-1, B_idxs, self.batch_T + 1))
+                policies = torch.from_numpy(extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T))
+                values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T))
                 batch = list(batch)
                 batch[2] = rewards
+                batch[4] = dones
                 batch = SamplesFromReplayExt(*batch, policy_probs=policies, values=values)
                 return self.sanitize_batch(batch)
             except:
@@ -115,7 +116,7 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                     print("Buffer T:", self.T, flush=True)
 
     def sanitize_batch(self, batch):
-        has_dones, inds = torch.max(batch.done, 0)
+        has_dones, inds = torch.max(batch.done[1:], 0)
         for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
             if not has_done:
                 continue
@@ -148,22 +149,23 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                 is_weights /= max(is_weights)  # Normalize.
                 is_weights = torchify_buffer(is_weights).float()
 
-                rewards = extract_sequences(self.samples.reward, T_idxs-1, B_idxs, self.batch_T)
-                policies = extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T)
-                values = extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T)
+                rewards = torch.from_numpy(extract_sequences(self.samples.reward, T_idxs-1, B_idxs, self.batch_T))
+                dones = torch.from_numpy(extract_sequences(self.samples.done, T_idxs-1, B_idxs, self.batch_T + 1))
+                policies = torch.from_numpy(extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T))
+                values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T))
                 batch = list(batch)
                 batch[2] = rewards
+                batch[4] = dones
                 batch = SamplesFromReplayPriExt(*batch, is_weights=is_weights, policy_probs=policies, values=values)
                 return self.sanitize_batch(batch)
-            except:
+            except Exception as e:
                 print("FAILED TO LOAD BATCH")
+                traceback.print_exc()
                 if sampled_indices:
                     print("B_idxs:", B_idxs, flush=True)
                     print("T_idxs:", T_idxs, flush=True)
                     print("Batch_T:", self.batch_T, flush=True)
                     print("Buffer T:", self.T, flush=True)
-
-
 
     def update_batch_priorities(self, priorities):
         with self.rw_lock.write_lock:
@@ -172,7 +174,7 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             self.priority_tree.update_batch_priorities(priorities ** self.alpha)
 
     def sanitize_batch(self, batch):
-        has_dones, inds = torch.max(batch.done, 0)
+        has_dones, inds = torch.max(batch.done[1:], 0)
         for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
             if not has_done:
                 continue
@@ -181,7 +183,7 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             batch.all_action[ind+1:, i] = batch.all_action[ind, i]
             batch.policy_probs[ind+1:, i] = batch.policy_probs[ind, i]
             batch.all_reward[ind+1:, i] = 0
-            batch.values[ind+1:, i] = 0
+            batch.values[ind:, i] = 0
         return batch
 
 
