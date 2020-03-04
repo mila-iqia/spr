@@ -562,16 +562,6 @@ class MCTSModel(nn.Module):
             nce_loss, nce_accs = self.nce.forward(nce_input, target_images)
             nce_losses = nce_loss.mean(-1).detach().cpu().numpy()
             nce_loss = (nce_loss*is_weights).mean(-1)
-            # else:
-            #     nce_loss = []
-            #     for i, pred_state in enumerate(pred_states):
-            #         current_targets = target_images[:, :, i]
-            #         nce_input = pred_state.flatten(2, 3).permute(2, 0, 1)
-            #         current_nce_loss, current_nce_acc = self.nce.forward(nce_input, current_targets)
-            #         nce_loss.append((current_nce_loss*is_weights).mean())
-            #         nce_losses.append(current_nce_loss.detach().cpu().mean().item())
-            #         nce_accs[i] = current_nce_acc
-
             for i, current_nce_loss in enumerate(nce_loss):
                 loss_scale = predictions[i][0]
                 loss = loss + loss_scale*self.args.contrastive_loss_weight*current_nce_loss
