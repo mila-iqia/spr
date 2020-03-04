@@ -227,18 +227,19 @@ class LocalBuffer:
         :param value_estimates: Stacked initial value estimates for the buffer.
         :return: Value errors.
         """
-        done_mask = torch.cumprod(1 - dones.float(), 0)
+        valid_range = rewards[:-self.args.multistep].shape[0]
+        dones = 1 - dones.float()
+        done_masks = torch.stack([torch.cumprod(dones[i:i+self.args.multistep+1], 0) for i in range(valid_range)])
         discounts = torch.ones_like(rewards)[:self.args.multistep+1]*self.args.discount
         discounts = discounts ** torch.arange(0, self.args.multistep+1)[:, None].float()
-        discounts = discounts * done_mask[:-self.args.multistep-1]
+        discounts = discounts
 
-        valid_range = rewards[:-self.args.multistep].shape[0]
-        discounted_rewards = torch.stack([torch.sum(rewards[i:i+self.args.multistep]*discounts, 0) for i in range(valid_range)], 0)
-        value_targets = values[self.args.multistep:]*discounts[-1]
+        discounted_rewards = torch.stack([torch.sum(discounts[:-1]*done_masks[i, :-1]*rewards[i:i+self.args.multistep], 0) for i in range(valid_range)], 0)
+        value_targets = values[self.args.multistep:]*discounts[-1]*done_masks[:, -1]
 
         value_targets = discounted_rewards + value_targets
 
-        errors = torch.abs(value_estimates[:self.args.multistep] - value_targets) + 0.001
+        errors = torch.abs(value_estimates[self.args.multistep:] - value_targets) + 0.001
 
         return errors
 

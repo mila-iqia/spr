@@ -123,6 +123,7 @@ def run_pizero(args):
             obs, actions, reward, done, policies, values, value_estimates = obs.cpu(), actions.cpu(), reward.cpu(),\
                                                                             done.cpu(), policies.cpu(),\
                                                                             values.cpu(), value_estimates.cpu()
+
             eprets += np.array(reward)
             eplens += 1
             for i in range(args.num_envs):
@@ -160,7 +161,7 @@ def run_pizero(args):
             else:
                 local_buf.append(obs, actions, reward, done, policies, values, value_estimates)
 
-            if env_steps % (args.jumps + args.multistep) == 0 and env_steps > 0:
+            if env_steps//args.num_envs % (args.jumps + args.multistep + 1) == 0 and env_steps > args.num_envs*50:
                 # Send transitions from the local buffer to the replay buffer
                 buffer.append_samples(samples_to_buffer(*local_buf.stack()))
                 local_buf.clear()
