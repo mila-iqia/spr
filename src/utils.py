@@ -55,6 +55,7 @@ def get_args():
     parser.add_argument('--virtual-threads', type=int, default=3)
     parser.add_argument('--virtual-loss-c', type=int, default=1.)
     parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
+    parser.add_argument('--dirichlet-alpha', type=float, default=0.25, help='Root dirichlet alpha')
     parser.add_argument('--visit-temp', type=float, default=1.0, help='Visit counts softmax temperature for sampling actions')
 
     # PiZero arguments
@@ -81,7 +82,7 @@ def get_args():
     parser.add_argument('--policy-loss-weight', type=float, default=1.)
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
     parser.add_argument('--contrastive-loss-weight', type=float, default=1.)
-    parser.add_argument('--entropy-loss-weight', type=float, default=0.01)
+    parser.add_argument('--entropy-loss-weight', type=float, default=0.0)
     parser.add_argument('--init-value-scale', type=float, default=1.)
     parser.add_argument('--film', action='store_true')
     parser.add_argument('--profile', action='store_true')
