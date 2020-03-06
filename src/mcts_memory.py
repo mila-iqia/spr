@@ -318,6 +318,7 @@ class SegmentTree:
     def total(self):
         return self.sum_tree[0]
 
+
 class ReplayMemory:
     def __init__(self, args, capacity, n=None, images=False, priority_exponent=None,
                  priority_weight=None, no_overshoot=False, no_segments=True):
