@@ -170,7 +170,6 @@ class TrainingWorker(object):
             return
 
     def train(self, steps, log=True):
-
         for step in range(steps):
             self.epochs_till_now += 1
             loss = self.model(self.buffer,
@@ -185,11 +184,9 @@ class TrainingWorker(object):
                 loss.backward()
             self.optimizer.step()
             self.scheduler.step()
-            self.model.update_target_network(self.epochs_till_now)
 
 
 class LocalNCE:
-
     def __init__(self, classifier, temperature=0.1):
         self.classifier = classifier
         self.inv_temp = 1/temperature
@@ -354,6 +351,7 @@ class MCTSModel(nn.Module):
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
         self.no_nce = args.no_nce
+        self.total_steps = 0
 
         self.batch_range = torch.arange(args.batch_size_per_worker).to(self.args.device)
         if args.film:
@@ -407,10 +405,8 @@ class MCTSModel(nn.Module):
         if logits:
             return NetworkOutput(hidden_state, reward_logits, policy_logits, value_logits)
 
-        value = inverse_transform(from_categorical(value_logits,
-                                                   logits=True))
-        reward = inverse_transform(from_categorical(reward_logits,
-                                                    logits=True))
+        value = inverse_transform(from_categorical(value_logits, logits=True))
+        reward = inverse_transform(from_categorical(reward_logits, logits=True))
         return NetworkOutput(hidden_state, reward, policy_logits, value)
 
     def value_target_network(self, obs, actions):
@@ -422,7 +418,6 @@ class MCTSModel(nn.Module):
         value = inverse_transform(from_categorical(value_logits,
                                                    logits=True))
         return value
-
 
     def inference(self, state, action):
         next_state, reward_logits, \
@@ -576,7 +571,7 @@ class MCTSModel(nn.Module):
                        current_value_loss*self.args.value_loss_weight +
                        current_policy_loss*self.args.policy_loss_weight +
                        current_reward_loss*self.args.reward_loss_weight -
-                        pred_entropy * self.args.entropy_loss_weight).mean())
+                       pred_entropy * self.args.entropy_loss_weight).mean())
 
             total_losses[i] += (current_value_loss*self.args.value_loss_weight +
                                 current_policy_loss*self.args.policy_loss_weight +
@@ -618,6 +613,10 @@ class MCTSModel(nn.Module):
                             value_errors, reward_errors, mean_values,
                             mean_rewards, target_values, target_rewards,
                             pred_entropies, target_entropies)
+
+        self.total_steps += 1
+        self.update_target_network(self.total_steps)
+
         return loss
 
 
