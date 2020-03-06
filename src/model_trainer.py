@@ -822,13 +822,13 @@ class QNetwork(nn.Module):
     def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36, limit=300):
         super().__init__()
         self.hidden_size = hidden_size
-        layers = [init_relu(nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1)),
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  init_relu(nn.Linear(pixels*hidden_size, 512)),
+                  nn.Linear(pixels*hidden_size, 512),
                   nn.ReLU(),
-                  init_0(nn.Linear(512, num_actions*(limit*2 + 1)))]
+                  init_small(nn.Linear(512, num_actions*(limit*2 + 1)))]
         self.network = nn.Sequential(*layers)
         self.num_actions = num_actions
         self.dist_size = limit*2 + 1
@@ -845,13 +845,13 @@ class ValueNetwork(nn.Module):
     def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300):
         super().__init__()
         self.hidden_size = hidden_size
-        layers = [init_relu(nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1)),
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  init_relu(nn.Linear(pixels*hidden_size, 256)),
+                  nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
-                  init_0(nn.Linear(256, limit*2 + 1))]
+                  init_small(nn.Linear(256, limit*2 + 1))]
         self.network = nn.Sequential(*layers)
         self.train()
 
@@ -863,7 +863,7 @@ class PolicyNetwork(nn.Module):
     def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
         super().__init__()
         self.hidden_size = hidden_size
-        layers = [init_relu(nn.Conv2d(input_channels, hidden_size, 3, padding=1)),
+        layers = [Conv2dSame(input_channels, hidden_size, 3),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
