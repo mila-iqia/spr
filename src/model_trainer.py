@@ -14,6 +14,7 @@ import numpy as np
 import sys
 import traceback
 import gym
+import copy
 import time
 import os
 import dill
@@ -159,8 +160,6 @@ class TrainingWorker(object):
 
                 self.train(self.args.epoch_steps, log=self.rank == 0)
 
-                self.epochs_till_now += self.args.epoch_steps
-
                 if self.rank == 0:
                     self.squeue.put((self.epochs_till_now, self.train_trackers))
                     self.train_trackers = reset_trackers(self.maximum_length)
@@ -173,6 +172,7 @@ class TrainingWorker(object):
     def train(self, steps, log=True):
 
         for step in range(steps):
+            self.epochs_till_now += 1
             loss = self.model(self.buffer,
                               self.train_trackers if log else None)
 
@@ -185,6 +185,7 @@ class TrainingWorker(object):
                 loss.backward()
             self.optimizer.step()
             self.scheduler.step()
+            self.model.update_target_network(self.epochs_till_now)
 
 
 class LocalNCE:
@@ -353,6 +354,7 @@ class MCTSModel(nn.Module):
         self.multistep = args.multistep
         self.use_all_targets = args.use_all_targets
         self.no_nce = args.no_nce
+
         self.batch_range = torch.arange(args.batch_size_per_worker).to(self.args.device)
         if args.film:
             self.dynamics_model = FiLMTransitionModel(channels=args.hidden_size,
@@ -377,6 +379,16 @@ class MCTSModel(nn.Module):
                                             nn.ReLU())
             self.nce = BlockNCE(self.classifier, use_self_targets=args.use_all_targets)
 
+        self.use_target_network = args.local_target_net
+        if self.use_target_network:
+            self.target_repnet = copy.deepcopy(self.encoder)
+            self.target_value_model = copy.deepcopy(self.value_model)
+
+    def update_target_network(self, steps):
+        if steps % self.args.target_update_interval == 0 and self.use_target_network:
+            self.target_repnet.load_state_dict(self.encoder.state_dict())
+            self.target_value_model.load_state_dict(self.value_model.state_dict())
+
     def encode(self, images, actions):
         return self.encoder(images, actions)
 
@@ -400,6 +412,17 @@ class MCTSModel(nn.Module):
         reward = inverse_transform(from_categorical(reward_logits,
                                                     logits=True))
         return NetworkOutput(hidden_state, reward, policy_logits, value)
+
+    def value_target_network(self, obs, actions):
+        if len(obs.shape) < 5:
+            obs = obs.unsqueeze(0)
+        obs = obs.flatten(1, 2)
+        hidden_state = self.target_repnet(obs, actions)
+        value_logits = self.target_value_model(hidden_state)
+        value = inverse_transform(from_categorical(value_logits,
+                                                   logits=True))
+        return value
+
 
     def inference(self, state, action):
         next_state, reward_logits, \
@@ -452,6 +475,15 @@ class MCTSModel(nn.Module):
             policies = policies.float().to(self.args.device)
             values = values.float().to(self.args.device)
             initial_actions = actions[0]
+
+            if self.use_target_network:
+                value_target_states = states[self.args.multistep:self.jumps+self.args.multistep+1]
+                value_target_states = value_target_states.to(self.args.device).float()/255.
+                value_targets = self.value_target_network(value_target_states.flatten(0, 1), None)
+                value_targets = value_targets.view(*value_target_states.shape[0:2], -1)
+                if self.args.q_learning:
+                    value_targets = value_targets.max(dim=-1, keepdim=False)[0]
+                values[self.args.multistep:self.jumps+self.args.multistep+1] = value_targets
 
         # Get into the shape used by the NCE code.
         if not self.no_nce:
