@@ -22,7 +22,7 @@ class VectorizedMCTS:
         self.pb_c_base = 19652
         self.pb_c_init = args.c1
         self.root_exploration_fraction = 0.25
-        self.root_dirichlet_alpha = 0.25
+        self.root_dirichlet_alpha = args.dirichlet_alpha
         self.visit_temp = args.visit_temp
         self.device = args.device
         self.n_runs = n_runs
@@ -78,16 +78,16 @@ class VectorizedMCTS:
 
     def value_score(self, sim_id):
         """normalized_q(s,a)."""
-        if (sim_id - 1) % self.virtual_threads == 0:
-            self.virtual_loss.fill_(0)
-        if sim_id <= 2:
-            return -self.virtual_loss
+        # if (sim_id - 1) % self.virtual_threads == 0:
+        #     self.virtual_loss.fill_(0)
+        # if sim_id <= 2:
+        #     return -self.virtual_loss
         valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
-        # if sim_id <= self.warmup_sims:
-        #     return -self.visit_count
+        if sim_id <= self.warmup_sims:
+            return -self.visit_count
         values = self.q - (valid_indices * self.min_q[:, None, None])
         values /= (self.max_q - self.min_q)[:, None, None]
-        values = valid_indices * (values - self.virtual_loss)
+        values = valid_indices * values
         return values
 
     def reset_tensors(self):
@@ -204,7 +204,7 @@ class VectorizedMCTS:
 
             # Update q and count at the parent for the actions taken then
             self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
-            self.virtual_loss[self.batch_range, parent_id.squeeze(), actions.squeeze()] += (self.vl_c * not_done_mask.squeeze())
+            # self.virtual_loss[self.batch_range, parent_id.squeeze(), actions.squeeze()] += (self.vl_c * not_done_mask.squeeze())
             values = ((self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] *
                        self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()]) + returns) \
                      / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] + 1)
@@ -243,11 +243,12 @@ class VectorizedMCTS:
 
     def visit_softmax_temperature(self):
         # TODO: Change the temperature schedule
-        if self.env_steps < 2.5e6:
-            return 1.
-        if self.env_steps < 3.75e6:
-            return 0.5
-        return 0.25
+        return self.visit_temp
+        # if self.env_steps < 1e5:
+        #     return 1.
+        # if self.env_steps < 1e6:
+        #     return 0.5
+        # return 0.25
 
     def evaluate(self, env_step):
         env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)
