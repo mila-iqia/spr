@@ -139,9 +139,6 @@ class TrainingWorker(object):
         self.buffer = buffer.x
         print("{} starting up".format(self.rank), flush=True)
         self.startup()
-        # _ = self.receive_queue.get()
-        env_steps = 0
-        force_wait = False
         try:
             while True:
                 env_steps = self.receive_queue.get()
