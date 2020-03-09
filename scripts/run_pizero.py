@@ -167,16 +167,17 @@ def run_pizero(args):
                 local_buf.clear()
 
             force_wait = (total_train_steps *
-                          args.batch_size < env_steps*args.replay_ratio_lower) and \
-                         args.replay_ratio_lower > 0 and training_started
+                          args.batch_size < (env_steps - 20000)*args.replay_ratio) and \
+                         args.replay_ratio > 0 and training_started
 
             if force_wait:
+                # FIXME: This count is wring
                 print("Runner waiting; needs {} more train steps to continue".format(
                                       -args.batch_size
                                       * total_train_steps +
-                                      args.replay_ratio_lower * env_steps))
+                                      args.replay_ratio * env_steps))
 
-            if force_wait or not send_queue.empty():
+            if force_wait:
                 steps, log = send_queue.get()
                 log_results(log, steps)
                 total_train_steps = steps
@@ -186,13 +187,13 @@ def run_pizero(args):
                     target_network.load_state_dict(network.state_dict())
                     target_train_steps = total_train_steps
 
-            # Send a command to start training if ready
-            if args.num_envs*101 >= env_steps > args.num_envs*100:
-                [q.put("train") for q in receive_queues]
-                training_started = True
+                if args.replay_ratio > 0 and training_started:
+                    [q.put(env_steps) for q in receive_queues]
 
-            if args.replay_ratio_upper > 0 and training_started:
+            # Send a command to start training if ready
+            if env_steps >= 20000 and training_started is False:
                 [q.put(env_steps) for q in receive_queues]
+                training_started = True
 
             if env_steps % args.log_interval == 0 and len(episode_rewards) > 0:
                 print('Env Steps: {}, Mean Reward: {}, Median Reward: {}, Mean Length: {}, Median Length: {}'.format(env_steps, np.mean(episode_rewards),
@@ -208,11 +209,12 @@ def run_pizero(args):
                 if eval_result:
                     eval_env_step, avg_reward = eval_result
                     print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
-                    wandb.log({'env_steps': env_steps, 'Average Eval Score': avg_reward})
+                    wandb.log({'eval_env_steps': eval_env_step, 'Average Eval Score': avg_reward})
 
             if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
                 print("Starting evaluation run")
-                async_eval.send_queue.put(('evaluate', env_steps))
+                eval_network = copy.deepcopy(network)
+                async_eval.send_queue.put(('evaluate', env_steps, eval_network))
 
             obs.copy_(torch.from_numpy(next_obs))
             env_steps += args.num_envs
