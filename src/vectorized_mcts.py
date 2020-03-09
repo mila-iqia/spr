@@ -8,6 +8,7 @@ import time
 import traceback
 import sys
 import wandb
+import copy
 
 MAXIMUM_FLOAT_VALUE = torch.finfo().max / 10
 MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
@@ -34,6 +35,7 @@ class VectorizedMCTS:
         self.env_steps = 0
         self.cpu_search = args.cpu_search
         self.search_device = "cpu" if self.cpu_search else self.device
+        self.eval = eval
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
@@ -440,7 +442,10 @@ class VectorizedQMCTS(VectorizedMCTS):
         return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
     def select_action(self):
-        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.search_device) < self.args.epsilon).long()
+        epsilon = self.args.epsilon
+        if self.eval:
+            epsilon *= 0.1
+        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.search_device) < epsilon).long()
         random_actions = torch.randint(self.num_actions, size=(self.n_runs,), device=self.search_device)
         max_actions = self.q[:, 0].argmax(dim=-1)
         actions = e_action * random_actions + (1-e_action) * max_actions
@@ -475,8 +480,9 @@ class AsyncEval:
 def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
     try:
         while True:
-            command, env_step = send_queue.get()
+            command, env_step, network = send_queue.get()
             if command == 'evaluate':
+                eval_mcts.network.to(eval_mcts.device)
                 avg_reward = eval_mcts.evaluate(env_step)
                 recieve_queue.put(((env_step, avg_reward), True))
             else:
