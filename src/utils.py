@@ -33,10 +33,8 @@ def get_args():
     parser.add_argument('--cpu-search', action='store_true', help="Put everything except MCTS inference calls on CPU")
     parser.add_argument('--epoch-steps', type=int, default=50,
                         help="Number of gradient steps between loggings.")
-    parser.add_argument('--replay-ratio-upper', type=float, default=-1.,
+    parser.add_argument('--replay-ratio', type=float, default=-1.,
                         help="Upper bound of async replay ratio.  -1 disables.")
-    parser.add_argument('--replay-ratio-lower', type=float, default=-1.,
-                        help="Lower bound of async replay ratio.  -1 disables.")
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
     parser.add_argument('--game', type=str, default='space_invaders', choices=atari_py.list_games(), help='ATARI game')
@@ -68,7 +66,7 @@ def get_args():
     parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
     parser.add_argument('--grad-scale-factor', type=float, default=0.5, help='Rollout gradient downscaling. 1 disables')
-    parser.add_argument('--adam-eps', type=float, default=1e-5, help='Adam epsilon')
+    parser.add_argument('--adam-eps', type=float, default=1e-4, help='Adam epsilon')
     parser.add_argument('--weight-decay', type=float, default=1e-3, help='Weight decay regularization constant')
     parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
     parser.add_argument('--dynamics-blocks', type=int, default=16, help='# of resblocks in dynamics model')
