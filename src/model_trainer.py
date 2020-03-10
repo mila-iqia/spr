@@ -478,6 +478,8 @@ class MCTSModel(nn.Module):
                 value_targets = value_targets.view(*value_target_states.shape[0:2], -1)
                 if self.args.q_learning:
                     value_targets = value_targets.max(dim=-1, keepdim=False)[0]
+                else:
+                    value_targets = value_targets.squeeze()
                 values[self.args.multistep:self.jumps+self.args.multistep+1] = value_targets
 
         # Get into the shape used by the NCE code.
