@@ -68,7 +68,7 @@ def create_network(args):
     dummy_env.seed(args.seed)
     model = MCTSModel(args, dummy_env.action_space[0].n)
     if args.optim == "adam":
-        optimizer = torch.optim.AdamW(model.parameters(),
+        optimizer = torch.optim.Adam(model.parameters(),
                                       lr=args.learning_rate,
                                       weight_decay=args.weight_decay,
                                       eps=args.adam_eps)
@@ -77,10 +77,10 @@ def create_network(args):
                                     lr=args.learning_rate,
                                     momentum=args.momentum,
                                     weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, args.lr_decay ** (1. / args.lr_decay_steps),)
+    # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, args.lr_decay ** (1. / args.lr_decay_steps),)
     model.to(args.device)
     model.share_memory()
-    return model, optimizer, scheduler
+    return model, optimizer, None
 
 
 class TrainingWorker(object):
@@ -133,31 +133,15 @@ class TrainingWorker(object):
             self.model = DDP(self.model,
                              device_ids=[self.args.device],
                              output_device=self.args.device,
-                             find_unused_parameters=False)
+                             find_unused_parameters=True)
 
     def optimize(self, buffer):
         self.buffer = buffer.x
         print("{} starting up".format(self.rank), flush=True)
         self.startup()
-        _ = self.receive_queue.get()
-        env_steps = 0
-        force_wait = False
         try:
             while True:
-                if not self.receive_queue.empty() or force_wait:
-                    command = self.receive_queue.get()
-                    if not command:
-                        return
-                    else:
-                        env_steps = command
-
-                if self.args.replay_ratio_upper > 0:
-                    force_wait = (self.args.replay_ratio_upper * env_steps <
-                                  self.args.batch_size
-                                  * self.epochs_till_now)
-                    if force_wait:
-                        continue
-
+                env_steps = self.receive_queue.get()
                 self.train(self.args.epoch_steps, log=self.rank == 0)
 
                 if self.rank == 0:
@@ -183,7 +167,7 @@ class TrainingWorker(object):
             else:
                 loss.backward()
             self.optimizer.step()
-            self.scheduler.step()
+            # self.scheduler.step()
 
 
 class LocalNCE:
@@ -664,7 +648,7 @@ class TransitionModel(nn.Module):
     def __init__(self,
                  channels,
                  num_actions,
-                 args,
+                 args=None,
                  blocks=16,
                  hidden_size=256,
                  latent_size=36,
@@ -823,13 +807,13 @@ class QNetwork(nn.Module):
     def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36, limit=300):
         super().__init__()
         self.hidden_size = hidden_size
-        layers = [init_relu(nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1)),
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  init_relu(nn.Linear(pixels*hidden_size, 512)),
+                  nn.Linear(pixels*hidden_size, 512),
                   nn.ReLU(),
-                  init_0(nn.Linear(512, num_actions*(limit*2 + 1)))]
+                  init_small(nn.Linear(512, num_actions*(limit*2 + 1)))]
         self.network = nn.Sequential(*layers)
         self.num_actions = num_actions
         self.dist_size = limit*2 + 1
@@ -846,13 +830,13 @@ class ValueNetwork(nn.Module):
     def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300):
         super().__init__()
         self.hidden_size = hidden_size
-        layers = [init_relu(nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1)),
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  init_relu(nn.Linear(pixels*hidden_size, 256)),
+                  nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
-                  init_0(nn.Linear(256, limit*2 + 1))]
+                  init_small(nn.Linear(256, limit*2 + 1))]
         self.network = nn.Sequential(*layers)
         self.train()
 
@@ -864,7 +848,7 @@ class PolicyNetwork(nn.Module):
     def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36):
         super().__init__()
         self.hidden_size = hidden_size
-        layers = [init_relu(nn.Conv2d(input_channels, hidden_size, 3, padding=1)),
+        layers = [Conv2dSame(input_channels, hidden_size, 3),
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
@@ -911,6 +895,9 @@ class RepNet(nn.Module):
             stacked_image = x
         latent = self.network(stacked_image)
         return renormalize(latent, 1)
+
+    def conv_out_size(self, h, w):
+        return (6, 6)
 
 
 def transform(value, eps=0.001):
