@@ -68,7 +68,7 @@ def create_network(args):
     dummy_env.seed(args.seed)
     model = MCTSModel(args, dummy_env.action_space[0].n)
     if args.optim == "adam":
-        optimizer = torch.optim.Adam(model.parameters(),
+        optimizer = torch.optim.AdamW(model.parameters(),
                                       lr=args.learning_rate,
                                       weight_decay=args.weight_decay,
                                       eps=args.adam_eps)
@@ -450,6 +450,7 @@ class MCTSModel(nn.Module):
             # Because of how this happens, we need to make sure that the first reward received isn't
             # actually from a different trajectory.  If it is, we just set it to 0.
             rewards[0] = rewards[0] * (1 - done[0].float())
+            done = 1 - done.float()[1:].to(self.args.device)
             rewards = rewards.float().to(self.args.device)
             policies = policies.float().to(self.args.device)
             values = values.float().to(self.args.device)
@@ -524,9 +525,11 @@ class MCTSModel(nn.Module):
             loss_scale, pred_reward, pred_policy, pred_value = prediction
 
             # Calculate the value target for v_i+1
-            value_target = torch.sum(discounts*rewards[i+1:i+self.multistep+1], 0)
+            done_n = torch.cumprod(done[i:i+self.multistep+1], 0)
+            discounts_done = discounts*done_n[:-1]
+            value_target = torch.sum(discounts_done*rewards[i+1:i+self.multistep+1], 0)
             value_target = value_target + self.args.discount ** self.multistep \
-                           * values[i+self.multistep]
+                           * values[i+self.multistep]*done_n[-1]
 
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
