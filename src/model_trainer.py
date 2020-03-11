@@ -435,13 +435,13 @@ class MCTSModel(nn.Module):
 
         Returns loss and KL-divergence-errors for use in prioritization.
         """
-
+        value_targets = F.softmax(value_targets, -1)
         delta_z = (self.V_max - self.V_min) / (self.n_atoms - 1)
         z = torch.linspace(self.V_min, self.V_max, self.n_atoms, device=self.args.device)
         # Makde 2-D tensor of contracted z_domain for each data point,
         # with zeros where next value should not be added.
         next_z = z * (self.args.discount ** self.args.multistep)  # [P']
-        next_z = torch.ger(1 - done_n.float(), next_z)  # [B,P']
+        next_z = torch.ger(done_n.float(), next_z)  # [B,P']
         ret = returns.unsqueeze(1)  # [B,1]
         next_z = torch.clamp(ret + next_z, self.V_min, self.V_max)  # [B,P']
 
@@ -449,6 +449,7 @@ class MCTSModel(nn.Module):
         next_z_bc = next_z.unsqueeze(1)  # [B,1,P']
         abs_diff_on_delta = abs(next_z_bc - z_bc) / delta_z
         projection_coeffs = torch.clamp(1 - abs_diff_on_delta, 0, 1)  # Most 0.
+
         # projection_coeffs is a 3-D tensor: [B,P,P']
         # dim-0: independent data entries
         # dim-1: base_z atoms (remains after projection)
@@ -461,17 +462,17 @@ class MCTSModel(nn.Module):
             target_p_unproj = select_at_indexes(next_a, target_ps)  # [B,P']
             target_p_unproj = target_p_unproj.unsqueeze(1)  # [B,1,P']
             target_p = (target_p_unproj * projection_coeffs).sum(-1)  # [B,P]
-        ps = pred_value  # [B,A,P]
+        ps = F.log_softmax(pred_value, -1)  # [B,A,P]
         # p = select_at_indexes(samples.action, ps)  # [B,P]
-        p = torch.clamp(ps, 1e-6, 1)  # NaN-guard.
-        losses = -torch.sum(torch.softmax(target_p, -1) * p, dim=1)  # Cross-entropy.
+        # p = torch.clamp(ps, 1e-6, 1)  # NaN-guard.
+        losses = -torch.sum(target_p * ps, dim=1)  # Cross-entropy.
 
         # if self.prioritized_replay:
         #     losses *= samples.is_weights
 
         target_p = torch.clamp(target_p, EPS, 1)
         KL_div = torch.sum(target_p *
-                           (torch.log(target_p) - torch.log(p.detach())), dim=1)
+                           (torch.log(target_p) - ps.detach()), dim=1)
         KL_div = torch.clamp(KL_div, EPS, 1 / EPS)  # Avoid <0 from NaN-guard.
 
         return losses, KL_div
@@ -514,11 +515,11 @@ class MCTSModel(nn.Module):
                 value_target_states = value_target_states.to(self.args.device).float()/255.
                 value_targets = self.value_target_network(value_target_states.flatten(0, 1), None)
                 value_targets = value_targets.view(*value_target_states.shape[0:2], -1, self.n_atoms)
-                if self.args.q_learning:
-                    best_actions = from_categorical(value_targets, logits=True, limit=10).argmax(dim=-1)
-                    value_targets = select_at_indexes(best_actions, value_targets)
-                else:
-                    value_targets = value_targets.squeeze()
+                # if self.args.q_learning:
+                #     best_actions = from_categorical(value_targets, logits=True, limit=10).argmax(dim=-1)
+                #     value_targets = select_at_indexes(best_actions, value_targets)
+                # else:
+                #     value_targets = value_targets.squeeze()
                 values = value_targets
             else:
                 values = values[self.args.multistep:self.args.jumps + self.args.multistep+1]
