@@ -1,7 +1,7 @@
 description: AWM
 
 target:
-  cluster: eu2
+  cluster: wu2
   vc: msrlabs
 
 environment:
@@ -11,10 +11,6 @@ environment:
     - export PATH=$$PATH:~/.local/bin
     - export LC_ALL=C.UTF-8
     - export LANG=C.UTF-8
-    #      - git clone https://github.com/NVIDIA/apex
-    #      - cd apex
-    #      - pip install --user -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
-    #      - cd ..
     - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly recordclass pyprind psutil dill
     - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
     - pip install --user git+git://github.com/astooke/rlpyt
@@ -38,46 +34,43 @@ search:
     name: awm
     sku: G4
     command:
-      - NCCL_DEBUG=INFO NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=eth0,eth1 python -m scripts.run_pizero --grayscale --game {game} {search-targets} --batch-size-per-worker 200 {nce} {envs} --total-env-steps 20000000 --savedir ./out --optim adam --multistep {multistep} --epoch-steps 20  --evaluation-episodes 10 --evaluation-interval 80000 --visit-temp {visit-temp} --discount 0.99 --num-trainers 3 --num-simulations 0 --eval-simulations 0 --virtual-threads {virtual-threads} {prioritized} --no-gpu-0-train --learning-rate {lr} --target-update-interval {uti}  --c1 {c1} --jumps 0  --q-learning  --local-target-net  --weight-decay 0.  --replay-ratio {replay-ratio}
+      - NCCL_DEBUG=INFO NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=eth0,eth1 python -m scripts.run_pizero --grayscale --game {game} {search-targets} --batch-size-per-worker 200 {nce} --num-envs {envs} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 20 --visit-temp {visit-temp} --num-trainers 3 --num-simulations 0 --eval-simulations 0 {prioritized} --no-gpu-0-train --learning-rate {lr} --target-update-interval {uti}  --c1 {c1} --jumps 0 --replay-ratio {replay-ratio}  {reanalyze}  --q-learning --buffer-size 1000000
   type: grid
-  max_trials: 12
+  max_trials: 24
   params:
     - name: game
       spec: discrete
       values: ['ms_pacman']
     - name: nce
       spec: discrete
-      values: ['--no-nce --policy-loss-weight 0. --reward-loss-weight 0.']
+      values: ['--no-nce --policy-loss-weight 0.0 --reward-loss-weight 0.']
     - name: envs
       spec: discrete
-      values: ['--num-envs 64 --num-workers 1', '--num-envs 16 --num-workers 1']
-#    - name: reanalyze
-#      spec: discrete
-#      values: ['']
+      values: [4]
+    - name: reanalyze
+      spec: discrete
+      values: ['']
     - name: uti
       spec: discrete
-      values: [500, 100]
+      values: [100, 1000]
     - name: multistep
       spec: discrete
       values: [5]
     - name: c1
       spec: discrete
-      values: [0.25]
+      values: [1.25]
     - name: search-targets
       spec: discrete
-      values: ['--no-search-value-targets']
+      values: ['--no-search-value-targets --local-target-net']
     - name: visit-temp
       spec: discrete
       values: [0.5]
     - name: replay-ratio
       spec: discrete
-      values: [8]
-    - name: virtual-threads
-      spec: discrete
-      values: [3]
+      values: [2, 4, 8]
     - name: prioritized
       spec: discrete
       values: ['']
     - name: lr
       spec: discrete
-      values: [0.0003, 0.003]
+      values: [0.0001, 0.001]

@@ -7,9 +7,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from rlpyt.utils.collections import namedarraytuple
-from rlpyt.utils.synchronize import find_port
 from src.logging import update_trackers, reset_trackers
-from src.mcts_memory import AsyncPrioritizedSequenceReplayFrameBufferExtended, initialize_replay_buffer
 import numpy as np
 import sys
 import traceback
@@ -17,7 +15,6 @@ import gym
 import copy
 import time
 import os
-import dill
 
 try:
     from apex import amp
@@ -47,9 +44,6 @@ def cleanup():
 
 
 def setup(rank, world_size, seed, port, backend="nccl"):
-    # os.environ['MASTER_ADDR'] = 'localhost'
-    # os.environ['MASTER_PORT'] = '12355'
-
     # initialize the process group
     dist.init_process_group(backend,
                             rank=rank,
