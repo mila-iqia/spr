@@ -23,6 +23,9 @@ pip install --user -e git+git://ithub.com/ankeshanand/abstract-world-models
 The file `ms_run_pizero.yaml` contains the required YAML setup to run the project on Philly.
 
 ## Usage:
+The default branch for the latest and stable changes is `master`. Features we are trying live in a feature branch and merged
+back to master when they seem to work. 
+
 * Sample run script
 ```bash
 python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64  
