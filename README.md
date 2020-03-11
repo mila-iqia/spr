@@ -34,11 +34,11 @@ This will launch a MuZero run with NCE enabled. Here are some options that might
 * For disabling NCE loss during training, pass the flag `--no-nce`
 * For running purely Q-learning (no search), use the following options: 
 ```bash
-python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net  --jumps 0
+python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net --num-simulations 0 --eval-simulations 0 --jumps 0
 ```
 * To run Q-learning with search, use the following options:
 ```bash
-python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net  --num-simulations 10 --eval-simulations 25 --c1 0.25
+python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net --c1 0.25
 ```
 
 A WIP implementation of the C51 Q-learning in currently located in the `c51` branch.
