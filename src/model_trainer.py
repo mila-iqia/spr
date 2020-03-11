@@ -538,8 +538,7 @@ class MCTSModel(nn.Module):
         if self.args.q_learning:
             pred_policy = pred_value
             pred_value = pred_value[self.batch_range, actions[1], :]
-            pred_policy = inverse_transform(from_categorical(pred_policy,
-                                                             logits=True))
+            pred_policy = from_categorical(pred_policy, logits=True, limit=10)
 
         # This represents s_1, r_0, pi_1, v_1
         predictions = [(1.0, pred_reward, pred_policy, pred_value)]
@@ -564,8 +563,7 @@ class MCTSModel(nn.Module):
                 self.step(current_state, action)
             if self.args.q_learning:
                 pred_policy = pred_value
-                pred_policy = inverse_transform(from_categorical(pred_policy,
-                                                   logits=True))
+                pred_policy = from_categorical(pred_policy, logits=True, limit=10)
                 pred_value = pred_value[self.batch_range, actions[i+1], :]
 
             current_state = ScaleGradient.apply(current_state,

@@ -173,11 +173,9 @@ def run_pizero(args):
             if force_wait:
                 # FIXME: This count is wring
                 print("Runner waiting; needs {} more train steps to continue".format(
-                                      -args.batch_size
-                                      * total_train_steps +
-                                      args.replay_ratio * env_steps))
+                                      -args.batch_size * total_train_steps +
+                                      (env_steps - 20000) * args.replay_ratio))
 
-            if force_wait:
                 steps, log = send_queue.get()
                 log_results(log, steps)
                 total_train_steps = steps
