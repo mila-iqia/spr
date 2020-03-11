@@ -7,7 +7,7 @@ import traceback
 from src.mcts_memory import LocalBuffer, initialize_replay_buffer, samples_to_buffer
 from src.model_trainer import TrainingWorker
 from src.async_reanalyze import AsyncReanalyze
-from src.utils import get_args, DillWrapper
+from src.utils import get_args, DillWrapper, find_free_port, torch_set_device
 from src.logging import log_results
 
 import os
@@ -17,28 +17,8 @@ import torch
 import wandb
 import numpy as np
 import gym
-import socket
 
 from src.vectorized_mcts import VectorizedMCTS, AsyncEval, VectorizedQMCTS
-
-
-def torch_set_device(args):
-    if torch.cuda.is_available():
-        args.device = torch.device('cuda:0')
-        torch.cuda.set_device('cuda:0')
-        torch.cuda.manual_seed(args.seed)
-        torch.backends.cudnn.enabled = True
-    else:
-        args.device = torch.device('cpu')
-
-
-def find_free_port():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('localhost', 0))
-    sockname = sock.getsockname()
-    sock.close()
-    return sockname[1]
 
 
 def run_pizero(args):
@@ -86,7 +66,6 @@ def run_pizero(args):
     env = gym.vector.make('atari-v0', num_envs=args.num_envs, args=args,
                           asynchronous=not args.sync_envs)
 
-    # TODO return int observations
     obs = env.reset()
     obs = torch.from_numpy(obs)
     if args.q_learning:
@@ -171,11 +150,7 @@ def run_pizero(args):
                          args.replay_ratio > 0 and training_started
 
             if force_wait:
-                # FIXME: This count is wring
-                print("Runner waiting; needs {} more train steps to continue".format(
-                                      -args.batch_size
-                                      * total_train_steps +
-                                      args.replay_ratio * env_steps))
+                print("Runner waiting; needs more train steps to continue")
 
             if force_wait:
                 steps, log = send_queue.get()
@@ -253,6 +228,4 @@ if __name__ == '__main__':
     os.makedirs(args.savedir, exist_ok=True)
 
     print("Saving episode data in {}".format(args.savedir))
-
-
     run_pizero(args)

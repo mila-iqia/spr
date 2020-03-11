@@ -9,22 +9,22 @@ import matplotlib.pyplot as plt
 import io
 from PIL import Image
 import dill
+import socket
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--total-env-steps', type=int, default=1000000,
+    parser.add_argument('--total-env-steps', type=int, default=10000000,
                         help='Total number to env steps to train (default: 100000)')
     parser.add_argument('--num-envs', type=int, default=64, help='Number of parallel envs to run')
     parser.add_argument('--num-trainers', type=int, default=1, help='Number of training workers')
     parser.add_argument('--num-reanalyze-envs', type=int, default=64, help='Number of parallel envs to run')
-    parser.add_argument('--num-workers', type=int, default=1, help='Number of parallel envs to run')
     parser.add_argument('--num-reanalyze-workers', type=int, default=1, help='Number of parallel envs to run')
     parser.add_argument('--sync-envs', action='store_true')
     parser.add_argument('--debug-reanalyze', action='store_true')
     parser.add_argument('--fp16', action='store_true')
     parser.add_argument('--buffer-size', type=int, default=500000)
-    parser.add_argument('--target-update-interval', type=int, default=10,
+    parser.add_argument('--target-update-interval', type=int, default=100,
                         help="Number of gradient steps for each update to the "
                              "target network.  <=0 to disable target network.")
     parser.add_argument('--no-gpu-0-train', action='store_true')
@@ -33,7 +33,7 @@ def get_args():
     parser.add_argument('--cpu-search', action='store_true', help="Put everything except MCTS inference calls on CPU")
     parser.add_argument('--epoch-steps', type=int, default=50,
                         help="Number of gradient steps between loggings.")
-    parser.add_argument('--replay-ratio', type=float, default=-1.,
+    parser.add_argument('--replay-ratio', type=float, default=-2.,
                         help="Upper bound of async replay ratio.  -1 disables.")
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed to use')
@@ -44,24 +44,22 @@ def get_args():
     parser.add_argument('--max-episode-length', type=int, default=int(108e3), metavar='LENGTH',
                         help='Max episode length in game frames (0 to disable)')
     parser.add_argument('--discount', type=float, default=0.99)
-    parser.add_argument('--evaluation-episodes', type=int, default=2,
+    parser.add_argument('--evaluation-episodes', type=int, default=10,
                         help='Number of episodes to average over when evaluating')
 
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
-    parser.add_argument('--eval-simulations', type=int, default=50)
+    parser.add_argument('--eval-simulations', type=int, default=25)
     parser.add_argument('--virtual-threads', type=int, default=3)
     parser.add_argument('--virtual-loss-c', type=int, default=1.)
     parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
     parser.add_argument('--dirichlet-alpha', type=float, default=0.25, help='Root dirichlet alpha')
-    parser.add_argument('--visit-temp', type=float, default=1.0, help='Visit counts softmax temperature for sampling actions')
+    parser.add_argument('--visit-temp', type=float, default=0.5, help='Visit counts softmax temperature for sampling actions')
 
     # PiZero arguments
-    parser.add_argument('--training-interval', type=int, default=64,
-                        help='Perform training after every {training-interval} env steps ')
     parser.add_argument('--batch-size-per-worker', type=int, default=128, help='Batch size per GPU to use during training')
-    parser.add_argument('--learning-rate', type=float, default=0.001, metavar='η', help='Learning rate')
-    parser.add_argument('--optim', type=str, default='sgd', choices=["adam", "sgd"], help='Optimizer')
+    parser.add_argument('--learning-rate', type=float, default=0.0003, metavar='η', help='Learning rate')
+    parser.add_argument('--optim', type=str, default='adam', choices=["adam", "sgd"], help='Optimizer')
     parser.add_argument('--lr-decay-steps', type=float, default=350.e3, help='Learning rate decay time constant')
     parser.add_argument('--lr-decay', type=float, default=0.1, help='Learning rate decay scale')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
@@ -92,14 +90,14 @@ def get_args():
     parser.add_argument('--epsilon', type=int, default=0.01)
     parser.add_argument('--no-search-value-targets', action='store_true')
     parser.add_argument('--prioritized', action='store_true')
-    parser.add_argument('--evaluation-interval', type=int, default=100000,
+    parser.add_argument('--evaluation-interval', type=int, default=80000,
                         help='Evaluate after every {evaluation-interval} env steps')
     parser.add_argument('--log-interval', type=int, default=3200,
                         help='Evaluate after every {evaluation-interval} env steps')
 
     parser.add_argument('--wandb-proj', type=str, default='pizero')
     parser.add_argument('--name', type=str, default='')
-    parser.add_argument('--savedir', type=str, default='')
+    parser.add_argument('--savedir', type=str, default='./out')
 
     args = parser.parse_args()
     args.max_episode_length = int(108e3)
@@ -229,4 +227,22 @@ class DillWrapper(object):
 
     def __setstate__(self, ob):
         self.x = dill.loads(ob)
+
+def torch_set_device(args):
+    if torch.cuda.is_available():
+        args.device = torch.device('cuda:0')
+        torch.cuda.set_device('cuda:0')
+        torch.cuda.manual_seed(args.seed)
+        torch.backends.cudnn.enabled = True
+    else:
+        args.device = torch.device('cpu')
+
+
+def find_free_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(('localhost', 0))
+    sockname = sock.getsockname()
+    sock.close()
+    return sockname[1]
 
