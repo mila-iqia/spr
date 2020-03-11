@@ -1,0 +1,76 @@
+description: AWM
+
+target:
+  cluster: wu2
+  vc: msrlabs
+
+environment:
+  image: philly/jobs/custom/pytorch:pytorch1.3.1-py36-cuda10.0
+  registry: phillyregistry.azurecr.io
+  setup:
+    - export PATH=$$PATH:~/.local/bin
+    - export LC_ALL=C.UTF-8
+    - export LANG=C.UTF-8
+    - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' plotly recordclass pyprind psutil dill
+    - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
+    - pip install --user git+git://github.com/astooke/rlpyt
+    - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
+
+# azure storage configuration
+storage:
+  my_storage:
+    # Replace with the name of the Azure Storage Account you created.
+    #   If you followed the tutorial, this should be your_username
+    storage_account_name: ankdefault
+    # Specify a name of the container on your blob (ex. phillytools),
+    #   to store data, results and code. It will be created if it does not exist.
+    container_name: awmcontainer
+
+# data
+#   data upload is not required for this example
+
+search:
+  job_template:
+    name: awm
+    sku: G4
+    command:
+      - NCCL_DEBUG=INFO NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=eth0,eth1 python -m scripts.run_pizero --grayscale --game {game} {search-targets} --batch-size-per-worker 200 {nce} --num-envs {envs} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 20 --visit-temp {visit-temp} --num-trainers 3 --num-simulations 0 --eval-simulations 0 {prioritized} --no-gpu-0-train --learning-rate {lr} --target-update-interval {uti}  --c1 {c1} --jumps 0 --replay-ratio {replay-ratio}  {reanalyze}  --q-learning --buffer-size 1000000
+  type: grid
+  max_trials: 24
+  params:
+    - name: game
+      spec: discrete
+      values: ['ms_pacman']
+    - name: nce
+      spec: discrete
+      values: ['--no-nce --policy-loss-weight 0.0 --reward-loss-weight 0.']
+    - name: envs
+      spec: discrete
+      values: [4]
+    - name: reanalyze
+      spec: discrete
+      values: ['']
+    - name: uti
+      spec: discrete
+      values: [100, 1000]
+    - name: multistep
+      spec: discrete
+      values: [5]
+    - name: c1
+      spec: discrete
+      values: [1.25]
+    - name: search-targets
+      spec: discrete
+      values: ['--no-search-value-targets --local-target-net']
+    - name: visit-temp
+      spec: discrete
+      values: [0.5]
+    - name: replay-ratio
+      spec: discrete
+      values: [2, 4, 8]
+    - name: prioritized
+      spec: discrete
+      values: ['']
+    - name: lr
+      spec: discrete
+      values: [0.0001, 0.001]
