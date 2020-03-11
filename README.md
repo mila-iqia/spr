@@ -28,19 +28,21 @@ back to master when they seem to work.
 
 * Sample run script
 ```bash
-python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64  
+python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --num-trainers 3 --no-gpu-0-train 
 ```
-This will launch a MuZero run with NCE enabled. Here are some options that might be useful when running experiments:
+This will launch a MuZero run with NCE enabled on 4GPUs where GPU0 is used only for search / reanalyze. 
+For all our experiments, we are using `--batch-size-per-worker 200` too, but this can change depending on the amount of GPU memory.
+
+Here are some options that might be useful when running experiments:
 * For disabling NCE loss during training, pass the flag `--no-nce`
 * For running purely Q-learning (no search), use the following options: 
 ```bash
-python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net --num-simulations 0 --eval-simulations 0 --jumps 0
+python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net --num-simulations 0 --eval-simulations 0 --jumps 0  --num-trainers 3 --no-gpu-0-train 
 ```
 * To run Q-learning with search, use the following options:
 ```bash
-python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net --c1 0.25
+python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net --c1 0.25 --num-trainers 3 --no-gpu-0-train 
 ```
-
 A WIP implementation of the C51 Q-learning in currently located in the `c51` branch.
 
 
