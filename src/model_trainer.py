@@ -427,7 +427,7 @@ class MCTSModel(nn.Module):
 
         return next_state, reward_logits, policy_logits, value_logits
 
-    def c51_loss(self, returns, done_n, value_targets, pred_value):
+    def c51_loss(self, returns, non_terminal_n, value_targets, pred_value):
         """
         Computes the Distributional Q-learning loss, based on projecting the
         discounted rewards + target Q-distribution into the current Q-domain,
@@ -441,7 +441,7 @@ class MCTSModel(nn.Module):
         # Makde 2-D tensor of contracted z_domain for each data point,
         # with zeros where next value should not be added.
         next_z = z * (self.args.discount ** self.args.multistep)  # [P']
-        next_z = torch.ger(done_n.float(), next_z)  # [B,P']
+        next_z = torch.ger(non_terminal_n.float(), next_z)  # [B,P']
         ret = returns.unsqueeze(1)  # [B,1]
         next_z = torch.clamp(ret + next_z, self.V_min, self.V_max)  # [B,P']
 
@@ -580,11 +580,11 @@ class MCTSModel(nn.Module):
             loss_scale, pred_reward, pred_policy, pred_value = prediction
 
             # Calculate the value target for v_i+1
-            done_n = torch.cumprod(done[i:i+self.multistep+1], 0)
-            discounts_done = discounts*done_n[:-1]
+            non_terminal_n = torch.cumprod(done[i:i+self.multistep+1], 0)
+            discounts_done = discounts*non_terminal_n[:-1]
             n_step_return = torch.sum(discounts_done*rewards[i+1:i+self.multistep+1], 0)
             # value_target = value_target + self.args.discount ** self.multistep \
-            #                * values[i+self.multistep]*done_n[-1]
+            #                * values[i+self.multistep]*non_terminal_n[-1]
 
             reward_target = to_categorical(rewards[i], limit=1)
 
@@ -592,7 +592,7 @@ class MCTSModel(nn.Module):
                 pred_reward.detach(), limit=1, logits=True))
             pred_values.append(from_categorical(
                 pred_value.detach(), limit=10, logits=True))
-            value_targets.append(n_step_return + self.args.discount ** self.multistep * pred_values[i]*done_n[-1])
+            value_targets.append(n_step_return + self.args.discount ** self.multistep * pred_values[i]*non_terminal_n[-1])
 
             pred_entropy = Categorical(logits=pred_policy).entropy()
             target_entropy = Categorical(probs=policies[i]).entropy()
@@ -606,7 +606,7 @@ class MCTSModel(nn.Module):
 
             current_reward_loss = -torch.sum(reward_target * pred_reward, -1)
             current_policy_loss = -torch.sum(policies[i] * pred_policy, -1)
-            current_value_loss, kl_div = self.c51_loss(n_step_return, done_n[-1], values[i], pred_value)
+            current_value_loss, kl_div = self.c51_loss(n_step_return, non_terminal_n[-1], values[i], pred_value)
             value_errors.append(kl_div.cpu().numpy())
 
             loss = loss + loss_scale * (is_weights * (
