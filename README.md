@@ -1,28 +1,59 @@
 # abstract-world-models
 
-## Dependencies: 
-* PyTorch 
-* wandb (logging tool)
-* gym
-
+## Installation 
 To install the requirements, follow these steps:
 ```bash
 # PyTorch
-conda install pytorch torchvision -c pytorch
+conda install pytorch torchvision -c pytorch dill
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
 
-# Other requirements
-pip install -r requirements.txt
+# Install requirements
+pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill
+pip install --user git+git://github.com/astooke/rlpyt
+
+# Login to W&B
+wandb login {wandb_key}
+
+# Finally, install the project
+pip install --user -e git+git://ithub.com/ankeshanand/abstract-world-models
 ```
+
+## Running on Philly
+The file `ms_run_pizero.yaml` contains the required YAML setup to run the project on Philly.
 
 ## Usage:
-* Add the project directory to your `$PYTHONPATH`
-
-* Run the training script
+* Sample run script
 ```bash
-python -m scripts.train_all
+python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64  
+```
+This will launch a MuZero run with NCE enabled. Here are some options that might be useful when running experiments:
+* For disabling NCE loss during training, pass the flag `--no-nce`
+* For running purely Q-learning (no search), use the following options: 
+```bash
+python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net  --jumps 0
+```
+* To run Q-learning with search, use the following options:
+```bash
+python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net  --num-simulations 10 --eval-simulations 25 --c1 0.25
 ```
 
-## References:
-Kaixin's Rainbow implementation: https://github.com/Kaixhin/Rainbow
+A WIP implementation of the C51 Q-learning in currently located in the `c51` branch.
 
-MBPO: https://arxiv.org/abs/1906.08253
+
+## What does each file do? 
+
+    .
+    ├── scripts
+    │   └── run_pizero.py         # The main runner script to launch jobs.
+    ├── src                     
+    │   ├── async_mcts.py         # Legacy / Defunct. Ignore this. 
+    │   ├── async_reanalyze.py    # An async worker that performs ReAnalyze MCTS. Episodes are read and written to disk.
+    │   ├── encoders.py           # Legacy / Defunt. Contains old nature conv encoders
+    │   ├── logging.py            # Utils for logging metrics during training
+    │   ├── mcts_memory.py        # Extends rlpyt's buffer for storing additional items such as the prior policy.
+    │   ├── model_trainer.py      # The main file that contrains training code for everything. Also includes all the network architectures for MuZero. 
+    │   ├── pizero.py             # Legacy / Defunct. Old MCTS implemetation.
+    │   └── utils.py              # Command line arguments and helper functions 
+    │
+    └── ms_run_pizero.yaml        # YAML file to run experiments on Philly

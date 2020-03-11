@@ -107,9 +107,6 @@ venv.bak/
 .idea
 *.pt
 tmp/
-wandb/
-
-# PHYRE directories
-phyre
-runs
-results
+wandb
+philly/
+results/
