@@ -8,6 +8,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from rlpyt.utils.collections import namedarraytuple
 from rlpyt.utils.synchronize import find_port
+from rlpyt.utils.tensor import select_at_indexes
 from src.logging import update_trackers, reset_trackers
 from src.mcts_memory import AsyncPrioritizedSequenceReplayFrameBufferExtended, initialize_replay_buffer
 import numpy as np
@@ -27,6 +28,7 @@ except ModuleNotFoundError as e:
 
 NetworkOutput = namedarraytuple('NetworkOutput', ['next_state', 'reward', 'policy_logits', 'value'])
 
+EPS = 1e-6
 
 def init(module, weight_init, bias_init, gain=1):
     weight_init(module.weight.data, gain=gain)
@@ -166,6 +168,8 @@ class TrainingWorker(object):
                     scaled_loss.backward()
             else:
                 loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), 10.)
             self.optimizer.step()
             # self.scheduler.step()
 
@@ -336,6 +340,8 @@ class MCTSModel(nn.Module):
         self.use_all_targets = args.use_all_targets
         self.no_nce = args.no_nce
         self.total_steps = 0
+        self.V_min, self.V_max = -10., 10.
+        self.n_atoms = 51
 
         self.batch_range = torch.arange(args.batch_size_per_worker).to(self.args.device)
         if args.film:
@@ -349,9 +355,9 @@ class MCTSModel(nn.Module):
                                                   blocks=args.dynamics_blocks,
                                                   args=args)
         if self.args.q_learning:
-            self.value_model = QNetwork(args.hidden_size, num_actions)
+            self.value_model = QNetwork(args.hidden_size, num_actions, atoms=self.n_atoms)
         else:
-            self.value_model = ValueNetwork(args.hidden_size)
+            self.value_model = ValueNetwork(args.hidden_size, limit=self.n_atoms//2+1)
             self.policy_model = PolicyNetwork(args.hidden_size, num_actions)
         self.encoder = RepNet(args.framestack, grayscale=args.grayscale, actions=False)
         if not self.no_nce:
@@ -389,8 +395,8 @@ class MCTSModel(nn.Module):
         if logits:
             return NetworkOutput(hidden_state, reward_logits, policy_logits, value_logits)
 
-        value = inverse_transform(from_categorical(value_logits, logits=True))
-        reward = inverse_transform(from_categorical(reward_logits, logits=True))
+        value = from_categorical(value_logits, limit=10, logits=True)
+        reward = from_categorical(reward_logits, limit=1, logits=True)
         return NetworkOutput(hidden_state, reward, policy_logits, value)
 
     def value_target_network(self, obs, actions):
@@ -399,17 +405,15 @@ class MCTSModel(nn.Module):
         obs = obs.flatten(1, 2)
         hidden_state = self.target_repnet(obs, actions)
         value_logits = self.target_value_model(hidden_state)
-        value = inverse_transform(from_categorical(value_logits,
-                                                   logits=True))
-        return value
+        # value = inverse_transform(from_categorical(value_logits,
+        #                                            logits=True))
+        return value_logits
 
     def inference(self, state, action):
         next_state, reward_logits, \
         policy_logits, value_logits = self.step(state, action)
-        value = inverse_transform(from_categorical(value_logits,
-                                                   logits=True))
-        reward = inverse_transform(from_categorical(reward_logits,
-                                                    logits=True))
+        value = from_categorical(value_logits, logits=True, limit=10)
+        reward = from_categorical(reward_logits, logits=True, limit=1)
 
         return NetworkOutput(next_state, reward, policy_logits, value)
 
@@ -422,6 +426,55 @@ class MCTSModel(nn.Module):
         value_logits = self.value_model(next_state)
 
         return next_state, reward_logits, policy_logits, value_logits
+
+    def c51_loss(self, returns, done_n, value_targets, pred_value):
+        """
+        Computes the Distributional Q-learning loss, based on projecting the
+        discounted rewards + target Q-distribution into the current Q-domain,
+        with cross-entropy loss.
+
+        Returns loss and KL-divergence-errors for use in prioritization.
+        """
+
+        delta_z = (self.V_max - self.V_min) / (self.n_atoms - 1)
+        z = torch.linspace(self.V_min, self.V_max, self.n_atoms, device=self.args.device)
+        # Makde 2-D tensor of contracted z_domain for each data point,
+        # with zeros where next value should not be added.
+        next_z = z * (self.args.discount ** self.args.multistep)  # [P']
+        next_z = torch.ger(1 - done_n.float(), next_z)  # [B,P']
+        ret = returns.unsqueeze(1)  # [B,1]
+        next_z = torch.clamp(ret + next_z, self.V_min, self.V_max)  # [B,P']
+
+        z_bc = z.view(1, -1, 1)  # [1,P,1]
+        next_z_bc = next_z.unsqueeze(1)  # [B,1,P']
+        abs_diff_on_delta = abs(next_z_bc - z_bc) / delta_z
+        projection_coeffs = torch.clamp(1 - abs_diff_on_delta, 0, 1)  # Most 0.
+        # projection_coeffs is a 3-D tensor: [B,P,P']
+        # dim-0: independent data entries
+        # dim-1: base_z atoms (remains after projection)
+        # dim-2: next_z atoms (summed in projection)
+
+        with torch.no_grad():
+            target_ps = value_targets  # [B,A,P']
+            target_qs = torch.tensordot(target_ps, z, dims=1)  # [B,A]
+            next_a = torch.argmax(target_qs, dim=-1)  # [B]
+            target_p_unproj = select_at_indexes(next_a, target_ps)  # [B,P']
+            target_p_unproj = target_p_unproj.unsqueeze(1)  # [B,1,P']
+            target_p = (target_p_unproj * projection_coeffs).sum(-1)  # [B,P]
+        ps = pred_value  # [B,A,P]
+        # p = select_at_indexes(samples.action, ps)  # [B,P]
+        p = torch.clamp(ps, 1e-6, 1)  # NaN-guard.
+        losses = -torch.sum(torch.softmax(target_p, -1) * p, dim=1)  # Cross-entropy.
+
+        # if self.prioritized_replay:
+        #     losses *= samples.is_weights
+
+        target_p = torch.clamp(target_p, EPS, 1)
+        KL_div = torch.sum(target_p *
+                           (torch.log(target_p) - torch.log(p.detach())), dim=1)
+        KL_div = torch.clamp(KL_div, EPS, 1 / EPS)  # Avoid <0 from NaN-guard.
+
+        return losses, KL_div
 
     def forward(self, buffer, trackers=None, step=True,):
         """
@@ -451,7 +504,7 @@ class MCTSModel(nn.Module):
             # actually from a different trajectory.  If it is, we just set it to 0.
             rewards[0] = rewards[0] * (1 - done[0].float())
             done = 1 - done.float()[1:].to(self.args.device)
-            rewards = rewards.float().to(self.args.device)
+            rewards = rewards.float().to(self.args.device).clamp(-1, 1)
             policies = policies.float().to(self.args.device)
             values = values.float().to(self.args.device)
             initial_actions = actions[0]
@@ -460,12 +513,15 @@ class MCTSModel(nn.Module):
                 value_target_states = states[self.args.multistep:self.jumps+self.args.multistep+1]
                 value_target_states = value_target_states.to(self.args.device).float()/255.
                 value_targets = self.value_target_network(value_target_states.flatten(0, 1), None)
-                value_targets = value_targets.view(*value_target_states.shape[0:2], -1)
+                value_targets = value_targets.view(*value_target_states.shape[0:2], -1, self.n_atoms)
                 if self.args.q_learning:
-                    value_targets = value_targets.max(dim=-1, keepdim=False)[0]
+                    best_actions = from_categorical(value_targets, logits=True, limit=10).argmax(dim=-1)
+                    value_targets = select_at_indexes(best_actions, value_targets)
                 else:
                     value_targets = value_targets.squeeze()
-                values[self.args.multistep:self.jumps+self.args.multistep+1] = value_targets
+                values = value_targets
+            else:
+                values = values[self.args.multistep:self.args.jumps + self.args.multistep+1]
 
         # Get into the shape used by the NCE code.
         if not self.no_nce:
@@ -527,40 +583,38 @@ class MCTSModel(nn.Module):
             # Calculate the value target for v_i+1
             done_n = torch.cumprod(done[i:i+self.multistep+1], 0)
             discounts_done = discounts*done_n[:-1]
-            value_target = torch.sum(discounts_done*rewards[i+1:i+self.multistep+1], 0)
-            value_target = value_target + self.args.discount ** self.multistep \
-                           * values[i+self.multistep]*done_n[-1]
+            n_step_return = torch.sum(discounts_done*rewards[i+1:i+self.multistep+1], 0)
+            # value_target = value_target + self.args.discount ** self.multistep \
+            #                * values[i+self.multistep]*done_n[-1]
 
-            value_targets.append(value_target)
-            value_target = to_categorical(transform(value_target))
-            reward_target = to_categorical(transform(rewards[i]))
+            reward_target = to_categorical(rewards[i], limit=1)
 
-            pred_rewards.append(inverse_transform(from_categorical(
-                pred_reward.detach(), logits=True)))
-            pred_values.append(inverse_transform(from_categorical(
-                pred_value.detach(), logits=True)))
+            pred_rewards.append(from_categorical(
+                pred_reward.detach(), limit=1, logits=True))
+            pred_values.append(from_categorical(
+                pred_value.detach(), limit=10, logits=True))
+            value_targets.append(n_step_return + self.args.discount ** self.multistep * pred_values[i]*done_n[-1])
 
             pred_entropy = Categorical(logits=pred_policy).entropy()
             target_entropy = Categorical(probs=policies[i]).entropy()
             pred_entropies.append(pred_entropy.mean().cpu().detach().item())
             target_entropies.append(target_entropy.mean().cpu().detach().item())
 
-            value_errors.append(torch.abs(pred_values[-1] - value_targets[-1]).detach().cpu().numpy())
             reward_errors.append(torch.abs(pred_rewards[-1] - rewards[i]).detach().cpu().numpy())
 
-            pred_value = F.log_softmax(pred_value, -1)
             pred_reward = F.log_softmax(pred_reward, -1)
             pred_policy = F.log_softmax(pred_policy, -1)
 
             current_reward_loss = -torch.sum(reward_target * pred_reward, -1)
-            current_value_loss = -torch.sum(value_target * pred_value, -1)
             current_policy_loss = -torch.sum(policies[i] * pred_policy, -1)
+            current_value_loss, kl_div = self.c51_loss(n_step_return, done_n[-1], values[i], pred_value)
+            value_errors.append(kl_div.cpu().numpy())
 
             loss = loss + loss_scale * (is_weights * (
-                       current_value_loss*self.args.value_loss_weight +
-                       current_policy_loss*self.args.policy_loss_weight +
-                       current_reward_loss*self.args.reward_loss_weight -
-                       pred_entropy * self.args.entropy_loss_weight).mean())
+                    current_value_loss * self.args.value_loss_weight +
+                    current_policy_loss * self.args.policy_loss_weight +
+                    current_reward_loss * self.args.reward_loss_weight -
+                    pred_entropy * self.args.entropy_loss_weight).mean())
 
             total_losses[i] += (current_value_loss*self.args.value_loss_weight +
                                 current_policy_loss*self.args.policy_loss_weight +
@@ -587,7 +641,7 @@ class MCTSModel(nn.Module):
             nce_losses = np.zeros(self.jumps + 1)
 
         if self.args.prioritized:
-            buffer.update_batch_priorities(value_errors[0] + 1e-5)
+            buffer.update_batch_priorities(value_errors[0] + EPS)
 
         mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
         mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
@@ -670,7 +724,7 @@ class TransitionModel(nn.Module):
         self.action_embedding = nn.Embedding(num_actions, latent_size*action_dim)
 
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = ValueNetwork(channels)
+        self.reward_predictor = RewardNetwork(channels)
         self.train()
 
     def _make_layer(self, in_channels, depth):
@@ -738,7 +792,7 @@ class FiLMTransitionModel(nn.Module):
                       nn.ReLU()])
 
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = ValueNetwork(channels)
+        self.reward_predictor = RewardNetwork(channels)
         self.train()
 
     def forward(self, x, action):
@@ -807,7 +861,7 @@ class Conv2dSame(torch.nn.Module):
 
 
 class QNetwork(nn.Module):
-    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36, limit=300):
+    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36, atoms=51):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
@@ -816,10 +870,10 @@ class QNetwork(nn.Module):
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 512),
                   nn.ReLU(),
-                  init_small(nn.Linear(512, num_actions*(limit*2 + 1)))]
+                  init_small(nn.Linear(512, num_actions*atoms))]
         self.network = nn.Sequential(*layers)
         self.num_actions = num_actions
-        self.dist_size = limit*2 + 1
+        self.dist_size = atoms
         self.train()
 
     def forward(self, x):
@@ -830,7 +884,24 @@ class QNetwork(nn.Module):
 
 
 class ValueNetwork(nn.Module):
-    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300):
+    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=25):
+        super().__init__()
+        self.hidden_size = hidden_size
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+                  nn.ReLU(),
+                  nn.BatchNorm2d(hidden_size),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*hidden_size, 256),
+                  nn.ReLU(),
+                  init_small(nn.Linear(256, limit*2 + 1))]
+        self.network = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x):
+        return self.network(x)
+
+class RewardNetwork(nn.Module):
+    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=1):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
@@ -931,7 +1002,7 @@ def from_categorical(distribution, limit=300, logits=True):
     distribution = distribution.float()  # Avoid any fp16 shenanigans
     if logits:
         distribution = torch.softmax(distribution, -1)
-    weights = torch.arange(-limit, limit + 1, device=distribution.device).float()
+    weights = torch.linspace(-limit, limit, distribution.shape[-1], device=distribution.device).float()
     return distribution @ weights
 
 

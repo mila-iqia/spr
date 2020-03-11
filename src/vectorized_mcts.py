@@ -29,7 +29,7 @@ class VectorizedMCTS:
         self.n_runs = n_runs
         self.n_sims = n_sims
         self.id_null = self.n_sims + 1
-        self.warmup_sims = min(self.n_sims // 3 + 1, n_actions)
+        self.warmup_sims = 4
         self.virtual_threads = args.virtual_threads
         self.vl_c = args.virtual_loss_c
         self.env_steps = 0
