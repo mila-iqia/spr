@@ -44,7 +44,7 @@ def get_args():
     parser.add_argument('--max-episode-length', type=int, default=int(108e3), metavar='LENGTH',
                         help='Max episode length in game frames (0 to disable)')
     parser.add_argument('--discount', type=float, default=0.99)
-    parser.add_argument('--evaluation-episodes', type=int, default=10,
+    parser.add_argument('--evaluation-episodes', type=int, default=8,
                         help='Number of episodes to average over when evaluating')
 
     # MCTS arguments
@@ -65,10 +65,11 @@ def get_args():
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
     parser.add_argument('--grad-scale-factor', type=float, default=0.5, help='Rollout gradient downscaling. 1 disables')
     parser.add_argument('--adam-eps', type=float, default=1e-4, help='Adam epsilon')
-    parser.add_argument('--weight-decay', type=float, default=1e-3, help='Weight decay regularization constant')
+    parser.add_argument('--weight-decay', type=float, default=1e-4, help='Weight decay regularization constant')
     parser.add_argument('--hidden-size', type=int, default=256, help='Hidden size of various MLPs')
     parser.add_argument('--dynamics-blocks', type=int, default=16, help='# of resblocks in dynamics model')
     parser.add_argument('--multistep', type=int, default=1, help='n-step for bootstrapping value targets')
+    parser.add_argument('--training-start', type=int, default=100000, help='env steps to wait before starting training')
     parser.add_argument('--priority-exponent', type=float, default=1., metavar='ω',
                         help='Prioritised experience replay exponent (originally denoted α)')
     parser.add_argument('--priority-weight', type=float, default=1., metavar='β',

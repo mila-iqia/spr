@@ -36,7 +36,6 @@ class TensorEpisode(dataobject):
 class AsyncReanalyze:
     def __init__(self, args, network, debug=False):
         self.args = args
-        self.num_workers = args.num_workers
 
         self.processes = []
         ctx = mp.get_context('spawn')
