@@ -71,10 +71,10 @@ def create_network(args):
                                     lr=args.learning_rate,
                                     momentum=args.momentum,
                                     weight_decay=args.weight_decay)
-    # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, args.lr_decay ** (1. / args.lr_decay_steps),)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, args.lr_decay ** (1. / args.lr_decay_steps),)
     model.to(args.device)
     model.share_memory()
-    return model, optimizer, None
+    return model, optimizer, scheduler
 
 
 class TrainingWorker(object):
@@ -161,7 +161,7 @@ class TrainingWorker(object):
             else:
                 loss.backward()
             self.optimizer.step()
-            # self.scheduler.step()
+            self.scheduler.step()
 
 
 class LocalNCE:
