@@ -1,5 +1,6 @@
 from collections import deque
 import torch.multiprocessing as mp
+import torch.nn as nn
 
 from rlpyt.utils.synchronize import find_port
 import traceback
@@ -146,7 +147,7 @@ def run_pizero(args):
                 local_buf.clear()
 
             force_wait = (total_train_steps *
-                          args.batch_size < (env_steps - 20000)*args.replay_ratio) and \
+                          args.batch_size < (env_steps - args.training_start)*args.replay_ratio) and \
                          args.replay_ratio > 0 and training_started
 
             if force_wait:
@@ -166,7 +167,7 @@ def run_pizero(args):
                     [q.put(env_steps) for q in receive_queues]
 
             # Send a command to start training if ready
-            if env_steps >= 20000 and training_started is False:
+            if env_steps >= args.training_start and training_started is False:
                 [q.put(env_steps) for q in receive_queues]
                 training_started = True
 
