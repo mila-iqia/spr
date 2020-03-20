@@ -189,7 +189,7 @@ def run_pizero(args):
 
             if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
                 print("Starting evaluation run")
-                eval_network = copy.deepcopy(network)
+                eval_network = network.cpu().state_dict()
                 async_eval.send_queue.put(('evaluate', env_steps, eval_network))
 
             obs.copy_(torch.from_numpy(next_obs))

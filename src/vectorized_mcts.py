@@ -482,7 +482,7 @@ def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
         while True:
             command, env_step, network = send_queue.get()
             if command == 'evaluate':
-                eval_mcts.network.to(eval_mcts.device)
+                eval_mcts.network.load_state_dict(network)
                 avg_reward = eval_mcts.evaluate(env_step)
                 recieve_queue.put(((env_step, avg_reward), True))
             else:
