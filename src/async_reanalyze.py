@@ -119,7 +119,7 @@ class AsyncReanalyze:
         return obs, actions, rewards, dones, policies, values, value_estimates
 
     def get_transitions(self, total_episodes):
-        if total_episodes <= 1:
+        if total_episodes <= 20:
             return self.get_blank_transitions()
         if self.debug:
             results = [p.sample_for_reanalysis() for p in self.processes]
@@ -200,7 +200,7 @@ class ReanalyzeWorker:
                 self.write_to_buffer()
 
                 # Check to see if there's any data to reanalyze yet.
-                self.can_reanalyze = self.can_reanalyze or len(glob.glob(self.directory + "/ep*")) > 0
+                self.can_reanalyze = self.can_reanalyze or len(glob.glob(self.directory + "/ep*")) > 20
                 # Don't reanalyze until we have data for it.
                 if self.can_reanalyze and self.receive_queue.qsize() < 100:
                     new_samples = self.sample_for_reanalysis()
