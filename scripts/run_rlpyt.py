@@ -22,16 +22,16 @@ from rlpyt.utils.launching.affinity import encode_affinity, make_affinity, quick
 from rlpyt.utils.logging.context import logger_context
 import wandb
 
-from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb
+from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel
 
 
 def build_and_train(game="pong", run_ID=0):
     affinity = make_affinity(
-        n_cpu_core=12,
-        n_gpu=4,
+        n_cpu_core=4,
+        n_gpu=2,
         async_sample=True,
         n_socket=1,
-        gpu_per_run=3,
+        gpu_per_run=1,
         sample_gpu_per_run=1
     )
     config = configs['ernbw']
@@ -49,7 +49,7 @@ def build_and_train(game="pong", run_ID=0):
         **config["sampler"]
     )
     algo = CategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
-    agent = AtariCatDqnAgent(model_kwargs=config["model"], **config["agent"])
+    agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
     runner = AsyncRlEvalWandb(
         algo=algo,
         agent=agent,

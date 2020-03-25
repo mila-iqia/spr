@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 
 from rlpyt.models.dqn.atari_catdqn_model import DistributionalHeadModel
 from rlpyt.models.dqn.dueling import DistributionalDuelingHeadModel
@@ -88,10 +89,9 @@ class PizeroCatDqnModel(torch.nn.Module):
             kernel_sizes=None,
             strides=None,
             paddings=None,
-            framestack=32,
+            framestack=4,
             grayscale=True,
             actions=False,
-            num_actions=None
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -99,15 +99,10 @@ class PizeroCatDqnModel(torch.nn.Module):
         self.dueling = dueling
         c, h, w = image_shape
         self.conv = RepNet(framestack, grayscale, actions)
-        conv_out_size = self.conv.conv_out_size(h, w)
-        if dueling:
-            self.head = DistributionalDuelingHeadModel(conv_out_size, fc_sizes,
-                                                       output_size=output_size, n_atoms=n_atoms)
-        else:
-            self.head = DistributionalHeadModel(conv_out_size, fc_sizes,
-                                                output_size=output_size, n_atoms=n_atoms)
-            self.dyamics_network = TransitionModel(conv_out_size, num_actions)
-            self.reward_network = ValueNetwork(conv_out_size)
+        # conv_out_size = self.conv.conv_out_size(h, w)
+        # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
+        # self.reward_network = ValueNetwork(conv_out_size)
+        self.head = PizeroDistributionalHeadModel(256, output_size)
 
     def forward(self, observation, prev_action, prev_reward):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
@@ -119,10 +114,31 @@ class PizeroCatDqnModel(torch.nn.Module):
         lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
 
         conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
-        p = self.head(conv_out.view(T * B, -1))
+        p = self.head(conv_out)
         p = F.softmax(p, dim=-1)
 
         # Restore leading dimensions: [T,B], [B], or [], as input.
         p = restore_leading_dims(p, lead_dim, T, B)
         return p
+
+
+class PizeroDistributionalHeadModel(torch.nn.Module):
+    """An MLP head which reshapes output to [B, output_size, n_atoms]."""
+
+    def __init__(self, input_channels, output_size, hidden_size=128, pixels=30, n_atoms=51):
+        super().__init__()
+        self.hidden_size = hidden_size
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+                  nn.ReLU(),
+                  nn.BatchNorm2d(hidden_size),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*hidden_size, 512),
+                  nn.ReLU(),
+                  nn.Linear(512, output_size*n_atoms)]
+        self.network = nn.Sequential(*layers)
+        self._output_size = output_size
+        self._n_atoms = n_atoms
+
+    def forward(self, input):
+        return self.network(input).view(-1, self._output_size, self._n_atoms)
 
