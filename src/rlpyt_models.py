@@ -159,7 +159,7 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 512),
                   nn.ReLU(),
-                  nn.Linear(512, output_size*n_atoms)]
+                  nn.Linear(512, n_atoms)]
         self.advantage_hidden = nn.Sequential(
             nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
             nn.ReLU(),
