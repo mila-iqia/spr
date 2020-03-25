@@ -1,0 +1,43 @@
+description: AWM
+
+target:
+  cluster: rr1
+  vc: resrchprojvc20
+
+environment:
+  image: philly/jobs/custom/pytorch:pytorch1.4-py37-cuda10.1
+  registry: phillyregistry.azurecr.io
+  setup:
+    - export PATH=$$PATH:~/.local/bin
+    - export LC_ALL=C.UTF-8
+    - export LANG=C.UTF-8
+    - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill
+    - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
+    - pip install --user git+git://github.com/astooke/rlpyt
+    - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
+
+# azure storage configuration
+storage:
+  my_storage:
+    # Replace with the name of the Azure Storage Account you created.
+    #   If you followed the tutorial, this should be your_username
+    storage_account_name: ankdefault
+    # Specify a name of the container on your blob (ex. phillytools),
+    #   to store data, results and code. It will be created if it does not exist.
+    container_name: awmcontainer
+
+# data
+#   data upload is not required for this example
+
+search:
+  job_template:
+    name: rlpyt_dueling_{game:s}_{random_string:s}
+    sku: G2
+    command:
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game}
+  type: grid
+  max_trials: 16
+  params:
+    - name: game
+      spec: discrete
+      values: ['ms_pacman', 'qbert']
