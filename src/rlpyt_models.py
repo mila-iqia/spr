@@ -93,6 +93,7 @@ class PizeroCatDqnModel(torch.nn.Module):
             framestack=4,
             grayscale=True,
             actions=False,
+            model_training=False,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -107,6 +108,32 @@ class PizeroCatDqnModel(torch.nn.Module):
             self.head = PizeroDistributionalDuelingHeadModel(256, output_size)
         else:
             self.head = PizeroDistributionalHeadModel(256, output_size)
+
+        if model_training:
+            self.dynamics_model = TransitionModel(channels=256,
+                                                  num_actions=output_size,
+                                                  blocks=16)
+
+    def stem_forward(self, observation, prev_action, prev_reward):
+        """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
+        for each state/observation, using softmax output nonlinearity."""
+        img = observation.type(torch.float)  # Expect torch.uint8 inputs
+        img = img.mul_(1. / 255)  # From [0-255] to [0-1], in place.
+
+        # Infer (presence of) leading dimensions: [T,B], [B], or [].
+        lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
+
+        conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
+        return conv_out
+
+    def head_forward(self, conv_out, prev_action, prev_reward):
+        lead_dim, T, B, img_shape = infer_leading_dims(conv_out, 3)
+        p = self.head(conv_out)
+        p = F.softmax(p, dim=-1)
+
+        # Restore leading dimensions: [T,B], [B], or [], as input.
+        p = restore_leading_dims(p, lead_dim, T, B)
+        return p
 
     def forward(self, observation, prev_action, prev_reward):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
@@ -184,4 +211,3 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
         x = self.advantage_out(x)
         x = x.view(-1, self._output_size, self._n_atoms)
         return x + self.advantage_bias
-

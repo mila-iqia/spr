@@ -27,7 +27,7 @@ import wandb
 from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel
 from src.rlpyt_algos import PizeroCategoricalDQN
 
-def debug_build_and_train(game="pong", run_ID=0, cuda_idx=None, n_parallel=2):
+def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0):
     config = configs['ernbw']
     config['runner']['log_interval_steps'] = 1e5
     config['env']['game'] = game
@@ -106,10 +106,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='pong')
     parser.add_argument('--debug', action="store_true")
+    parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     args = parser.parse_args()
     wandb.init(project='rlpyt', entity='abs-world-models')
     if args.debug:
-        debug_build_and_train(game=args.game)
+        debug_build_and_train(game=args.game, cuda_idx=args.debug_cuda_idx)
     else:
         build_and_train(
             game=args.game,
