@@ -28,41 +28,6 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
 EPS = 1e-6
 
 
-def initialize_replay_buffer(args):
-    examples = get_example_outputs(args)
-    batch_size = args.num_envs
-    if args.reanalyze:
-        batch_size = batch_size + args.num_reanalyze_envs
-    example_to_buffer = SamplesToBuffer(
-        observation=examples["observation"],
-        action=examples["action"],
-        reward=examples["reward"],
-        done=examples["done"],
-        policy_probs=examples['policy_probs'],
-        value=examples['value']
-    )
-    replay_kwargs = dict(
-        example=example_to_buffer,
-        size=args.buffer_size,
-        B=batch_size,
-        batch_T=args.jumps + args.multistep + 1,
-        # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
-        rnn_state_interval=0,
-        discount=args.discount,
-        n_step_return=1,
-    )
-
-    if args.prioritized:
-        replay_kwargs['alpha'] = args.priority_exponent
-        replay_kwargs['beta'] = args.priority_weight
-        replay_kwargs["input_priorities"] = args.input_priorities
-        buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
-    else:
-        buffer = AsyncUniformSequenceReplayFrameBufferExtended(**replay_kwargs)
-
-    return buffer
-
-
 def samples_to_buffer(observation, action, reward, done, policy_probs, value, priorities=None):
     samples = SamplesToBuffer(
         observation=observation,
@@ -84,7 +49,6 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
     """
     def sample_batch(self, batch_B):
         while True:
-            sampled_indices = False
             try:
                 self._async_pull()  # Updates from writers.
                 batch_T = self.batch_T
@@ -93,14 +57,9 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                 if self.rnn_state_interval > 1:
                     T_idxs = T_idxs * self.rnn_state_interval
 
-                batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
-                rewards = torch.from_numpy(extract_sequences(self.samples.reward, T_idxs-1, B_idxs, self.batch_T))
-                dones = torch.from_numpy(extract_sequences(self.samples.done, T_idxs-1, B_idxs, self.batch_T + 1))
-                batch = list(batch)
-                batch[2] = rewards
-                batch[4] = dones
-                batch = SamplesFromReplay(*batch)
+                batch = self.extract_batch(T_idxs-1, B_idxs, self.batch_T+1)
                 return batch
+
             except:
                 print("FAILED TO LOAD BATCH")
                 if sampled_indices:
@@ -115,9 +74,10 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
             if not has_done:
                 continue
             batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
-            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
-            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
             batch.all_reward[ind+1:, i] = 0
+            batch.done[ind+1:, i] = True
+            batch.done_n[ind+1:, i] = True
+            batch.return_[ind+1:, i] = 0
         return batch
 
 
@@ -127,7 +87,6 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
     """
     def sample_batch(self, batch_B):
         while True:
-            sampled_indices = False
             try:
                 self._async_pull()  # Updates from writers.
                 (T_idxs, B_idxs), priorities = self.priority_tree.sample(
@@ -136,20 +95,14 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                 if self.rnn_state_interval > 1:
                     T_idxs = T_idxs * self.rnn_state_interval
 
-                batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
+                batch = self.extract_batch(T_idxs-1, B_idxs, self.batch_T+1)
                 is_weights = (1. / (priorities + 1e-5)) ** self.beta
                 is_weights /= max(is_weights)  # Normalize.
                 is_weights = torchify_buffer(is_weights).float()
 
-                rewards = torch.from_numpy(extract_sequences(self.samples.reward, T_idxs-1, B_idxs, self.batch_T))
-                dones = torch.from_numpy(extract_sequences(self.samples.done, T_idxs-1, B_idxs, self.batch_T + 1))
-                # policies = torch.from_numpy(extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T))
-                # values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T))
-                batch = list(batch)
-                batch[2] = rewards
-                batch[4] = dones
                 batch = SamplesFromReplayPri(*batch, is_weights=is_weights)
                 return batch
+
             except Exception as e:
                 print("FAILED TO LOAD BATCH")
                 traceback.print_exc()
@@ -171,9 +124,8 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             if not has_done:
                 continue
             batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
-            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
-            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
-            # batch.policy_probs[ind+1:, i] = batch.policy_probs[ind, i]
             batch.all_reward[ind+1:, i] = 0
-            # batch.values[ind:, i] = 0
+            batch.done[ind+1:, i] = True
+            batch.done_n[ind+1:, i] = True
+            batch.return_[ind+1:, i] = 0
         return batch

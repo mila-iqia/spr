@@ -33,6 +33,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0):
     config['env']['game'] = game
     config["eval_env"]["game"] = config["env"]["game"]
     config["algo"]["n_step_return"] = 5
+    config["algo"]["prioritized_replay"] = True
     config["algo"]["min_steps_learn"] = 1e3
     wandb.config.update(config)
     sampler = SerialSampler(
