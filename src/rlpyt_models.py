@@ -8,7 +8,7 @@ from rlpyt.models.utils import scale_grad
 from rlpyt.runners.async_rl import AsyncRlEval
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
 from rlpyt.utils.tensor import infer_leading_dims, restore_leading_dims
-from src.model_trainer import ValueNetwork, TransitionModel, RepNet
+from src.model_trainer import ValueNetwork, TransitionModel, RepNet, NetworkOutput, from_categorical
 import numpy as np
 from rlpyt.utils.logging import logger
 import wandb
@@ -73,7 +73,6 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
                 self.wandb_info[k] = np.average(v)
         self._opt_infos = {k: list() for k in self._opt_infos}  # (reset)
 
-
 class PizeroCatDqnModel(torch.nn.Module):
     """2D conlutional network feeding into MLP with ``n_atoms`` outputs
     per action, representing a discrete probability distribution of Q-values."""
@@ -93,7 +92,6 @@ class PizeroCatDqnModel(torch.nn.Module):
             framestack=4,
             grayscale=True,
             actions=False,
-            model_training=False,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -109,10 +107,64 @@ class PizeroCatDqnModel(torch.nn.Module):
         else:
             self.head = PizeroDistributionalHeadModel(256, output_size)
 
-        if model_training:
-            self.dynamics_model = TransitionModel(channels=256,
-                                                  num_actions=output_size,
-                                                  blocks=16)
+    def forward(self, observation, prev_action, prev_reward):
+        """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
+        for each state/observation, using softmax output nonlinearity."""
+        img = observation.type(torch.float)  # Expect torch.uint8 inputs
+        img = img.mul_(1. / 255)  # From [0-255] to [0-1], in place.
+
+        # Infer (presence of) leading dimensions: [T,B], [B], or [].
+        lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
+
+        conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
+        p = self.head(conv_out)
+        p = F.softmax(p, dim=-1)
+
+        # Restore leading dimensions: [T,B], [B], or [], as input.
+        p = restore_leading_dims(p, lead_dim, T, B)
+        return p
+
+
+class PizeroSearchCatDqnModel(torch.nn.Module):
+    """2D conlutional network feeding into MLP with ``n_atoms`` outputs
+    per action, representing a discrete probability distribution of Q-values."""
+
+    def __init__(
+            self,
+            image_shape,
+            output_size,
+            n_atoms=51,
+            fc_sizes=512,
+            dueling=False,
+            use_maxpool=False,
+            channels=None,  # None uses default.
+            kernel_sizes=None,
+            strides=None,
+            paddings=None,
+            framestack=4,
+            grayscale=True,
+            actions=False,
+    ):
+        """Instantiates the neural network according to arguments; network defaults
+        stored within this method."""
+        super().__init__()
+        self.dueling = dueling
+        c, h, w = image_shape
+        self.conv = RepNet(framestack, grayscale, actions)
+        # conv_out_size = self.conv.conv_out_size(h, w)
+        # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
+        # self.reward_network = ValueNetwork(conv_out_size)
+        if dueling:
+            self.head = PizeroDistributionalDuelingHeadModel(256, output_size)
+        else:
+            self.head = PizeroDistributionalHeadModel(256, output_size)
+
+        self.dynamics_model = TransitionModel(channels=256,
+                                              num_actions=output_size,
+                                              blocks=16)
+
+    def stem_parameters(self):
+        return list(self.conv.parameters()) + list(self.head.parameters())
 
     def stem_forward(self, observation, prev_action, prev_reward):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
@@ -151,6 +203,46 @@ class PizeroCatDqnModel(torch.nn.Module):
         # Restore leading dimensions: [T,B], [B], or [], as input.
         p = restore_leading_dims(p, lead_dim, T, B)
         return p
+
+    def initial_inference(self, obs, actions=None, logits=False):
+        if len(obs.shape) < 5:
+            obs = obs.unsqueeze(0)
+        obs = obs.flatten(1, 2)
+        hidden_state = self.encoder(obs, actions)
+        if not self.args.q_learning:
+            policy_logits = self.policy_model(hidden_state)
+        else:
+            policy_logits = None
+        value_logits = self.value_model(hidden_state)
+        reward_logits = self.dynamics_model.reward_predictor(hidden_state)
+
+        if logits:
+            return NetworkOutput(hidden_state, reward_logits, policy_logits, value_logits)
+
+        value = from_categorical(value_logits, logits=True)
+        reward = from_categorical(reward_logits, logits=True)
+        return NetworkOutput(hidden_state, reward, policy_logits, value)
+
+    def value_target_network(self, obs, actions):
+        if len(obs.shape) < 5:
+            obs = obs.unsqueeze(0)
+        obs = obs.flatten(1, 2)
+        hidden_state = self.target_repnet(obs, actions)
+        value_logits = self.target_value_model(hidden_state)
+        value = from_categorical(value_logits, logits=True)
+        return value
+
+    def inference(self, state, action):
+        next_state, reward_logits, \
+        policy_logits, value_logits = self.step(state, action)
+        value = from_categorical(value_logits, logits=True)
+        reward = from_categorical(reward_logits, logits=True)
+
+        return NetworkOutput(next_state, reward, policy_logits, value)
+
+    def step(self, state, action):
+        next_state, reward_logits = self.dynamics_model(state, action)
+        return next_state, reward_logits
 
 
 class PizeroDistributionalHeadModel(torch.nn.Module):

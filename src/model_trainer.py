@@ -437,7 +437,7 @@ class MCTSModel(nn.Module):
             target_images = target_images.reshape(-1, *states.shape[-3:])
             initial_states = states[0]
             target_images = target_images.to(self.args.device).float()/255.
-            initial_states = initial_states.to(self.args.device).float() / 255.
+            initial_states = initial_states.to(self.args.device).float()/255.
 
             actions = actions.long().to(self.args.device)
             # Note that rewards are shifted right by one; r[i] is reward received when arriving at i.
