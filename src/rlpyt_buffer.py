@@ -100,7 +100,7 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                 batch[2] = rewards
                 batch[4] = dones
                 batch = SamplesFromReplay(*batch)
-                return self.sanitize_batch(batch)
+                return batch
             except:
                 print("FAILED TO LOAD BATCH")
                 if sampled_indices:
@@ -149,7 +149,7 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                 batch[2] = rewards
                 batch[4] = dones
                 batch = SamplesFromReplayPri(*batch, is_weights=is_weights)
-                return self.sanitize_batch(batch)
+                return batch
             except Exception as e:
                 print("FAILED TO LOAD BATCH")
                 traceback.print_exc()
