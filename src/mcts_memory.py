@@ -53,7 +53,7 @@ def initialize_replay_buffer(args):
         # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
         rnn_state_interval=0,
         discount=args.discount,
-        n_step_return=1,
+        n_step_return=args.multistep,
     )
 
     if args.prioritized:
@@ -98,13 +98,9 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                     T_idxs = T_idxs * self.rnn_state_interval
 
                 batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
-                rewards = torch.from_numpy(extract_sequences(self.samples.reward, T_idxs-1, B_idxs, self.batch_T))
-                dones = torch.from_numpy(extract_sequences(self.samples.done, T_idxs-1, B_idxs, self.batch_T + 1))
                 policies = torch.from_numpy(extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T))
                 values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T))
                 batch = list(batch)
-                batch[2] = rewards
-                batch[4] = dones
                 batch = SamplesFromReplayExt(*batch, policy_probs=policies, values=values)
                 return self.sanitize_batch(batch)
             except:
@@ -116,15 +112,15 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                     print("Buffer T:", self.T, flush=True)
 
     def sanitize_batch(self, batch):
-        has_dones, inds = torch.max(batch.done[1:], 0)
+        has_dones, inds = torch.max(batch.done, 0)
         for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
             if not has_done:
                 continue
             batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
-            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
-            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
             batch.policy_probs[ind+1:, i] = batch.policy_probs[ind, i]
             batch.all_reward[ind+1:, i] = 0
+            batch.return_[ind+1:, i] = 0
+            batch.done_n[ind+1:, i] = True
             batch.values[ind:, i] = 0
         return batch
 
@@ -149,13 +145,9 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                 is_weights /= max(is_weights)  # Normalize.
                 is_weights = torchify_buffer(is_weights).float()
 
-                rewards = torch.from_numpy(extract_sequences(self.samples.reward, T_idxs-1, B_idxs, self.batch_T))
-                dones = torch.from_numpy(extract_sequences(self.samples.done, T_idxs-1, B_idxs, self.batch_T + 1))
                 policies = torch.from_numpy(extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T))
                 values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T))
                 batch = list(batch)
-                batch[2] = rewards
-                batch[4] = dones
                 batch = SamplesFromReplayPriExt(*batch, is_weights=is_weights, policy_probs=policies, values=values)
                 return self.sanitize_batch(batch)
             except Exception as e:
@@ -174,15 +166,15 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             self.priority_tree.update_batch_priorities(priorities ** self.alpha)
 
     def sanitize_batch(self, batch):
-        has_dones, inds = torch.max(batch.done[1:], 0)
+        has_dones, inds = torch.max(batch.done, 0)
         for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
             if not has_done:
                 continue
             batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
-            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
-            batch.all_action[ind+1:, i] = batch.all_action[ind, i]
             batch.policy_probs[ind+1:, i] = batch.policy_probs[ind, i]
             batch.all_reward[ind+1:, i] = 0
+            batch.return_[ind+1:, i] = 0
+            batch.done_n[ind+1:, i] = True
             batch.values[ind:, i] = 0
         return batch
 
