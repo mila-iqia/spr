@@ -443,11 +443,12 @@ class MCTSModel(nn.Module):
             # Note that rewards are shifted right by one; r[i] is reward received when arriving at i.
             # Because of how this happens, we need to make sure that the first reward received isn't
             # actually from a different trajectory.  If it is, we just set it to 0.
-            rewards[0] = rewards[0] * (1 - done[0].float())
-            done = 1 - done.float()[1:].to(self.args.device)
+            # rewards[0] = rewards[0] * (1 - done[0].float())
             rewards = rewards.float().to(self.args.device)
             policies = policies.float().to(self.args.device)
             values = values.float().to(self.args.device)
+            return_ = return_.float().to(self.args.device)
+            done_n = 1 - done_n.float().to(self.args.device)
             initial_actions = actions[0]
 
             if self.use_target_network:
@@ -490,12 +491,9 @@ class MCTSModel(nn.Module):
                                  np.zeros(self.jumps + 1)
         target_entropies, pred_entropies = [], []
 
-        discounts = torch.ones_like(rewards)[:self.multistep]*self.args.discount
-        discounts = discounts ** torch.arange(0, self.multistep, device=self.args.device)[:, None].float()
-
         value_errors, reward_errors = [], []
 
-        for i in range(0, self.jumps):
+        for i in range(1, self.jumps+1):
             action = actions[i]
             current_state, pred_reward, pred_policy, pred_value = \
                 self.step(current_state, action)
@@ -519,11 +517,9 @@ class MCTSModel(nn.Module):
             loss_scale, pred_reward, pred_policy, pred_value = prediction
 
             # Calculate the value target for v_i+1
-            done_n = torch.cumprod(done[i:i+self.multistep+1], 0)
-            discounts_done = discounts*done_n[:-1]
-            value_target = torch.sum(discounts_done*rewards[i+1:i+self.multistep+1], 0)
+            value_target = return_[i]
             value_target = value_target + self.args.discount ** self.multistep \
-                           * values[i+self.multistep]*done_n[-1]
+                           * values[i+self.multistep]*done_n[i]
 
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
