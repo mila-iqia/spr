@@ -45,6 +45,7 @@ def run_pizero(args):
                          args=(DillWrapper(buffer),)) for worker in workers]
     for p in procs:
         p.start()
+
     # Need to get the target network from the training agent that created it.
     torch_set_device(args)
     network = send_queue.get()
@@ -153,7 +154,7 @@ def run_pizero(args):
             if force_wait:
                 print("Runner waiting; needs more train steps to continue")
 
-            if force_wait:
+            if force_wait or not send_queue.empty():
                 steps, log = send_queue.get()
                 log_results(log, steps)
                 total_train_steps = steps
