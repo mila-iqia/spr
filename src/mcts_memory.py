@@ -49,7 +49,7 @@ def initialize_replay_buffer(args):
         example=example_to_buffer,
         size=args.buffer_size,
         B=batch_size,
-        batch_T=args.jumps,
+        batch_T=args.jumps+1,
         # We don't use the built-in n-step returns, so easiest to just ask for all the data at once.
         rnn_state_interval=0,
         discount=args.discount,
