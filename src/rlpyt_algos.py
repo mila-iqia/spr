@@ -21,47 +21,12 @@ class PizeroCategoricalDQN(CategoricalDQN):
     """Distributional DQN with fixed probability bins for the Q-value of each
     action, a.k.a. categorical."""
 
-    def __init__(self, jumps=1, detach_model=True, **kwargs):
+    def __init__(self, jumps=0, detach_model=True, **kwargs):
         """Standard __init__() plus Q-value limits; the agent configures
         the number of atoms (bins)."""
         self.jumps = jumps
         self.detach_model = detach_model
         super().__init__(**kwargs)
-
-
-    def optimize_agent(self, itr, samples=None, sampler_itr=None):
-        """
-        Extracts the needed fields from input samples and stores them in the
-        replay buffer.  Then samples from the replay buffer to train the agent
-        by gradient updates (with the number of updates determined by replay
-        ratio, sampler batch size, and training batch size).  If using prioritized
-        replay, updates the priorities for sampled training batches.
-        """
-        itr = itr if sampler_itr is None else sampler_itr  # Async uses sampler_itr.
-        if samples is not None:
-            samples_to_buffer = self.samples_to_buffer(samples)
-            self.replay_buffer.append_samples(samples_to_buffer)
-        opt_info = OptInfo(*([] for _ in range(len(OptInfo._fields))))
-        if itr < self.min_itr_learn:
-            return opt_info
-        for _ in range(self.updates_per_optimize):
-            samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
-            self.optimizer.zero_grad()
-            loss, td_abs_errors = self.loss(samples_from_replay)
-            loss.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.agent.parameters(), self.clip_grad_norm)
-            self.optimizer.step()
-            if self.prioritized_replay:
-                self.replay_buffer.update_batch_priorities(td_abs_errors)
-            opt_info.loss.append(loss.item())
-            opt_info.gradNorm.append(grad_norm)
-            opt_info.tdAbsErr.extend(td_abs_errors[::8].numpy())  # Downsample.
-            self.update_counter += 1
-            if self.update_counter % self.target_update_interval == 0:
-                self.agent.update_target(self.target_update_tau)
-        self.update_itr_hyperparams(itr)
-        return opt_info
 
     def initialize_replay_buffer(self, examples, batch_spec, async_=False):
         example_to_buffer = SamplesToBuffer(
@@ -74,7 +39,7 @@ class PizeroCategoricalDQN(CategoricalDQN):
             example=example_to_buffer,
             size=self.replay_size,
             B=batch_spec.B,
-            batch_T=self.jumps + self.n_step_return + 1,
+            batch_T=self.jumps,
             discount=self.discount,
             n_step_return=self.n_step_return,
             rnn_state_interval=0,
@@ -172,6 +137,56 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             self.optimizer.load_state_dict(self.initial_optim_state_dict)
         if self.prioritized_replay:
             self.pri_beta_itr = max(1, self.pri_beta_steps // self.sampler_bs)
+
+    def optimize_agent(self, itr, samples=None, sampler_itr=None):
+        """
+        Extracts the needed fields from input samples and stores them in the
+        replay buffer.  Then samples from the replay buffer to train the agent
+        by gradient updates (with the number of updates determined by replay
+        ratio, sampler batch size, and training batch size).  If using prioritized
+        replay, updates the priorities for sampled training batches.
+        """
+        itr = itr if sampler_itr is None else sampler_itr  # Async uses sampler_itr.
+        if samples is not None:
+            samples_to_buffer = self.samples_to_buffer(samples)
+            self.replay_buffer.append_samples(samples_to_buffer)
+        opt_info = OptInfo(*([] for _ in range(len(OptInfo._fields))))
+        if itr < self.min_itr_learn:
+            return opt_info
+        for _ in range(self.updates_per_optimize):
+            samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
+            loss, td_abs_errors, model_loss = self.loss(samples_from_replay)
+            if not self.detach_model:
+                loss = loss + model_loss
+                self.optimizer.zero_grad()
+                self.model_optimizer.zero_grad()
+                loss.backward()
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.agent.parameters(), self.clip_grad_norm)
+                self.optimizer.step()
+                self.model_optimizer.step()
+            else:
+                self.optimizer.zero_grad()
+                loss.backward()
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.agent.parameters(), self.clip_grad_norm)
+                self.optimizer.step()
+                self.model_optimizer.zero_grad()
+                model_loss.backward()
+                model_grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.agent.parameters(), self.clip_grad_norm)
+                self.model_optimizer.step()
+
+            if self.prioritized_replay:
+                self.replay_buffer.update_batch_priorities(td_abs_errors)
+            opt_info.loss.append(loss.item())
+            opt_info.gradNorm.append(grad_norm)
+            opt_info.tdAbsErr.extend(td_abs_errors[::8].numpy())  # Downsample.
+            self.update_counter += 1
+            if self.update_counter % self.target_update_interval == 0:
+                self.agent.update_target(self.target_update_tau)
+        self.update_itr_hyperparams(itr)
+        return opt_info
 
     def rl_loss(self, latent, action, return_n,
                 done_n, prev_action, prev_reward,
