@@ -58,7 +58,7 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                     T_idxs = T_idxs * self.rnn_state_interval
 
                 batch = self.extract_batch(T_idxs-1, B_idxs, self.batch_T+1)
-                return batch
+                return self.sanitize_batch(batch)
 
             except:
                 print("FAILED TO LOAD BATCH")
@@ -69,17 +69,15 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                     print("Buffer T:", self.T, flush=True)
 
     def sanitize_batch(self, batch):
-        has_dones, inds = torch.max(batch.done[1:], 0)
+        has_dones, inds = torch.max(batch.done, 0)
         for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
             if not has_done:
                 continue
             batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
             batch.all_reward[ind+1:, i] = 0
-            batch.done[ind+1:, i] = True
-            batch.done_n[ind+1:, i] = True
             batch.return_[ind+1:, i] = 0
+            batch.done_n[ind+1:, i] = True
         return batch
-
 
 class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequenceReplayFrameBuffer):
     """
@@ -101,7 +99,7 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                 is_weights = torchify_buffer(is_weights).float()
 
                 batch = SamplesFromReplayPri(*batch, is_weights=is_weights)
-                return batch
+                return self.sanitize_batch(batch)
 
             except Exception as e:
                 print("FAILED TO LOAD BATCH")
@@ -112,20 +110,19 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                     print("Batch_T:", self.batch_T, flush=True)
                     print("Buffer T:", self.T, flush=True)
 
-    def update_batch_priorities(self, priorities):
-        with self.rw_lock.write_lock:
-            priorities = numpify_buffer(priorities)
-            self.default_priority = max(priorities)
-            self.priority_tree.update_batch_priorities(priorities ** self.alpha)
+    # def update_batch_priorities(self, priorities):
+    #     with self.rw_lock.write_lock:
+    #         priorities = numpify_buffer(priorities)
+    #         # self.default_priority = max(priorities)
+    #         self.priority_tree.update_batch_priorities(priorities ** self.alpha)
 
     def sanitize_batch(self, batch):
-        has_dones, inds = torch.max(batch.done[1:], 0)
+        has_dones, inds = torch.max(batch.done, 0)
         for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
             if not has_done:
                 continue
             batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
             batch.all_reward[ind+1:, i] = 0
-            batch.done[ind+1:, i] = True
-            batch.done_n[ind+1:, i] = True
             batch.return_[ind+1:, i] = 0
+            batch.done_n[ind+1:, i] = True
         return batch
