@@ -188,10 +188,11 @@ def run_pizero(args):
                     print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
                     wandb.log({'eval_env_steps': eval_env_step, 'Average Eval Score': avg_reward})
 
-            if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
+            if env_steps % args.evaluation_interval == 0 and env_steps > 0:
                 print("Starting evaluation run")
-                eval_network = network.cpu().state_dict()
-                async_eval.send_queue.put(('evaluate', env_steps, eval_network))
+                eval_state_dict = copy.deepcopy(network.state_dict())
+                async_eval.send_queue.put(('evaluate', env_steps, eval_state_dict))
+                del eval_state_dict
 
             obs.copy_(torch.from_numpy(next_obs))
             env_steps += args.num_envs
