@@ -39,7 +39,7 @@ class DQNSearchAgent(AtariCatDqnAgent):
         # Overwrite distribution.
         self.search = VectorizedQMCTS(self.search_args,
                                       env_spaces.action.n,
-                                      self.model,
+                                      self.target_model,
                                       eval=self.eval)
 
     def to_device(self, cuda_idx=None):
@@ -65,7 +65,6 @@ class DQNSearchAgent(AtariCatDqnAgent):
         """Extend method to set epsilon for sampling (including annealing)."""
         super().sample_mode(itr)
         self.search.set_train()
-
 
     @torch.no_grad()
     def step(self, observation, prev_action, prev_reward):
