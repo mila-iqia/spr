@@ -348,9 +348,6 @@ class VectorizedQMCTS(VectorizedMCTS):
         self.reset_tensors()
         obs = obs.to(self.device).float() / 255.
 
-        self.reset_tensors()
-        obs = obs.to(self.device).float() / 255.
-
         hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
         self.q[:, 0] = initial_value.to(self.device)
@@ -373,7 +370,7 @@ class VectorizedQMCTS(VectorizedMCTS):
 
                 # Select the children corresponding to the current actions
                 current_actions = actions.gather(1, self.id_current.clamp_max(sim_id-1))
-                id_next = current_children.squeeze(0).gather(-1, current_actions)
+                id_next = current_children.squeeze(1).gather(-1, current_actions)
                 self.search_actions[:, depth] = current_actions.squeeze()
 
                 # Create a mask for live runs that will be true on the
@@ -421,9 +418,8 @@ class VectorizedQMCTS(VectorizedMCTS):
         action = self.select_action()
         value = self.q[:, 0].max(dim=-1)[0]
 
-        if len(action.shape) > 1:
-            action = action.squeeze()
-        return action, F.softmax(self.q[:, 0], dim=-1), value, initial_value.max(dim=-1)[0]
+        return action.squeeze(), F.softmax(self.q[:, 0], dim=-1).squeeze(), \
+               value.squeeze(), initial_value.max(dim=-1)[0].squeeze()
 
     def value_score(self, sim_id):
         """normalized_q(s,a)."""
