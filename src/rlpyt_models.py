@@ -224,15 +224,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         reward = from_categorical(reward_logits, logits=True, limit=1)
         return NetworkOutput(hidden_state, reward, policy_logits, value)
 
-    # def value_target_network(self, obs, actions):
-    #     if len(obs.shape) < 5:
-    #         obs = obs.unsqueeze(0)
-    #     obs = obs.flatten(1, 2)
-    #     hidden_state = self.target_repnet(obs, actions)
-    #     value_logits = self.target_value_model(hidden_state)
-    #     # value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
-    #     return value_logits
-
     def inference(self, state, action):
         next_state, reward_logits, \
         policy_logits, value_logits = self.step(state, action)
@@ -246,7 +237,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         policy_logits = None
         value_logits = self.head(next_state)
         return next_state, reward_logits, policy_logits, value_logits
-
 
 class PizeroDistributionalHeadModel(torch.nn.Module):
     """An MLP head which reshapes output to [B, output_size, n_atoms]."""
