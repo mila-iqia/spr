@@ -103,6 +103,8 @@ class VectorizedMCTS:
         self.vl_c = args.virtual_loss_c
         self.env_steps = 0
         self.eval = eval
+        if self.eval:
+            self.visit_temp = self.visit_temp / 2.
         self.initialize_on_device("cpu") # Need to have a CPU setup to generate examples.
 
     def set_eval(self):
@@ -419,7 +421,7 @@ class VectorizedQMCTS(VectorizedMCTS):
         action = self.select_action()
         value = self.q[:, 0].max(dim=-1)[0]
 
-        return action, F.softmax(self.q[:, 0], dim=-1), value, initial_value.max(dim=-1)[0]
+        return action.squeeze(), F.softmax(self.q[:, 0], dim=-1), value, initial_value.max(dim=-1)[0]
 
     def value_score(self, sim_id):
         """normalized_q(s,a)."""
