@@ -1,24 +1,25 @@
 import torch
-from rlpyt.agents.dqn.catdqn_agent import CatDqnAgent
+from rlpyt.agents.dqn.atari.atari_catdqn_agent import AtariCatDqnAgent
 from rlpyt.models.dqn.atari_catdqn_model import AtariCatDqnModel
 from rlpyt.agents.dqn.atari.mixin import AtariMixin
-from rlpyt.agents.dqn.atari.atari_catdqn_agent import AtariCatDQNAgent
 from rlpyt.utils.buffer import buffer_to
+from rlpyt.utils.logging import logger
 from rlpyt.utils.collections import namedarraytuple
+MAXIMUM_FLOAT_VALUE = torch.finfo().max / 10
+MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
 AgentInputs = namedarraytuple("AgentInputs",
     ["observation", "prev_action", "prev_reward"])
 AgentInfo = namedarraytuple("AgentInfo", "q")
 AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
-from src.vectorized_mcts import VectorizedMCTS
 
 
-class DQNSearchAgent(AtariCatDQNAgent):
+class DQNSearchAgent(AtariCatDqnAgent):
     """Agent for Categorical DQN algorithm with search."""
 
-    def __init__(self, args=None, eval=False, **kwargs):
+    def __init__(self, search_args=None, eval=False, **kwargs):
         """Standard init, and set the number of probability atoms (bins)."""
         super().__init__(**kwargs)
-        self.search_args = args
+        self.search_args = search_args
         self.eval = eval
 
     def initialize(self, env_spaces, share_memory=False,
@@ -46,24 +47,13 @@ class DQNSearchAgent(AtariCatDQNAgent):
         """Extend method to set epsilon for evaluation, using 1 for
         pre-training eval."""
         super().eval_mode(itr)
-        logger.log(f"Agent at itr {itr}, eval eps "
-            f"{self.eps_eval if itr > 0 else 1.}")
-        self.search.set_eval(itr)
+        self.search.set_eval()
 
 
     def sample_mode(self, itr):
         """Extend method to set epsilon for sampling (including annealing)."""
         super().sample_mode(itr)
-        self.search.set_train(itr)
-        # itr_min = self._eps_itr_min_max[0]  # Shared memory for CpuSampler
-        # itr_max = self._eps_itr_min_max[1]
-        # if itr <= itr_max:
-        #     prog = min(1, max(0, itr - itr_min) / (itr_max - itr_min))
-        #     self.eps_sample = prog * self.eps_final + (1 - prog) * self.eps_init
-        #     if itr % (itr_max // 10) == 0 or itr == itr_max:
-        #         logger.log(f"Agent at itr {itr}, sample eps {self.eps_sample}"
-        #             f" (min itr: {itr_min}, max_itr: {itr_max})")
-        # self.distribution.set_epsilon(self.eps_sample)
+        self.search.set_train()
 
 
     @torch.no_grad()
@@ -93,7 +83,8 @@ class VectorizedMCTS:
         self.visit_temp = args.visit_temp
         self.device = args.device
         self.n_runs = args.n_runs
-        self.n_sims = args.n_sims
+        self.train_n_sims = args.n_sims
+        self.eval_n_sims = args.n_sims
         self.id_null = self.n_sims + 1
         self.warmup_sims = min(self.n_sims // 3 + 1, n_actions)
         self.virtual_threads = args.virtual_threads
@@ -103,18 +94,26 @@ class VectorizedMCTS:
         self.search_device = "cpu" if self.cpu_search else self.device
         self.eval = eval
 
+
+    def set_eval(self):
+        self.n_sims = self.eval_n_sims
+
+    def set_train(self):
+        self.n_sims = self.train_n_sims
+
     def initialize_on_device(self, device):
+        max_n_sims = max(self.train_n_sims, self.eval_n_sims)
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
         # Store tensors to have [N_RUNS, N_SIMS] leading dimensions.
-        self.q = torch.zeros((self.n_runs, self.n_sims + 2, self.num_actions),
+        self.q = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions),
                              device=device,
                              pin_memory=self.cpu_search)
-        self.prior = torch.zeros((self.n_runs, self.n_sims + 2, self.num_actions), device=device)
-        self.visit_count = torch.zeros((self.n_runs, self.n_sims + 2, self.num_actions), device=device)
-        self.virtual_loss = torch.zeros((self.n_runs, self.n_sims + 2, self.num_actions), device=device)
-        self.reward = torch.zeros((self.n_runs, self.n_sims + 2, self.num_actions), device=device)
-        self.hidden_state = torch.zeros((self.n_runs, self.n_sims + 2, self.args.hidden_size, 6, 6), device=self.device)
+        self.prior = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions), device=device)
+        self.visit_count = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions), device=device)
+        self.virtual_loss = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions), device=device)
+        self.reward = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions), device=device)
+        self.hidden_state = torch.zeros((self.n_runs, max_n_sims + 2, self.args.hidden_size, 6, 6), device=self.device)
         self.min_q, self.max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \
                                  torch.zeros((self.n_runs,), device=device).fill_(MINIMUM_FLOAT_VALUE)
         self.init_min_q, self.init_max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \
@@ -124,9 +123,9 @@ class VectorizedMCTS:
         self.dummy_zeros = torch.zeros_like(self.visit_count, device=device)
 
         # Initialize pointers defining the tree structure.
-        self.id_children = torch.zeros((self.n_runs, self.n_sims + 2, self.num_actions),
+        self.id_children = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions),
                                        dtype=torch.int64, device=device)
-        self.id_parent = torch.zeros((self.n_runs, self.n_sims + 2),
+        self.id_parent = torch.zeros((self.n_runs, max_n_sims + 2),
                                      dtype=torch.int64, device=device)
 
         # Pointers used during the search.
@@ -138,7 +137,7 @@ class VectorizedMCTS:
         # Tensors defining the actions taken during the search.
         self.actions_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=device,
                                          pin_memory=self.cpu_search)
-        self.search_actions = torch.zeros((self.n_runs, self.n_sims + 2),
+        self.search_actions = torch.zeros((self.n_runs, max_n_sims + 2),
                                           dtype=torch.int64, device=device,
                                           pin_memory=self.cpu_search)
 
