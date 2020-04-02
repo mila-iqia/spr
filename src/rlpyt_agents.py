@@ -421,7 +421,9 @@ class VectorizedQMCTS(VectorizedMCTS):
         action = self.select_action()
         value = self.q[:, 0].max(dim=-1)[0]
 
-        return action.squeeze(), F.softmax(self.q[:, 0], dim=-1), value, initial_value.max(dim=-1)[0]
+        if len(action.shape) > 1:
+            action = action.squeeze()
+        return action, F.softmax(self.q[:, 0], dim=-1), value, initial_value.max(dim=-1)[0]
 
     def value_score(self, sim_id):
         """normalized_q(s,a)."""

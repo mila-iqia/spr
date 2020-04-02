@@ -110,12 +110,6 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                     print("Batch_T:", self.batch_T, flush=True)
                     print("Buffer T:", self.T, flush=True)
 
-    # def update_batch_priorities(self, priorities):
-    #     with self.rw_lock.write_lock:
-    #         priorities = numpify_buffer(priorities)
-    #         # self.default_priority = max(priorities)
-    #         self.priority_tree.update_batch_priorities(priorities ** self.alpha)
-
     def sanitize_batch(self, batch):
         has_dones, inds = torch.max(batch.done, 0)
         for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
