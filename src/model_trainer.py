@@ -341,6 +341,7 @@ class MCTSModel(nn.Module):
             self.dynamics_model = TransitionModel(channels=args.hidden_size,
                                                   num_actions=num_actions,
                                                   blocks=args.dynamics_blocks,
+                                                  limit=300,
                                                   args=args)
         if self.args.q_learning:
             self.value_model = QNetwork(args.hidden_size, num_actions)
@@ -518,7 +519,7 @@ class MCTSModel(nn.Module):
 
             # Calculate the value target for v_i+1
             value_target = return_[i] + self.args.discount ** self.multistep \
-                           * values[i+self.multistep]*done_n[i]
+                           * values[i+self.multistep]*(1 - done_n[i])
 
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
@@ -643,7 +644,8 @@ class TransitionModel(nn.Module):
                  args=None,
                  blocks=16,
                  hidden_size=256,
-                 latent_size=36,
+                 pixels=36,
+                 limit=300,
                  action_dim=6,):
         super().__init__()
         self.hidden_size = hidden_size
@@ -656,10 +658,10 @@ class TransitionModel(nn.Module):
         layers.extend([Conv2dSame(hidden_size, channels, 3),
                       nn.ReLU()])
 
-        self.action_embedding = nn.Embedding(num_actions, latent_size*action_dim)
+        self.action_embedding = nn.Embedding(num_actions, pixels*action_dim)
 
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = ValueNetwork(channels)
+        self.reward_predictor = ValueNetwork(channels, pixels=pixels, limit=limit)
         self.train()
 
     def _make_layer(self, in_channels, depth):
@@ -920,7 +922,8 @@ def from_categorical(distribution, limit=300, logits=True):
     distribution = distribution.float()  # Avoid any fp16 shenanigans
     if logits:
         distribution = torch.softmax(distribution, -1)
-    weights = torch.arange(-limit, limit + 1, device=distribution.device).float()
+    num_atoms = distribution.shape[-1]
+    weights = torch.linspace(-limit, limit, num_atoms, device=distribution.device).float()
     return distribution @ weights
 
 

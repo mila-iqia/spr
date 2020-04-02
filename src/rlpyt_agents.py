@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from rlpyt.agents.dqn.atari.atari_catdqn_agent import AtariCatDqnAgent
 from rlpyt.models.dqn.atari_catdqn_model import AtariCatDqnModel
 from rlpyt.agents.dqn.atari.mixin import AtariMixin
@@ -26,10 +27,10 @@ class DQNSearchAgent(AtariCatDqnAgent):
                    global_B=1, env_ranks=None):
         super().initialize(env_spaces, share_memory, global_B, env_ranks)
         # Overwrite distribution.
-        self.search = VectorizedMCTS(self.search_args,
-                                     env_spaces.action.n,
-                                     self.model,
-                                     eval=self.eval)
+        self.search = VectorizedQMCTS(self.search_args,
+                                      env_spaces.action.n,
+                                      self.model,
+                                      eval=self.eval)
 
     def to_device(self, cuda_idx=None):
         """Moves the model to the specified cuda device, if not ``None``.  If
@@ -81,39 +82,39 @@ class VectorizedMCTS:
         self.root_exploration_fraction = 0.25
         self.root_dirichlet_alpha = args.dirichlet_alpha
         self.visit_temp = args.visit_temp
-        self.device = args.device
-        self.n_runs = args.n_runs
-        self.train_n_sims = args.n_sims
-        self.eval_n_sims = args.n_sims
-        self.id_null = self.n_sims + 1
-        self.warmup_sims = min(self.n_sims // 3 + 1, n_actions)
+        self.n_runs = 1
+        self.train_n_sims = args.num_simulations
+        self.eval_n_sims = args.eval_simulations
+        self.n_sims = args.num_simulations
+        self.warmup_sims = min(self.n_sims // 3 + 1, self.num_actions)
+        self.max_n_sims = max(self.train_n_sims, self.eval_n_sims)
+        self.id_null = self.max_n_sims + 1
         self.virtual_threads = args.virtual_threads
         self.vl_c = args.virtual_loss_c
         self.env_steps = 0
-        self.cpu_search = args.cpu_search
-        self.search_device = "cpu" if self.cpu_search else self.device
         self.eval = eval
-
+        self.initialize_on_device("cpu") # Need to have a CPU setup to generate examples.
 
     def set_eval(self):
         self.n_sims = self.eval_n_sims
+        self.warmup_sims = min(self.n_sims // 3 + 1, self.num_actions)
 
     def set_train(self):
         self.n_sims = self.train_n_sims
+        self.warmup_sims = min(self.n_sims // 3 + 1, self.num_actions)
 
     def initialize_on_device(self, device):
-        max_n_sims = max(self.train_n_sims, self.eval_n_sims)
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
         # Store tensors to have [N_RUNS, N_SIMS] leading dimensions.
-        self.q = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions),
-                             device=device,
-                             pin_memory=self.cpu_search)
-        self.prior = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions), device=device)
-        self.visit_count = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions), device=device)
-        self.virtual_loss = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions), device=device)
-        self.reward = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions), device=device)
-        self.hidden_state = torch.zeros((self.n_runs, max_n_sims + 2, self.args.hidden_size, 6, 6), device=self.device)
+        self.device = device
+        self.q = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions),
+                             device=device,)
+        self.prior = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
+        self.visit_count = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
+        self.virtual_loss = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
+        self.reward = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
+        self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2, self.args.latent_size, 6, 5), device=self.device)
         self.min_q, self.max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \
                                  torch.zeros((self.n_runs,), device=device).fill_(MINIMUM_FLOAT_VALUE)
         self.init_min_q, self.init_max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \
@@ -123,27 +124,22 @@ class VectorizedMCTS:
         self.dummy_zeros = torch.zeros_like(self.visit_count, device=device)
 
         # Initialize pointers defining the tree structure.
-        self.id_children = torch.zeros((self.n_runs, max_n_sims + 2, self.num_actions),
+        self.id_children = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions),
                                        dtype=torch.int64, device=device)
-        self.id_parent = torch.zeros((self.n_runs, max_n_sims + 2),
+        self.id_parent = torch.zeros((self.n_runs, self.max_n_sims + 2),
                                      dtype=torch.int64, device=device)
 
         # Pointers used during the search.
-        self.id_current = torch.zeros((self.n_runs, 1), dtype=torch.int64, device=device,
-                                      pin_memory=self.cpu_search)
-        self.id_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=device,
-                                    pin_memory=self.cpu_search)
+        self.id_current = torch.zeros((self.n_runs, 1), dtype=torch.int64, device=device,)
+        self.id_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=device,)
 
         # Tensors defining the actions taken during the search.
-        self.actions_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=device,
-                                         pin_memory=self.cpu_search)
-        self.search_actions = torch.zeros((self.n_runs, max_n_sims + 2),
-                                          dtype=torch.int64, device=device,
-                                          pin_memory=self.cpu_search)
+        self.actions_final = torch.zeros(self.n_runs, 1, dtype=torch.int64, device=device,)
+        self.search_actions = torch.zeros((self.n_runs, self.max_n_sims + 2),
+                                          dtype=torch.int64, device=device,)
 
         # A helper tensor used in indexing.
-        self.batch_range = torch.arange(self.n_runs, device=device,
-                                        pin_memory=self.cpu_search)
+        self.batch_range = torch.arange(self.n_runs, device=device,)
 
     def to_device(self, cuda_idx):
         self.device = torch.device("cuda", index=cuda_idx)
@@ -175,6 +171,11 @@ class VectorizedMCTS:
 
     @torch.no_grad()
     def run(self, obs):
+        if len(obs.shape) == 3:
+            obs.unsqueeze_(0)
+        if obs.shape[0] != self.n_runs:
+            self.n_runs = obs.shape[0]
+            self.initialize_on_device(self.device)
         self.reset_tensors()
         obs = obs.to(self.device).float() / 255.
 
@@ -222,7 +223,7 @@ class VectorizedMCTS:
                 if torch.all(done_mask):
                     break
 
-            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, 6, 6).to(self.device)).squeeze()
+            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, 6, 5).to(self.device)).squeeze()
             hidden_state, reward, policy_logits, value = self.network.inference(
                 input_state, self.actions_final.to(self.device))
 
@@ -349,22 +350,26 @@ class VectorizedMCTS:
 
 
 class VectorizedQMCTS(VectorizedMCTS):
-    # def __init__(self, *args, **kwargs):
-    #     super(VectorizedQMCTS, self).__init__(*args, **kwargs)
-    #     self.root_exploration_fraction = 0.05
-
     def reset_tensors(self):
         super().reset_tensors()
         self.visit_count.fill_(1)
 
     @torch.no_grad()
     def run(self, obs):
+        if len(obs.shape) == 3:
+            obs.unsqueeze_(0)
+        if obs.shape[0] != self.n_runs:
+            self.n_runs = obs.shape[0]
+            self.initialize_on_device(self.device)
+        self.reset_tensors()
+        obs = obs.to(self.device).float() / 255.
+
         self.reset_tensors()
         obs = obs.to(self.device).float() / 255.
 
         hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
-        self.q[:, 0] = initial_value.to(self.search_device)
+        self.q[:, 0] = initial_value.to(self.device)
         self.min_q = torch.min(self.q[:, 0], dim=-1)[0]
         self.max_q = torch.max(self.q[:, 0], dim=-1)[0]
         if self.args.q_dirichlet:
@@ -384,7 +389,7 @@ class VectorizedQMCTS(VectorizedMCTS):
 
                 # Select the children corresponding to the current actions
                 current_actions = actions.gather(1, self.id_current.clamp_max(sim_id-1))
-                id_next = current_children.squeeze().gather(-1, current_actions)
+                id_next = current_children.squeeze(0).gather(-1, current_actions)
                 self.search_actions[:, depth] = current_actions.squeeze()
 
                 # Create a mask for live runs that will be true on the
@@ -409,14 +414,14 @@ class VectorizedQMCTS(VectorizedMCTS):
                 if torch.all(done_mask):
                     break
 
-            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, 6, 6).to(self.device)).squeeze()
+            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, 6, 5).to(self.device)).squeeze()
             hidden_state, reward, policy_logits, value = self.network.inference(
                 input_state, self.actions_final.to(self.device))
-            value = value.to(self.search_device)
+            value = value.to(self.device)
 
             # The new node is stored at entry sim_id
             self.hidden_state[:, sim_id, :] = hidden_state
-            self.reward[self.batch_range, sim_id, self.actions_final.squeeze()] = reward.to(self.search_device)
+            self.reward[self.batch_range, sim_id, self.actions_final.squeeze()] = reward.to(self.device)
             # self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1)
             self.q[:, sim_id] = value
 
@@ -448,7 +453,7 @@ class VectorizedQMCTS(VectorizedMCTS):
         return values
 
     def add_exploration_noise(self):
-        concentrations = torch.tensor([self.root_dirichlet_alpha] * self.num_actions, device=self.search_device)
+        concentrations = torch.tensor([self.root_dirichlet_alpha] * self.num_actions, device=self.device)
         noise = torch.distributions.dirichlet.Dirichlet(concentrations).sample((self.n_runs,))
         frac = self.root_exploration_fraction
 
@@ -516,8 +521,8 @@ class VectorizedQMCTS(VectorizedMCTS):
         epsilon = self.args.epsilon
         if self.eval:
             epsilon *= 0.1
-        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.search_device) < epsilon).long()
-        random_actions = torch.randint(self.num_actions, size=(self.n_runs,), device=self.search_device)
+        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.device) < epsilon).long()
+        random_actions = torch.randint(self.num_actions, size=(self.n_runs,), device=self.device)
         max_actions = self.q[:, 0].argmax(dim=-1)
         actions = e_action * random_actions + (1-e_action) * max_actions
         return actions
