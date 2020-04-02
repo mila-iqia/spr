@@ -13,6 +13,7 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
     ["observation", "action", "reward", "done"])
 
 OptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr"])
+ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr", "modelLoss", "modelGradNorm"])
 
 
 EPS = 1e-6  # (NaN-guard)
@@ -151,37 +152,42 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         if samples is not None:
             samples_to_buffer = self.samples_to_buffer(samples)
             self.replay_buffer.append_samples(samples_to_buffer)
-        opt_info = OptInfo(*([] for _ in range(len(OptInfo._fields))))
+        opt_info = ModelOptInfo(*([] for _ in range(len(ModelOptInfo._fields))))
         if itr < self.min_itr_learn:
             return opt_info
         for _ in range(self.updates_per_optimize):
             samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
             loss, td_abs_errors, model_loss = self.loss(samples_from_replay)
             if not self.detach_model:
-                loss = loss + model_loss
+                total_loss = loss + model_loss
                 self.optimizer.zero_grad()
                 self.model_optimizer.zero_grad()
-                loss.backward()
+                total_loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.agent.parameters(), self.clip_grad_norm)
+                    self.agent.model.stem_parameters(), self.clip_grad_norm)
+                model_grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.agent.model.dynamics_model.parameters(), self.clip_grad_norm)
+                model_grad_norm = grad_norm
                 self.optimizer.step()
                 self.model_optimizer.step()
             else:
                 self.optimizer.zero_grad()
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.agent.parameters(), self.clip_grad_norm)
+                    self.agent.model.stem_parameters(), self.clip_grad_norm)
                 self.optimizer.step()
                 self.model_optimizer.zero_grad()
                 model_loss.backward()
                 model_grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.agent.parameters(), self.clip_grad_norm)
+                    self.agent.model.dynamics_model.parameters(), self.clip_grad_norm)
                 self.model_optimizer.step()
 
             if self.prioritized_replay:
                 self.replay_buffer.update_batch_priorities(td_abs_errors)
             opt_info.loss.append(loss.item())
             opt_info.gradNorm.append(grad_norm)
+            opt_info.modelLoss.append(model_loss.item())
+            opt_info.modelGradNorm.append(model_grad_norm)
             opt_info.tdAbsErr.extend(td_abs_errors[::8].numpy())  # Downsample.
             self.update_counter += 1
             if self.update_counter % self.target_update_interval == 0:
@@ -197,7 +203,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         # with zeros where next value should not be added.
         next_z = z * (self.discount ** self.n_step_return)  # [P']
         next_z = torch.ger(1 - samples.done_n[index].float(), next_z)  # [B,P']
-        ret = samples.return_n[index].unsqueeze(1)  # [B,1]
+        ret = samples.return_[index].unsqueeze(1)  # [B,1]
         next_z = torch.clamp(ret + next_z, self.V_min, self.V_max)  # [B,P']
 
         z_bc = z.view(1, -1, 1)  # [1,P,1]
@@ -225,10 +231,10 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             target_p_unproj = select_at_indexes(next_a, target_ps)  # [B,P']
             target_p_unproj = target_p_unproj.unsqueeze(1)  # [B,1,P']
             target_p = (target_p_unproj * projection_coeffs).sum(-1)  # [B,P]
-        ps = self.agent(latent,
-                        samples.all_action[index],
-                        samples.all_reward[index])  # [B,A,P]
-        p = select_at_indexes(samples.all_action[index + 1].to(self.agent.device), ps)  # [B,P]
+        ps = self.agent.model.head_forward(latent,
+                                           samples.all_action[index],
+                                           samples.all_reward[index])  # [B,A,P]\
+        p = select_at_indexes(samples.all_action[index + 1].squeeze(-1), ps.cpu())  # [B,P]
         p = torch.clamp(p, EPS, 1)  # NaN-guard.
         losses = -torch.sum(target_p * torch.log(p), dim=1)  # Cross-entropy.
 
@@ -261,29 +267,29 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                                samples.all_action[0],
                                samples.all_reward[0],
                                stem_only=True)  # [B,A,P]
-        rl_loss, KL = self.rl_loss(conv_base,samples, 0)
+        rl_loss, KL = self.rl_loss(conv_base, samples, 0)
 
         current_latent = conv_base.detach() if self.detach_model else conv_base
 
         reward_target = to_categorical(samples.all_reward[0].to(self.agent.device), limit=1)
-        pred_rew = self.agent.transition_model.reward_predictor(current_latent)
+        pred_rew = self.agent.model.dynamics_model.reward_predictor(current_latent)
 
         pred_rew = F.log_softmax(pred_rew, -1)
         model_loss = -torch.sum(reward_target * pred_rew, -1)
         for j in range(1, self.jumps+1):
-            current_latent, pred_rew = self.agent.step(current_latent, samples.all_action[j])
+            current_latent, pred_rew, _, _ = self.agent.model.step(current_latent, samples.all_action[j].to(self.agent.device))
             jump_rl_loss, _ = self.rl_loss(current_latent,
                                            samples,
                                            j)
 
-            reward_target = to_categorical(samples.all_reward[0], limit=1)
-            pred_rew = self.agent.transition_model.reward_predictor(current_latent)
+            reward_target = to_categorical(samples.all_reward[j].to(self.agent.device), limit=1)
 
             pred_rew = F.log_softmax(pred_rew, -1)
             model_loss = model_loss - torch.sum(reward_target * pred_rew, -1) \
-                       + jump_rl_loss
+                       + jump_rl_loss.to(self.agent.device)
 
+        model_loss = model_loss
         if self.prioritized_replay:
-            model_loss *= samples.is_weights
+            model_loss *= samples.is_weights.to(self.agent.device)
 
-        return rl_loss, KL, model_loss
+        return rl_loss, KL, model_loss.mean()
