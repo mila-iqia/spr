@@ -23,6 +23,7 @@ from rlpyt.runners.minibatch_rl import MinibatchRl as MinibatchRl
 from rlpyt.utils.launching.affinity import encode_affinity, make_affinity, quick_affinity_code, affinity_from_code
 from rlpyt.utils.logging.context import logger_context
 import wandb
+import psutil
 
 from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
@@ -43,7 +44,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         env_kwargs=dict(game=game),
         eval_env_kwargs=dict(game=game),
         batch_T=4,  # Four time-steps per sampler iteration.
-        batch_B=1,
+        batch_B=16,
         max_decorrelation_steps=0,
         eval_n_envs=10,
         eval_max_steps=int(10e3),
@@ -77,8 +78,12 @@ def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=Non
         async_sample=True,
         n_socket=1,
         gpu_per_run=1,
-        sample_gpu_per_run=1
+        sample_gpu_per_run=1,
     )
+    if args.beluga:
+        affinity = convert_affinity(affinity, psutil.Process().cpu_affinity())
+        print(affinity)
+
     config = configs['ernbw']
     config['runner']['log_interval_steps'] = 1e5
     config['env']['game'] = game
@@ -113,12 +118,36 @@ def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=Non
         runner.train()
 
 
+def convert_affinity(affinity, cpus):
+    affinity.all_cpus = cpus[:len(affinity.all_cpus)]
+    cpu_tracker = 0
+    for optimizer in affinity.optimizer:
+        cpus_to_alloc = len(optimizer["cpus"])
+        optimizer["cpus"] = cpus[cpu_tracker:cpu_tracker+cpus_to_alloc]
+        cpu_tracker = cpu_tracker + cpus_to_alloc
+    for sampler in affinity.sampler:
+        cpus_to_alloc = len(sampler["all_cpus"])
+        sampler["all_cpus"] = cpus[cpu_tracker:cpu_tracker+cpus_to_alloc]
+        sampler["master_cpus"] = cpus[cpu_tracker:cpu_tracker+cpus_to_alloc]
+        new_workers_cpus = []
+        for worker in sampler["workers_cpus"]:
+            cpus_to_alloc = len(worker)
+            worker = cpus[cpu_tracker:cpu_tracker+cpus_to_alloc]
+            cpu_tracker = cpu_tracker + cpus_to_alloc
+            new_workers_cpus.append(worker)
+
+        sampler["workers_cpus"] = tuple(new_workers_cpus)
+
+    return affinity
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='pong')
     parser.add_argument('--debug', action="store_true")
     parser.add_argument('--model', action="store_true")
+    parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=4)
     parser.add_argument('--detach_model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
