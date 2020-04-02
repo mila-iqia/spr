@@ -122,7 +122,9 @@ if __name__ == "__main__":
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
     parser.add_argument('--eval-simulations', type=int, default=25)
+    parser.add_argument('--latent-size', type=int, default=256)
     parser.add_argument('--virtual-threads', type=int, default=3)
+    parser.add_argument('--q-dirichlet', type=int, default=0)
     parser.add_argument('--virtual-loss-c', type=int, default=1.)
     parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
     parser.add_argument('--dirichlet-alpha', type=float, default=0.25, help='Root dirichlet alpha')

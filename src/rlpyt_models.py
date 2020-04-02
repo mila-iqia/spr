@@ -161,6 +161,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.dynamics_model = TransitionModel(channels=256,
                                               num_actions=output_size,
+                                              latent_size=30,
+                                              limit=1,
                                               blocks=16)
 
     def stem_parameters(self):
@@ -208,19 +210,19 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         if len(obs.shape) < 5:
             obs = obs.unsqueeze(0)
         obs = obs.flatten(1, 2)
-        hidden_state = self.encoder(obs, actions)
-        if not self.args.q_learning:
-            policy_logits = self.policy_model(hidden_state)
-        else:
-            policy_logits = None
-        value_logits = self.value_model(hidden_state)
+        hidden_state = self.conv(obs, actions)
+        # if not self.args.q_learning:
+        #     policy_logits = self.policy_model(hidden_state)
+        # else:
+        policy_logits = None
+        value_logits = self.head(hidden_state)
         reward_logits = self.dynamics_model.reward_predictor(hidden_state)
 
         if logits:
             return NetworkOutput(hidden_state, reward_logits, policy_logits, value_logits)
 
-        value = from_categorical(value_logits, logits=True)
-        reward = from_categorical(reward_logits, logits=True)
+        value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
+        reward = from_categorical(reward_logits, logits=True, limit=1)
         return NetworkOutput(hidden_state, reward, policy_logits, value)
 
     def value_target_network(self, obs, actions):
