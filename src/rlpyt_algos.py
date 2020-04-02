@@ -129,9 +129,9 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
     def optim_initialize(self, rank=0):
         """Called in initilize or by async runner after forking sampler."""
         self.rank = rank
-        self.optimizer = self.OptimCls(self.agent.stem_parameters(),
+        self.optimizer = self.OptimCls(self.agent.model.stem_parameters(),
             lr=self.learning_rate, **self.optim_kwargs)
-        self.model_optimizer = self.OptimCls(self.agent.transition_model.parameters(),
+        self.model_optimizer = self.OptimCls(self.agent.model.dynamics_model.parameters(),
             lr=self.learning_rate, **self.optim_kwargs)
         if self.initial_optim_state_dict is not None:
             self.optimizer.load_state_dict(self.initial_optim_state_dict)

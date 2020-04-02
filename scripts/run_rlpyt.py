@@ -26,8 +26,9 @@ import wandb
 
 from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
+from src.rlpyt_agents import DQNSearchAgent
 
-def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach_model=1):
+def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach_model=1, args=None):
     config = configs['ernbw']
     config['runner']['log_interval_steps'] = 1e5
     config['env']['game'] = game
@@ -50,7 +51,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     )
     if model:
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], **config["algo"], detach_model=detach_model)  # Run with defaults.
-        agent = AtariCatDqnAgent(ModelCls=PizeroSearchCatDqnModel, model_kwargs=config["model"], **config["agent"])
+        agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
@@ -68,7 +69,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     with logger_context(log_dir, run_ID, name, config, snapshot_mode="last"):
         runner.train()
 
-def build_and_train(game="pong", run_ID=0, model=False, detach_model=1):
+def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=None):
     affinity = make_affinity(
         n_cpu_core=4,
         n_gpu=2,
@@ -93,7 +94,7 @@ def build_and_train(game="pong", run_ID=0, model=False, detach_model=1):
     )
     if model:
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], **config["algo"], detach_model=detach_model)  # Run with defaults.
-        agent = AtariCatDqnAgent(ModelCls=PizeroSearchCatDqnModel, model_kwargs=config["model"], **config["agent"])
+        agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
@@ -118,6 +119,15 @@ if __name__ == "__main__":
     parser.add_argument('--model', action="store_true")
     parser.add_argument('--detach_model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
+    # MCTS arguments
+    parser.add_argument('--num-simulations', type=int, default=10)
+    parser.add_argument('--eval-simulations', type=int, default=25)
+    parser.add_argument('--virtual-threads', type=int, default=3)
+    parser.add_argument('--virtual-loss-c', type=int, default=1.)
+    parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
+    parser.add_argument('--dirichlet-alpha', type=float, default=0.25, help='Root dirichlet alpha')
+    parser.add_argument('--visit-temp', type=float, default=0.5, help='Visit counts softmax temperature for sampling actions')
+
     args = parser.parse_args()
     wandb.init(project='rlpyt', entity='abs-world-models')
     if args.debug:
@@ -125,12 +135,14 @@ if __name__ == "__main__":
                               cuda_idx=args.debug_cuda_idx,
                               model=args.model,
                               detach_model=args.detach_model,
+                              args=args,
                               )
     else:
         build_and_train(
             game=args.game,
             model=args.model,
             detach_model=args.detach_model,
+            args=args,
         )
     wandb.config.update()
 

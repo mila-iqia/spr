@@ -448,7 +448,7 @@ class MCTSModel(nn.Module):
             policies = policies.float().to(self.args.device)
             values = values.float().to(self.args.device)
             return_ = return_.float().to(self.args.device)
-            done_n = 1 - done_n.float().to(self.args.device)
+            done_n = done_n.float().to(self.args.device)
             initial_actions = actions[0]
 
             if self.use_target_network:
@@ -517,8 +517,7 @@ class MCTSModel(nn.Module):
             loss_scale, pred_reward, pred_policy, pred_value = prediction
 
             # Calculate the value target for v_i+1
-            value_target = return_[i]
-            value_target = value_target + self.args.discount ** self.multistep \
+            value_target = return_[i] + self.args.discount ** self.multistep \
                            * values[i+self.multistep]*done_n[i]
 
             value_targets.append(value_target)
