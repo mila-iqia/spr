@@ -24,10 +24,10 @@ from rlpyt.utils.launching.affinity import encode_affinity, make_affinity, quick
 from rlpyt.utils.logging.context import logger_context
 import wandb
 
-from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel
-from src.rlpyt_algos import PizeroCategoricalDQN
+from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel
+from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
 
-def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0):
+def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach_model=1):
     config = configs['ernbw']
     config['runner']['log_interval_steps'] = 1e5
     config['env']['game'] = game
@@ -48,8 +48,12 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0):
         eval_max_steps=int(10e3),
         eval_max_trajectories=5,
     )
-    algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
-    agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
+    if model:
+        algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], **config["algo"], detach_model=detach_model)  # Run with defaults.
+        agent = AtariCatDqnAgent(ModelCls=PizeroSearchCatDqnModel, model_kwargs=config["model"], **config["agent"])
+    else:
+        algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
+        agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
     runner = MinibatchRl(
         algo=algo,
         agent=agent,
@@ -64,7 +68,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0):
     with logger_context(log_dir, run_ID, name, config, snapshot_mode="last"):
         runner.train()
 
-def build_and_train(game="pong", run_ID=0):
+def build_and_train(game="pong", run_ID=0, model=False, detach_model=1):
     affinity = make_affinity(
         n_cpu_core=4,
         n_gpu=2,
@@ -87,8 +91,12 @@ def build_and_train(game="pong", run_ID=0):
         eval_env_kwargs=config["eval_env"],
         **config["sampler"]
     )
-    algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
-    agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
+    if model:
+        algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], **config["algo"], detach_model=detach_model)  # Run with defaults.
+        agent = AtariCatDqnAgent(ModelCls=PizeroSearchCatDqnModel, model_kwargs=config["model"], **config["agent"])
+    else:
+        algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
+        agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
     runner = AsyncRlEvalWandb(
         algo=algo,
         agent=agent,
@@ -107,14 +115,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='pong')
     parser.add_argument('--debug', action="store_true")
+    parser.add_argument('--model', action="store_true")
+    parser.add_argument('--detach_model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     args = parser.parse_args()
     wandb.init(project='rlpyt', entity='abs-world-models')
     if args.debug:
-        debug_build_and_train(game=args.game, cuda_idx=args.debug_cuda_idx)
+        debug_build_and_train(game=args.game,
+                              cuda_idx=args.debug_cuda_idx,
+                              model=args.model,
+                              detach_model=args.detach_model,
+                              )
     else:
         build_and_train(
             game=args.game,
+            model=args.model,
+            detach_model=args.detach_model,
         )
     wandb.config.update()
 
