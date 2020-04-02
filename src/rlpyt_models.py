@@ -161,7 +161,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.dynamics_model = TransitionModel(channels=256,
                                               num_actions=output_size,
-                                              latent_size=30,
+                                              pixels=30,
                                               limit=1,
                                               blocks=16)
 
