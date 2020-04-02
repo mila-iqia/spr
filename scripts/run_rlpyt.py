@@ -95,7 +95,7 @@ def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=Non
     )
     args.discount = config["algo"]["discount"]
     if model:
-        algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], **config["algo"], jumps=args.jumps, detach_model=detach_model)  # Run with defaults.
+        algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
