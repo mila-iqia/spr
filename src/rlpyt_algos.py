@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 from rlpyt.utils.collections import namedarraytuple
 from collections import namedtuple
@@ -63,6 +64,7 @@ class PizeroCategoricalDQN(CategoricalDQN):
 
         Returns loss and KL-divergence-errors for use in prioritization.
         """
+        import ipdb; ipdb.set_trace()
         delta_z = (self.V_max - self.V_min) / (self.agent.n_atoms - 1)
         z = torch.linspace(self.V_min, self.V_max, self.agent.n_atoms)
         # Make 2-D tensor of contracted z_domain for each data point,
@@ -188,18 +190,15 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         self.update_itr_hyperparams(itr)
         return opt_info
 
-    def rl_loss(self, latent, action, return_n,
-                done_n, prev_action, prev_reward,
-                next_state, next_prev_action, next_prev_reward,
-                is_weights, done):
+    def rl_loss(self, latent, samples, index):
 
         delta_z = (self.V_max - self.V_min) / (self.agent.n_atoms - 1)
         z = torch.linspace(self.V_min, self.V_max, self.agent.n_atoms)
         # Make 2-D tensor of contracted z_domain for each data point,
         # with zeros where next value should not be added.
         next_z = z * (self.discount ** self.n_step_return)  # [P']
-        next_z = torch.ger(1 - done_n.float(), next_z)  # [B,P']
-        ret = return_n.unsqueeze(1)  # [B,1]
+        next_z = torch.ger(1 - samples.done_n[index].float(), next_z)  # [B,P']
+        ret = samples.return_n[index].unsqueeze(1)  # [B,1]
         next_z = torch.clamp(ret + next_z, self.V_min, self.V_max)  # [B,P']
 
         z_bc = z.view(1, -1, 1)  # [1,P,1]
@@ -212,13 +211,13 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         # dim-2: next_z atoms (summed in projection)
 
         with torch.no_grad():
-            target_ps = self.agent.target(next_state,
-                                          next_prev_action,
-                                          next_prev_reward)  # [B,A,P']
+            target_ps = self.agent.target(samples.all_observation[index + self.n_step_return],
+                                          samples.all_action[index + self.n_step_return],
+                                          samples.all_reward[index + self.n_step_return])  # [B,A,P']
             if self.double_dqn:
-                next_ps = self.agent(next_state,
-                                     next_prev_action,
-                                     next_prev_reward)  # [B,A,P']
+                next_ps = self.agent(samples.all_observation[index + self.n_step_return],
+                                          samples.all_action[index + self.n_step_return],
+                                          samples.all_reward[index + self.n_step_return])  # [B,A,P']
                 next_qs = torch.tensordot(next_ps, z, dims=1)  # [B,A]
                 next_a = torch.argmax(next_qs, dim=-1)  # [B]
             else:
@@ -227,13 +226,15 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             target_p_unproj = select_at_indexes(next_a, target_ps)  # [B,P']
             target_p_unproj = target_p_unproj.unsqueeze(1)  # [B,1,P']
             target_p = (target_p_unproj * projection_coeffs).sum(-1)  # [B,P]
-        ps = self.agent.head_forward(latent, prev_action, prev_reward)  # [B,A,P]
-        p = select_at_indexes(action, ps)  # [B,P]
+        ps = self.agent(latent,
+                        samples.all_action[index],
+                        samples.all_reward[index])  # [B,A,P]
+        p = select_at_indexes(samples.all_action[index + 1].to(self.agent.device), ps)  # [B,P]
         p = torch.clamp(p, EPS, 1)  # NaN-guard.
         losses = -torch.sum(target_p * torch.log(p), dim=1)  # Cross-entropy.
 
         if self.prioritized_replay:
-            losses *= is_weights
+            losses *= samples.is_weights
 
         target_p = torch.clamp(target_p, EPS, 1)
         KL_div = torch.sum(target_p *
@@ -241,7 +242,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         KL_div = torch.clamp(KL_div, EPS, 1 / EPS)  # Avoid <0 from NaN-guard.
 
         if not self.mid_batch_reset:
-            valid = valid_from_done(done)
+            valid = valid_from_done(samples.done[index])
             loss = valid_mean(losses, valid)
             KL_div *= valid
         else:
@@ -257,24 +258,15 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
 
         Returns loss and KL-divergence-errors for use in prioritization.
         """
-        conv_base = self.agent.stem_forward(samples.all_observation[0],
-                                            samples.all_action[0],
-                                            samples.all_reward[0])  # [B,A,P]
-        rl_loss, KL = self.rl_loss(conv_base,
-                                   samples.all_action[0],
-                                   samples.return_[0],
-                                   samples.done_n[0],
-                                   samples.all_action[0],
-                                   samples.all_reward[0],
-                                   samples.all_observation[self.n_step_return],
-                                   samples.all_action[self.n_step_return],
-                                   samples.all_reward[self.n_step_return],
-                                   samples.is_weights if self.prioritized_replay else 1.,
-                                   samples.done[0])
+        conv_base = self.agent(samples.all_observation[0],
+                               samples.all_action[0],
+                               samples.all_reward[0],
+                               stem_only=True)  # [B,A,P]
+        rl_loss, KL = self.rl_loss(conv_base,samples, 0)
 
         current_latent = conv_base.detach() if self.detach_model else conv_base
 
-        reward_target = to_categorical(samples.all_reward[0], limit=1)
+        reward_target = to_categorical(samples.all_reward[0].to(self.agent.device), limit=1)
         pred_rew = self.agent.transition_model.reward_predictor(current_latent)
 
         pred_rew = F.log_softmax(pred_rew, -1)
@@ -282,16 +274,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         for j in range(1, self.jumps+1):
             current_latent, pred_rew = self.agent.step(current_latent, samples.all_action[j])
             jump_rl_loss, _ = self.rl_loss(current_latent,
-                                           samples.all_action[j],
-                                           samples.return_[j],
-                                           samples.done_n[j],
-                                           samples.all_action[j],
-                                           samples.all_reward[j],
-                                           samples.all_observation[j+self.n_step_return],
-                                           samples.all_action[j+self.n_step_return],
-                                           samples.all_reward[j+self.n_step_return],
-                                           samples.is_weights if self.prioritize_replay else 1.,
-                                           samples.done[j])
+                                           samples,
+                                           j)
 
             reward_target = to_categorical(samples.all_reward[0], limit=1)
             pred_rew = self.agent.transition_model.reward_predictor(current_latent)

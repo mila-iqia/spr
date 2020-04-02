@@ -225,26 +225,28 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         reward = from_categorical(reward_logits, logits=True, limit=1)
         return NetworkOutput(hidden_state, reward, policy_logits, value)
 
-    def value_target_network(self, obs, actions):
-        if len(obs.shape) < 5:
-            obs = obs.unsqueeze(0)
-        obs = obs.flatten(1, 2)
-        hidden_state = self.target_repnet(obs, actions)
-        value_logits = self.target_value_model(hidden_state)
-        value = from_categorical(value_logits, logits=True)
-        return value
+    # def value_target_network(self, obs, actions):
+    #     if len(obs.shape) < 5:
+    #         obs = obs.unsqueeze(0)
+    #     obs = obs.flatten(1, 2)
+    #     hidden_state = self.target_repnet(obs, actions)
+    #     value_logits = self.target_value_model(hidden_state)
+    #     # value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
+    #     return value_logits
 
     def inference(self, state, action):
         next_state, reward_logits, \
         policy_logits, value_logits = self.step(state, action)
-        value = from_categorical(value_logits, logits=True)
-        reward = from_categorical(reward_logits, logits=True)
+        value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
+        reward = from_categorical(reward_logits, logits=True, limit=1)
 
         return NetworkOutput(next_state, reward, policy_logits, value)
 
     def step(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)
-        return next_state, reward_logits
+        policy_logits = None
+        value_logits = self.head(next_state)
+        return next_state, reward_logits, policy_logits, value_logits
 
 
 class PizeroDistributionalHeadModel(torch.nn.Module):

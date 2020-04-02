@@ -49,8 +49,9 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         eval_max_steps=int(10e3),
         eval_max_trajectories=5,
     )
+    args.discount = config["algo"]["discount"]
     if model:
-        algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], **config["algo"], detach_model=detach_model)  # Run with defaults.
+        algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
@@ -92,8 +93,9 @@ def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=Non
         eval_env_kwargs=config["eval_env"],
         **config["sampler"]
     )
+    args.discount = config["algo"]["discount"]
     if model:
-        algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], **config["algo"], detach_model=detach_model)  # Run with defaults.
+        algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], **config["algo"], jumps=args.jumps, detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
@@ -117,6 +119,7 @@ if __name__ == "__main__":
     parser.add_argument('--game', help='Atari game', default='pong')
     parser.add_argument('--debug', action="store_true")
     parser.add_argument('--model', action="store_true")
+    parser.add_argument('--jumps', type=int, default=4)
     parser.add_argument('--detach_model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     # MCTS arguments
@@ -125,6 +128,7 @@ if __name__ == "__main__":
     parser.add_argument('--latent-size', type=int, default=256)
     parser.add_argument('--virtual-threads', type=int, default=3)
     parser.add_argument('--q-dirichlet', type=int, default=0)
+    parser.add_argument('--search-epsilon', type=float, default=0.01, help='Epsilon for search e-greedy')
     parser.add_argument('--virtual-loss-c', type=int, default=1.)
     parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
     parser.add_argument('--dirichlet-alpha', type=float, default=0.25, help='Root dirichlet alpha')

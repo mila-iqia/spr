@@ -10,7 +10,7 @@ MAXIMUM_FLOAT_VALUE = torch.finfo().max / 10
 MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
 AgentInputs = namedarraytuple("AgentInputs",
     ["observation", "prev_action", "prev_reward"])
-AgentInfo = namedarraytuple("AgentInfo", "q")
+AgentInfo = namedarraytuple("AgentInfo", "p")
 AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 
 
@@ -22,6 +22,16 @@ class DQNSearchAgent(AtariCatDqnAgent):
         super().__init__(**kwargs)
         self.search_args = search_args
         self.eval = eval
+
+    def __call__(self, observation, prev_action, prev_reward, stem_only=False):
+        """Returns Q-values for states/observations (with grad)."""
+        prev_action = self.distribution.to_onehot(prev_action)
+        model_inputs = buffer_to((observation, prev_action, prev_reward),
+            device=self.device)
+        if stem_only:
+            return self.model.stem_forward(*model_inputs)
+        else:
+            return self.model(*model_inputs).cpu()
 
     def initialize(self, env_spaces, share_memory=False,
                    global_B=1, env_ranks=None):
@@ -97,10 +107,12 @@ class VectorizedMCTS:
 
     def set_eval(self):
         self.n_sims = self.eval_n_sims
+        self.eval = True
         self.warmup_sims = min(self.n_sims // 3 + 1, self.num_actions)
 
     def set_train(self):
         self.n_sims = self.train_n_sims
+        self.eval = False
         self.warmup_sims = min(self.n_sims // 3 + 1, self.num_actions)
 
     def initialize_on_device(self, device):
@@ -242,13 +254,8 @@ class VectorizedMCTS:
 
         # Get action, policy and value from the root after the search has finished
         action, policy = self.select_action()
-        if self.args.no_search_value_targets:
-            value = initial_value
-        else:
-            value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
+        value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
 
-        if self.args.no_search_value_targets:
-            value = initial_value
         return action, policy, value, initial_value
 
     def add_exploration_noise(self):
@@ -324,31 +331,6 @@ class VectorizedMCTS:
         #     return 0.5
         # return 0.25
 
-    def evaluate(self, env_step):
-        env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)
-        for e in env.envs:
-            e.eval()
-        T_rewards = []
-        dones, reward_sums, envs_done = [False] * self.n_runs, np.array([0.] * self.n_runs), 0
-
-        obs = env.reset()
-        obs = torch.from_numpy(obs)
-        while envs_done < self.n_runs:
-            actions, policy, value, _ = self.run(obs)
-            next_obs, reward, done, _ = env.step(actions.cpu().numpy())
-            reward_sums += np.array(reward)
-            for i, d in enumerate(done):
-                if done[i] and not dones[i]:
-                    T_rewards.append(reward_sums[i])
-                    dones[i] = True
-                    envs_done += 1
-            obs.copy_(torch.from_numpy(next_obs))
-        env.close()
-
-        avg_reward = sum(T_rewards) / len(T_rewards)
-        return avg_reward
-
-
 class VectorizedQMCTS(VectorizedMCTS):
     def reset_tensors(self):
         super().reset_tensors()
@@ -414,7 +396,7 @@ class VectorizedQMCTS(VectorizedMCTS):
                 if torch.all(done_mask):
                     break
 
-            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, 6, 5).to(self.device)).squeeze()
+            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, 6, 5).to(self.device)).squeeze(1)
             hidden_state, reward, policy_logits, value = self.network.inference(
                 input_state, self.actions_final.to(self.device))
             value = value.to(self.device)
@@ -435,10 +417,7 @@ class VectorizedQMCTS(VectorizedMCTS):
 
         # Get action, policy and value from the root after the search has finished
         action = self.select_action()
-        if self.args.no_search_value_targets:
-            value = initial_value.max(dim=-1)[0]
-        else:
-            value = self.q[:, 0].max(dim=-1)[0]
+        value = self.q[:, 0].max(dim=-1)[0]
 
         return action, F.softmax(self.q[:, 0], dim=-1), value, initial_value.max(dim=-1)[0]
 
@@ -518,7 +497,7 @@ class VectorizedQMCTS(VectorizedMCTS):
         return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
     def select_action(self):
-        epsilon = self.args.epsilon
+        epsilon = self.args.search_epsilon
         if self.eval:
             epsilon *= 0.1
         e_action = (torch.rand_like(self.q[:, 0, 0], device=self.device) < epsilon).long()
