@@ -806,7 +806,7 @@ class QNetwork(nn.Module):
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 512),
                   nn.ReLU(),
-                  init_small(nn.Linear(512, num_actions*(limit*2 + 1)))]
+                  nn.Linear(512, num_actions*(limit*2 + 1))]
         self.network = nn.Sequential(*layers)
         self.num_actions = num_actions
         self.dist_size = limit*2 + 1
@@ -829,7 +829,7 @@ class ValueNetwork(nn.Module):
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
-                  init_small(nn.Linear(256, limit*2 + 1))]
+                  nn.Linear(256, limit*2 + 1)]
         self.network = nn.Sequential(*layers)
         self.train()
 
@@ -845,7 +845,7 @@ class PolicyNetwork(nn.Module):
                   nn.ReLU(),
                   nn.BatchNorm2d(hidden_size),
                   nn.Flatten(-3, -1),
-                  init_small(nn.Linear(pixels * hidden_size, num_actions))]
+                  nn.Linear(pixels * hidden_size, num_actions)]
         self.network = nn.Sequential(*layers)
         self.train()
 
