@@ -207,9 +207,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         return p
 
     def initial_inference(self, obs, actions=None, logits=False):
-        if len(obs.shape) < 5:
-            obs = obs.unsqueeze(0)
-        obs = obs.flatten(1, 2)
+        if len(obs.shape) == 5:
+            obs = obs.flatten(1, 2)
         hidden_state = self.conv(obs, actions)
         # if not self.args.q_learning:
         #     policy_logits = self.policy_model(hidden_state)
