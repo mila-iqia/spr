@@ -1,11 +1,11 @@
 description: AWM
 
 target:
-  cluster: eu2
-  vc: msrlabs
+  cluster: rr1
+  vc: resrchprojvc20
 
 environment:
-  image: philly/jobs/custom/pytorch:pytorch1.3.1-py36-cuda10.0
+  image: philly/jobs/custom/pytorch:pytorch1.4-py37-cuda10.1
   registry: phillyregistry.azurecr.io
   setup:
     - export PATH=$$PATH:~/.local/bin
@@ -31,7 +31,7 @@ storage:
 
 search:
   job_template:
-    name: rlpyt_model_{game:s}_{random_string:s}
+    name: rlpyt_async_{game:s}_{random_string:s}
     sku: G2
     command:
       - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {simulations}
@@ -40,7 +40,7 @@ search:
   params:
     - name: game
       spec: discrete
-      values: ['ms_pacman', 'qbert']
+      values: ['qbert', 'ms_pacman']
     - name: simulations
       spec: discrete
-      values: ['--model', '--num-simulations 0 --eval-simulations 0 --jumps 0 --model']
+      values: ['--model', '--model --num-simulations 0 --eval-simulations 0 --jumps 0']
