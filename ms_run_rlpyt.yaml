@@ -32,7 +32,7 @@ storage:
 search:
   job_template:
     name: rlpyt_async_{game:s}_{random_string:s}
-    sku: G2
+    sku: G4
     command:
       - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {simulations}
   type: grid
