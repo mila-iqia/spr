@@ -488,6 +488,8 @@ def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
                 eval_mcts.network.load_state_dict(network)
                 avg_reward = eval_mcts.evaluate(env_step)
                 recieve_queue.put(((env_step, avg_reward), True))
+                del network
+                torch.cuda.empty_cache()
             else:
                 time.sleep(10.)
     except (KeyboardInterrupt, Exception):

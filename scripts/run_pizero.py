@@ -193,6 +193,7 @@ def run_pizero(args):
                 eval_state_dict = copy.deepcopy(network.state_dict())
                 async_eval.send_queue.put(('evaluate', env_steps, eval_state_dict))
                 del eval_state_dict
+                torch.cuda.empty_cache()
 
             obs.copy_(torch.from_numpy(next_obs))
             env_steps += args.num_envs
