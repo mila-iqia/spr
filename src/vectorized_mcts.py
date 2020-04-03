@@ -241,19 +241,19 @@ class VectorizedMCTS:
 
     def select_action(self):
         t = self.visit_softmax_temperature()
-        # policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
-        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t))
-        action = policy.sample()
+        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
+        action = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t)).sample()
+        # action = policy.sample()
         return action, policy.probs
 
     def visit_softmax_temperature(self):
         # TODO: Change the temperature schedule
-        # return self.visit_temp
-        if self.eval:
-            return 0.25
-        if self.env_steps < 5e6:
-            return 0.5
-        return 0.25
+        return self.visit_temp
+        # if self.eval:
+        #     return 0.25
+        # if self.env_steps < 5e6:
+        #     return 0.5
+        # return 0.25
 
     def evaluate(self, env_step):
         env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)
