@@ -72,28 +72,40 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         runner.train()
 
 def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=None):
-    affinity = make_affinity(
-        n_cpu_core=4,
-        n_gpu=2,
+    affinity_dict = dict(
+        n_cpu_core=10,
+        n_gpu=4,
         async_sample=True,
         n_socket=1,
         gpu_per_run=1,
-        sample_gpu_per_run=1,
+        sample_gpu_per_run=2,
+        # alternating=True
     )
+    affinity = make_affinity(**affinity_dict)
+
     if args.beluga:
         affinity = convert_affinity(affinity, psutil.Process().cpu_affinity())
-        print(affinity)
 
+    print(affinity)
+    wandb.config.update(affinity_dict)
     config = configs['ernbw']
     config['runner']['log_interval_steps'] = 1e5
     config['env']['game'] = game
     config["eval_env"]["game"] = config["env"]["game"]
     config["algo"]["n_step_return"] = 5
+    config["algo"]["batch_size"] = 256
+    # config["sampler"]["max_decorrelation_steps"] = 0
+    # config["algo"]["min_steps_learn"] = 2e4
+    config['sampler']['batch_B'] = 64
+    # config['sampler']['batch_T'] = 2
+    config['sampler']['eval_n_envs'] = 1
+    config["sampler"]["eval_max_steps"] = int(125e3)
+    config["sampler"]["eval_max_trajectories"] = 8
     wandb.config.update(config)
     sampler = AsyncGpuSampler(
         EnvCls=AtariEnv,
         env_kwargs=config["env"],
-        CollectorCls=DbGpuWaitResetCollector,
+        CollectorCls=DbGpuResetCollector,
         TrajInfoCls=AtariTrajInfo,
         eval_env_kwargs=config["eval_env"],
         **config["sampler"]
@@ -179,5 +191,4 @@ if __name__ == "__main__":
             detach_model=args.detach_model,
             args=args,
         )
-    wandb.config.update()
 
