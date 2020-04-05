@@ -29,6 +29,7 @@ from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDq
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
 from src.rlpyt_agents import DQNSearchAgent
 
+
 def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach_model=1, args=None):
     config = configs['ernbw']
     config['runner']['log_interval_steps'] = 1e5
@@ -37,6 +38,10 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["algo"]["n_step_return"] = 5
     config["algo"]["prioritized_replay"] = True
     config["algo"]["min_steps_learn"] = 1e3
+    config["sampler"]["eval_max_trajectories"] = 5
+    config["sampler"]["eval_n_envs"] = 5
+    config["sampler"]["batch_B"] = 128
+    config["model"]["jumps"] = args.jumps
     wandb.config.update(config)
     sampler = SerialSampler(
         EnvCls=AtariEnv,
@@ -46,9 +51,6 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         batch_T=4,  # Four time-steps per sampler iteration.
         batch_B=16,
         max_decorrelation_steps=0,
-        eval_n_envs=10,
-        eval_max_steps=int(10e3),
-        eval_max_trajectories=5,
     )
     args.discount = config["algo"]["discount"]
     if model:
@@ -71,13 +73,14 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     with logger_context(log_dir, run_ID, name, config, snapshot_mode="last"):
         runner.train()
 
+
 def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=None):
     affinity = make_affinity(
-        n_cpu_core=4,
-        n_gpu=2,
+        n_cpu_core=16,
+        n_gpu=3,
         async_sample=True,
         n_socket=1,
-        gpu_per_run=1,
+        gpu_per_run=2,
         sample_gpu_per_run=1,
     )
     if args.beluga:
@@ -89,6 +92,10 @@ def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=Non
     config['env']['game'] = game
     config["eval_env"]["game"] = config["env"]["game"]
     config["algo"]["n_step_return"] = 5
+    config["sampler"]["eval_max_trajectories"] = 5
+    config["sampler"]["eval_n_envs"] = 5
+    config["sampler"]["batch_B"] = 128
+    config["model"]["jumps"] = args.jumps
     wandb.config.update(config)
     sampler = AsyncGpuSampler(
         EnvCls=AtariEnv,
@@ -149,7 +156,7 @@ if __name__ == "__main__":
     parser.add_argument('--model', action="store_true")
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=4)
-    parser.add_argument('--detach_model', type=int, default=1)
+    parser.add_argument('--detach-model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
