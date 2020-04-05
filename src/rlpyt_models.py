@@ -8,7 +8,7 @@ from rlpyt.models.utils import scale_grad
 from rlpyt.runners.async_rl import AsyncRlEval
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
 from rlpyt.utils.tensor import infer_leading_dims, restore_leading_dims
-from src.model_trainer import ValueNetwork, TransitionModel, RepNet, NetworkOutput, from_categorical
+from src.model_trainer import ValueNetwork, TransitionModel, RepNet, NetworkOutput, from_categorical, ScaleGradient
 import numpy as np
 from rlpyt.utils.logging import logger
 import wandb
@@ -144,6 +144,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             framestack=4,
             grayscale=True,
             actions=False,
+            jumps=0
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -151,6 +152,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.dueling = dueling
         c, h, w = image_shape
         self.conv = RepNet(framestack, grayscale, actions)
+        self.jumps = jumps
         # conv_out_size = self.conv.conv_out_size(h, w)
         # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
         # self.reward_network = ValueNetwork(conv_out_size)
@@ -189,22 +191,46 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         p = restore_leading_dims(p, lead_dim, T, B)
         return p
 
-    def forward(self, observation, prev_action, prev_reward):
+    def forward(self, observation, prev_action, prev_reward, jumps=False):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
-        img = observation.type(torch.float)  # Expect torch.uint8 inputs
-        img = img.mul_(1. / 255)  # From [0-255] to [0-1], in place.
+        if jumps:
+            pred_ps = []
+            pred_reward = []
+            latent = self.stem_forward(observation[0],
+                                       prev_action[0],
+                                       prev_reward[0])
+            pred_ps.append(self.head_forward(latent,
+                                             prev_action[0],
+                                             prev_reward[0]))
+            pred_rew = F.log_softmax(self.dynamics_model.reward_predictor(latent), -1)
+            pred_reward.append(pred_rew)
 
-        # Infer (presence of) leading dimensions: [T,B], [B], or [].
-        lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
+            for j in range(1, self.jumps + 1):
+                latent, pred_rew, _, _ = self.step(latent, prev_action[j])
+                latent = ScaleGradient.apply(latent, 0.5)
+                pred_rew = F.log_softmax(pred_rew, -1)
+                pred_reward.append(pred_rew)
+                pred_ps.append(self.head_forward(latent,
+                                                 prev_action[j],
+                                                 prev_reward[j]))
 
-        conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
-        p = self.head(conv_out)
-        p = F.softmax(p, dim=-1)
+            return pred_ps, pred_reward
 
-        # Restore leading dimensions: [T,B], [B], or [], as input.
-        p = restore_leading_dims(p, lead_dim, T, B)
-        return p
+        else:
+            img = observation.type(torch.float)  # Expect torch.uint8 inputs
+            img = img.mul_(1. / 255)  # From [0-255] to [0-1], in place.
+
+            # Infer (presence of) leading dimensions: [T,B], [B], or [].
+            lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
+
+            conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
+            p = self.head(conv_out)
+            p = F.softmax(p, dim=-1)
+
+            # Restore leading dimensions: [T,B], [B], or [], as input.
+            p = restore_leading_dims(p, lead_dim, T, B)
+            return p
 
     def initial_inference(self, obs, actions=None, logits=False):
         if len(obs.shape) == 5:

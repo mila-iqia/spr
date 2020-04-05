@@ -131,10 +131,19 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
     def optim_initialize(self, rank=0):
         """Called in initilize or by async runner after forking sampler."""
         self.rank = rank
-        self.optimizer = self.OptimCls(self.agent.model.stem_parameters(),
-            lr=self.learning_rate, **self.optim_kwargs)
-        self.model_optimizer = self.OptimCls(self.agent.model.dynamics_model.parameters(),
-            lr=self.learning_rate, **self.optim_kwargs)
+        try:
+            self.optimizer = self.OptimCls(self.agent.model.stem_parameters(),
+                lr=self.learning_rate, **self.optim_kwargs)
+            self.model_optimizer = self.OptimCls(self.agent.model.dynamics_model.parameters(),
+                lr=self.learning_rate, **self.optim_kwargs)
+            self.model = self.agent.model
+        except:
+            # We're probably dealing with DDP
+            self.optimizer = self.OptimCls(self.agent.model.module.stem_parameters(),
+                lr=self.learning_rate, **self.optim_kwargs)
+            self.model_optimizer = self.OptimCls(self.agent.model.module.dynamics_model.parameters(),
+                lr=self.learning_rate, **self.optim_kwargs)
+            self.model = self.agent.model.module
         if self.initial_optim_state_dict is not None:
             self.optimizer.load_state_dict(self.initial_optim_state_dict)
         if self.prioritized_replay:
@@ -164,22 +173,21 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                 self.model_optimizer.zero_grad()
                 total_loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.agent.model.stem_parameters(), self.clip_grad_norm)
+                    self.model.stem_parameters(), self.clip_grad_norm)
                 model_grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.agent.model.dynamics_model.parameters(), self.clip_grad_norm)
-                model_grad_norm = grad_norm
+                    self.model.dynamics_model.parameters(), self.clip_grad_norm)
                 self.optimizer.step()
                 self.model_optimizer.step()
             else:
                 self.optimizer.zero_grad()
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.agent.model.stem_parameters(), self.clip_grad_norm)
+                    self.model.stem_parameters(), self.clip_grad_norm)
                 self.optimizer.step()
                 self.model_optimizer.zero_grad()
                 model_loss.backward()
                 model_grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.agent.model.dynamics_model.parameters(), self.clip_grad_norm)
+                    self.model.dynamics_model.parameters(), self.clip_grad_norm)
                 self.model_optimizer.step()
 
             if self.prioritized_replay:
@@ -195,8 +203,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         self.update_itr_hyperparams(itr)
         return opt_info
 
-    def rl_loss(self, latent, samples, index):
-
+    def rl_loss(self, pred_ps, samples, index):
         delta_z = (self.V_max - self.V_min) / (self.agent.n_atoms - 1)
         z = torch.linspace(self.V_min, self.V_max, self.agent.n_atoms)
         # Make 2-D tensor of contracted z_domain for each data point,
@@ -231,15 +238,13 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             target_p_unproj = select_at_indexes(next_a, target_ps)  # [B,P']
             target_p_unproj = target_p_unproj.unsqueeze(1)  # [B,1,P']
             target_p = (target_p_unproj * projection_coeffs).sum(-1)  # [B,P]
-        ps = self.agent.model.head_forward(latent,
-                                           samples.all_action[index],
-                                           samples.all_reward[index])  # [B,A,P]\
-        p = select_at_indexes(samples.all_action[index + 1].squeeze(-1), ps.cpu())  # [B,P]
+        p = select_at_indexes(samples.all_action[index + 1].squeeze(-1),
+                              pred_ps.cpu())  # [B,P]
         p = torch.clamp(p, EPS, 1)  # NaN-guard.
         losses = -torch.sum(target_p * torch.log(p), dim=1)  # Cross-entropy.
 
         if self.prioritized_replay:
-            losses *= samples.is_weights
+            losses = losses*samples.is_weights
 
         target_p = torch.clamp(target_p, EPS, 1)
         KL_div = torch.sum(target_p *
@@ -263,33 +268,23 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
 
         Returns loss and KL-divergence-errors for use in prioritization.
         """
-        conv_base = self.agent(samples.all_observation[0],
-                               samples.all_action[0],
-                               samples.all_reward[0],
-                               stem_only=True)  # [B,A,P]
-        rl_loss, KL = self.rl_loss(conv_base, samples, 0)
+        pred_ps, pred_rew = self.agent(samples.all_observation.to(self.agent.device),
+                                       samples.all_action.to(self.agent.device),
+                                       samples.all_reward.to(self.agent.device),
+                                       jumps=True)  # [B,A,P]
+        rl_loss, KL = self.rl_loss(pred_ps[0], samples, 0)
+        pred_rew = torch.stack(pred_rew, 0)
+        with torch.no_grad():
+            reward_target = to_categorical(samples.all_reward[:self.jumps+1].flatten().to(self.agent.device), limit=1).view(*pred_rew.shape)
+        model_loss = -torch.sum(reward_target * pred_rew, (0, 2))
 
-        current_latent = conv_base.detach() if self.detach_model else conv_base
-
-        reward_target = to_categorical(samples.all_reward[0].to(self.agent.device), limit=1)
-        pred_rew = self.agent.model.dynamics_model.reward_predictor(current_latent)
-
-        pred_rew = F.log_softmax(pred_rew, -1)
-        model_loss = -torch.sum(reward_target * pred_rew, -1)
-        for j in range(1, self.jumps+1):
-            current_latent, pred_rew, _, _ = self.agent.model.step(current_latent, samples.all_action[j].to(self.agent.device))
-            jump_rl_loss, _ = self.rl_loss(current_latent,
+        for i in range(1, self.jumps+1):
+            jump_rl_loss, _ = self.rl_loss(pred_ps[i],
                                            samples,
-                                           j)
+                                           i)
+            model_loss = model_loss + jump_rl_loss.to(self.agent.device)
 
-            reward_target = to_categorical(samples.all_reward[j].to(self.agent.device), limit=1)
-
-            pred_rew = F.log_softmax(pred_rew, -1)
-            model_loss = model_loss - torch.sum(reward_target * pred_rew, -1) \
-                       + jump_rl_loss.to(self.agent.device)
-
-        model_loss = model_loss
         if self.prioritized_replay:
-            model_loss *= samples.is_weights.to(self.agent.device)
+            model_loss = model_loss * samples.is_weights.to(self.agent.device)
 
-        return rl_loss, KL, model_loss.mean()
+        return rl_loss, KL, model_loss.mean().cpu()*1/self.jumps

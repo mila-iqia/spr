@@ -6,6 +6,7 @@ from rlpyt.agents.dqn.atari.mixin import AtariMixin
 from rlpyt.utils.buffer import buffer_to
 from rlpyt.utils.logging import logger
 from rlpyt.utils.collections import namedarraytuple
+import time
 MAXIMUM_FLOAT_VALUE = torch.finfo().max / 10
 MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
 AgentInputs = namedarraytuple("AgentInputs",
@@ -13,8 +14,36 @@ AgentInputs = namedarraytuple("AgentInputs",
 AgentInfo = namedarraytuple("AgentInfo", "p")
 AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.nn.parallel import DistributedDataParallelCPU as DDPC
 
-class DQNSearchAgent(AtariCatDqnAgent):
+class PizeroAgent(AtariCatDqnAgent):
+    def data_parallel(self):
+        """Wraps the model with PyTorch's DistributedDataParallel.  The
+        intention is for rlpyt to create a separate Python process to drive
+        each GPU (or CPU-group for CPU-only, MPI-like configuration). Agents
+        with additional model components (beyond ``self.model``) which will
+        have gradients computed through them should extend this method to wrap
+        those, as well.
+
+        Typically called in the runner during startup.
+        """
+        if self.device.type == "cpu":
+            self.model = DDPC(self.model,
+                              broadcast_buffers=False,
+                              find_unused_parameters=True)
+            logger.log("Initialized DistributedDataParallelCPU agent model.")
+        else:
+            self.model = DDP(self.model,
+                             device_ids=[self.device.index],
+                             output_device=self.device.index,
+                             broadcast_buffers=False,
+                             find_unused_parameters=True)
+            logger.log("Initialized DistributedDataParallel agent model on "
+                f"device {self.device}.")
+
+
+class DQNSearchAgent(PizeroAgent):
     """Agent for Categorical DQN algorithm with search."""
 
     def __init__(self, search_args=None, eval=False, **kwargs):
@@ -23,14 +52,16 @@ class DQNSearchAgent(AtariCatDqnAgent):
         self.search_args = search_args
         self.eval = eval
 
-    def __call__(self, observation, prev_action, prev_reward, stem_only=False):
+    def __call__(self, observation, prev_action, prev_reward, jumps=False):
         """Returns Q-values for states/observations (with grad)."""
-        prev_action = self.distribution.to_onehot(prev_action)
-        model_inputs = buffer_to((observation, prev_action, prev_reward),
-            device=self.device)
-        if stem_only:
-            return self.model.stem_forward(*model_inputs)
+        if jumps:
+            model_inputs = buffer_to((observation, prev_action, prev_reward),
+                device=self.device)
+            return self.model(*model_inputs, jumps=jumps)
         else:
+            prev_action = self.distribution.to_onehot(prev_action)
+            model_inputs = buffer_to((observation, prev_action, prev_reward),
+                device=self.device)
             return self.model(*model_inputs).cpu()
 
     def initialize(self, env_spaces, share_memory=False,
@@ -170,6 +201,8 @@ class VectorizedMCTS:
         values = self.q - (valid_indices * self.min_q[:, None, None])
         values /= (self.max_q - self.min_q)[:, None, None]
         values = valid_indices * values
+
+        # Multiply by visit_counts / (virtual_loss + visit_counts)
         return values
 
     def reset_tensors(self):
@@ -184,6 +217,8 @@ class VectorizedMCTS:
 
     @torch.no_grad()
     def run(self, obs):
+        # print("Searching {} environments".format(obs.shape[0]))
+        # start = time.time()
         if len(obs.shape) == 3:
             obs.unsqueeze_(0)
         if obs.shape[0] != self.n_runs:
@@ -257,6 +292,8 @@ class VectorizedMCTS:
         action, policy = self.select_action()
         value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
 
+        # end = time.time()
+        # print("Searched {} environments, took {}".format(obs.shape[0], end-start))
         return action, policy, value, initial_value
 
     def add_exploration_noise(self):
@@ -339,6 +376,8 @@ class VectorizedQMCTS(VectorizedMCTS):
 
     @torch.no_grad()
     def run(self, obs):
+        # print("Searching {} environments".format(obs.shape[0]))
+        # start = time.time()
         if len(obs.shape) == 3:
             obs.unsqueeze_(0)
         if obs.shape[0] != self.n_runs:
@@ -417,6 +456,8 @@ class VectorizedQMCTS(VectorizedMCTS):
         action = self.select_action()
         value = self.q[:, 0].max(dim=-1)[0]
 
+        # end = time.time()
+        # print("Searched {} environments with {} sims, took {}".format(obs.shape[0], self.n_sims, end-start))
         return action.squeeze(), F.softmax(self.q[:, 0], dim=-1).squeeze(), \
                value.squeeze(), initial_value.max(dim=-1)[0].squeeze()
 
@@ -440,7 +481,13 @@ class VectorizedQMCTS(VectorizedMCTS):
         est_q = torch.log(mixed_dist)
         mean_offset = self.q[:, 0].mean(-1, keepdim=True) - est_q.mean(-1, keepdim=True)
 
+        self.exploration_Q = est_q + mean_offset
+
         self.q[:, 0] = est_q + mean_offset
+
+    def remove_exploration_noise(self, initial_values):
+        correction = (initial_values - self.exploration_Q)/self.visit_count[:, 0]
+        self.q[:, 0] = self.q[:, 0] + correction
 
     def backup(self, id_final, depth, value_final):
         returns = value_final.max(dim=-1)[0]
