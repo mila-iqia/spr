@@ -42,6 +42,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["sampler"]["eval_n_envs"] = 5
     config["sampler"]["batch_B"] = 128
     config["model"]["jumps"] = args.jumps
+    config["model"]["detach_model"] = detach_model
     wandb.config.update(config)
     sampler = SerialSampler(
         EnvCls=AtariEnv,
@@ -77,10 +78,10 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
 def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=None):
     affinity_dict = dict(
         n_cpu_core=10,
-        n_gpu=3,
+        n_gpu=4,
         async_sample=True,
         n_socket=1,
-        gpu_per_run=2,
+        gpu_per_run=3,
         sample_gpu_per_run=1,
         # alternating=True
     )
@@ -97,6 +98,7 @@ def build_and_train(game="pong", run_ID=0, model=False, detach_model=1, args=Non
     config["eval_env"]["game"] = config["env"]["game"]
     config["algo"]["n_step_return"] = 5
     config["model"]["jumps"] = args.jumps
+    config["model"]["detach_model"] = detach_model
     config["algo"]["batch_size"] = 256
     # config["sampler"]["max_decorrelation_steps"] = 0
     # config["algo"]["min_steps_learn"] = 2e4

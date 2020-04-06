@@ -12,6 +12,7 @@ from src.model_trainer import ValueNetwork, TransitionModel, RepNet, NetworkOutp
 import numpy as np
 from rlpyt.utils.logging import logger
 import wandb
+import time
 
 
 class AsyncRlEvalWandb(AsyncRlEval):
@@ -144,7 +145,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             framestack=4,
             grayscale=True,
             actions=False,
-            jumps=0
+            jumps=0,
+            detach_model=True
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -153,6 +155,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         c, h, w = image_shape
         self.conv = RepNet(framestack, grayscale, actions)
         self.jumps = jumps
+        self.detach_model = detach_model
         # conv_out_size = self.conv.conv_out_size(h, w)
         # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
         # self.reward_network = ValueNetwork(conv_out_size)
@@ -166,6 +169,17 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                               pixels=30,
                                               limit=1,
                                               blocks=16)
+
+        if self.detach_model:
+            if dueling:
+                self.target_head = PizeroDistributionalDuelingHeadModel(256, output_size)
+            else:
+                self.target_head = PizeroDistributionalHeadModel(256, output_size)
+
+            for param in self.target_head.parameters():
+                param.requires_grad = False
+
+
 
     def stem_parameters(self):
         return list(self.conv.parameters()) + list(self.head.parameters())
@@ -194,6 +208,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
     def forward(self, observation, prev_action, prev_reward, jumps=False):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
+        # start = time.time()
         if jumps:
             pred_ps = []
             pred_reward = []
@@ -203,6 +218,14 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             pred_ps.append(self.head_forward(latent,
                                              prev_action[0],
                                              prev_reward[0]))
+
+            if self.detach_model:
+                # copy_start = time.time()
+                self.target_head.load_state_dict(self.head.state_dict())
+                # copy_end = time.time()
+                # print("Copying took {}".format(copy_end - copy_start))
+                latent = latent.detach()
+
             pred_rew = F.log_softmax(self.dynamics_model.reward_predictor(latent), -1)
             pred_reward.append(pred_rew)
 
@@ -215,6 +238,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  prev_action[j],
                                                  prev_reward[j]))
 
+            # end = time.time()
+            # print("Forward took {}".format(end - start))
             return pred_ps, pred_reward
 
         else:
