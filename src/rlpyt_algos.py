@@ -167,28 +167,27 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         for _ in range(self.updates_per_optimize):
             samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
             loss, td_abs_errors, model_loss = self.loss(samples_from_replay)
-            if not self.detach_model:
-                total_loss = loss + model_loss
-                self.optimizer.zero_grad()
-                self.model_optimizer.zero_grad()
-                total_loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.model.stem_parameters(), self.clip_grad_norm)
-                model_grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.model.dynamics_model.parameters(), self.clip_grad_norm)
-                self.optimizer.step()
-                self.model_optimizer.step()
-            else:
-                self.optimizer.zero_grad()
-                loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.model.stem_parameters(), self.clip_grad_norm)
-                self.optimizer.step()
-                self.model_optimizer.zero_grad()
-                model_loss.backward()
-                model_grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.model.dynamics_model.parameters(), self.clip_grad_norm)
-                self.model_optimizer.step()
+            total_loss = loss + model_loss
+            self.optimizer.zero_grad()
+            self.model_optimizer.zero_grad()
+            total_loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.stem_parameters(), self.clip_grad_norm)
+            model_grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.dynamics_model.parameters(), self.clip_grad_norm)
+            self.optimizer.step()
+            self.model_optimizer.step()
+            # else:
+            #     self.optimizer.zero_grad()
+            #     loss.backward()
+            #     grad_norm = torch.nn.utils.clip_grad_norm_(
+            #         self.model.stem_parameters(), self.clip_grad_norm)
+            #     self.optimizer.step()
+            #     self.model_optimizer.zero_grad()
+            #     model_loss.backward()
+            #     model_grad_norm = torch.nn.utils.clip_grad_norm_(
+            #         self.model.dynamics_model.parameters(), self.clip_grad_norm)
+            #     self.model_optimizer.step()
 
             if self.prioritized_replay:
                 self.replay_buffer.update_batch_priorities(td_abs_errors)
