@@ -217,7 +217,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                              prev_action[0],
                                              prev_reward[0]),)
 
-            if self.detach_model:
+            if self.detach_model and self.jumps > 0:
                 # copy_start = time.time()
                 self.target_head.load_state_dict(self.head.state_dict())
                 # copy_end = time.time()
@@ -237,8 +237,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
             # end = time.time()
             # print("Forward took {}".format(end - start))
-            return [F.log_softmax(ps, -1) for ps in pred_ps],\
-                   [F.log_softmax(ps, -1) for ps in pred_reward]
+            return pred_ps, [F.log_softmax(ps, -1) for ps in pred_reward]
 
         else:
             img = observation.type(torch.float)  # Expect torch.uint8 inputs
