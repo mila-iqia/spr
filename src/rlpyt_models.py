@@ -179,8 +179,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             for param in self.target_head.parameters():
                 param.requires_grad = False
 
-
-
     def stem_parameters(self):
         return list(self.conv.parameters()) + list(self.head.parameters())
 
@@ -217,7 +215,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                        prev_reward[0])
             pred_ps.append(self.head_forward(latent,
                                              prev_action[0],
-                                             prev_reward[0]))
+                                             prev_reward[0]),)
 
             if self.detach_model:
                 # copy_start = time.time()
@@ -226,13 +224,12 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 # print("Copying took {}".format(copy_end - copy_start))
                 latent = latent.detach()
 
-            pred_rew = F.log_softmax(self.dynamics_model.reward_predictor(latent), -1)
+            pred_rew = self.dynamics_model.reward_predictor(latent)
             pred_reward.append(pred_rew)
 
             for j in range(1, self.jumps + 1):
                 latent, pred_rew, _, _ = self.step(latent, prev_action[j])
                 latent = ScaleGradient.apply(latent, 0.5)
-                pred_rew = F.log_softmax(pred_rew, -1)
                 pred_reward.append(pred_rew)
                 pred_ps.append(self.head_forward(latent,
                                                  prev_action[j],
@@ -240,7 +237,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
             # end = time.time()
             # print("Forward took {}".format(end - start))
-            return pred_ps, pred_reward
+            return [F.log_softmax(ps, -1) for ps in pred_ps],\
+                   [F.log_softmax(ps, -1) for ps in pred_reward]
 
         else:
             img = observation.type(torch.float)  # Expect torch.uint8 inputs

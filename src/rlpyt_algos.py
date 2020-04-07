@@ -239,15 +239,15 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             target_p = (target_p_unproj * projection_coeffs).sum(-1)  # [B,P]
         p = select_at_indexes(samples.all_action[index + 1].squeeze(-1),
                               pred_ps.cpu())  # [B,P]
-        p = torch.clamp(p, EPS, 1)  # NaN-guard.
-        losses = -torch.sum(target_p * torch.log(p), dim=1)  # Cross-entropy.
+        # p = torch.clamp(p, EPS, 1)  # NaN-guard.
+        losses = -torch.sum(target_p * p, dim=1)  # Cross-entropy.
 
         if self.prioritized_replay:
             losses = losses*samples.is_weights
 
         target_p = torch.clamp(target_p, EPS, 1)
         KL_div = torch.sum(target_p *
-            (torch.log(target_p) - torch.log(p.detach())), dim=1)
+            (torch.log(target_p) - p.detach()), dim=1)
         KL_div = torch.clamp(KL_div, EPS, 1 / EPS)  # Avoid <0 from NaN-guard.
 
         if not self.mid_batch_reset:
@@ -286,4 +286,4 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         if self.prioritized_replay:
             model_loss = model_loss * samples.is_weights.to(self.agent.device)
 
-        return rl_loss, KL, model_loss.mean().cpu()*1/self.jumps
+        return rl_loss, KL, model_loss.mean().cpu()

@@ -14,6 +14,7 @@ AgentInputs = namedarraytuple("AgentInputs",
 AgentInfo = namedarraytuple("AgentInfo", "p")
 AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 
+from src.model_trainer import from_categorical
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.parallel import DistributedDataParallelCPU as DDPC
 
@@ -90,12 +91,13 @@ class DQNSearchAgent(PizeroAgent):
         pre-training eval."""
         super().eval_mode(itr)
         self.search.set_eval()
-
+        self.search.epsilon = self.distribution.epsilon
 
     def sample_mode(self, itr):
         """Extend method to set epsilon for sampling (including annealing)."""
         super().sample_mode(itr)
         self.search.set_train()
+        self.search.epsilon = self.distribution.epsilon
 
     @torch.no_grad()
     def step(self, observation, prev_action, prev_reward):
@@ -184,6 +186,7 @@ class VectorizedMCTS:
 
         # A helper tensor used in indexing.
         self.batch_range = torch.arange(self.n_runs, device=device,)
+        self.epsilon = self.args.search_epsilon
 
     def to_device(self, cuda_idx):
         self.device = torch.device("cuda", index=cuda_idx)
@@ -454,12 +457,12 @@ class VectorizedQMCTS(VectorizedMCTS):
 
         # Get action, policy and value from the root after the search has finished
         action = self.select_action()
-        value = self.q[:, 0].max(dim=-1)[0]
+        value = self.q[self.batch_range, 0, action]
 
         # end = time.time()
         # print("Searched {} environments with {} sims, took {}".format(obs.shape[0], self.n_sims, end-start))
-        return action.squeeze(), F.softmax(self.q[:, 0], dim=-1).squeeze(), \
-               value.squeeze(), initial_value.max(dim=-1)[0].squeeze()
+        return action.squeeze(), self.q[:, 0].squeeze(), \
+               value.squeeze(), initial_value
 
     def value_score(self, sim_id):
         """normalized_q(s,a)."""
@@ -543,9 +546,7 @@ class VectorizedQMCTS(VectorizedMCTS):
         return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
     def select_action(self):
-        epsilon = self.args.search_epsilon
-        if self.eval:
-            epsilon *= 0.1
+        epsilon = self.epsilon
         e_action = (torch.rand_like(self.q[:, 0, 0], device=self.device) < epsilon).long()
         random_actions = torch.randint(self.num_actions, size=(self.n_runs,), device=self.device)
         max_actions = self.q[:, 0].argmax(dim=-1)
