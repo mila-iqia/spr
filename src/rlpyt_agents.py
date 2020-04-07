@@ -65,13 +65,16 @@ class DQNSearchAgent(PizeroAgent):
                 device=self.device)
             return self.model(*model_inputs).cpu()
 
-    def initialize(self, env_spaces, share_memory=False,
-                   global_B=1, env_ranks=None):
+    def initialize(self,
+                   env_spaces,
+                   share_memory=False,
+                   global_B=1,
+                   env_ranks=None):
         super().initialize(env_spaces, share_memory, global_B, env_ranks)
         # Overwrite distribution.
         self.search = VectorizedQMCTS(self.search_args,
                                       env_spaces.action.n,
-                                      self.target_model,
+                                      self.model,
                                       eval=self.eval)
 
     def to_device(self, cuda_idx=None):
@@ -85,6 +88,7 @@ class DQNSearchAgent(PizeroAgent):
         """
         super().to_device(cuda_idx)
         self.search.to_device(cuda_idx)
+        self.search.network = self.model
 
     def eval_mode(self, itr):
         """Extend method to set epsilon for evaluation, using 1 for
@@ -103,12 +107,19 @@ class DQNSearchAgent(PizeroAgent):
     def step(self, observation, prev_action, prev_reward):
         """Compute the discrete distribution for the Q-value for each
         action for each state/observation (no grad)."""
+        action, p, value, initial_value = self.search.run(observation.to(self.search.device))
+        p = p.cpu()
+
+        action = action.cpu()
+
         # prev_action = self.distribution.to_onehot(prev_action)
         # model_inputs = buffer_to((observation, prev_action, prev_reward),
-        #     device=self.device)
-        action, p, value, initial_value = self.search.run(observation.to(self.device))
-        p = p.cpu()
-        action = action.cpu()
+        #                          device=self.device)
+        # base_p = self.model(*model_inputs).cpu()
+        # base_value = from_categorical(base_p, limit=10, logits=False)
+        # base_action = self.distribution.sample(base_p)
+        # print(action == base_action)
+
         agent_info = AgentInfo(p=p)  # Only change from DQN: q -> p.
         action, agent_info = buffer_to((action, agent_info), device="cpu")
         return AgentStep(action=action, agent_info=agent_info)
