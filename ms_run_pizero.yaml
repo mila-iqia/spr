@@ -31,10 +31,10 @@ storage:
 
 search:
   job_template:
-    name: awm
+    name: muzero_
     sku: G4
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_pizero --grayscale --game {game} {search-targets} --batch-size-per-worker 200 {nce} --num-envs {envs} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 20 --visit-temp {visit-temp} --num-trainers 3 --num-simulations 10 --eval-simulations 25 {prioritized} --no-gpu-0-train --learning-rate {lr} --target-update-interval {uti}  --c1 {c1} --jumps 5 --replay-ratio {replay-ratio}  {reanalyze} --buffer-size 1000000  --training-start 60000 --adam-eps 1e-6
+      - NCCL_DEBUG=INFO python -m scripts.run_pizero --grayscale --game {game} {search-targets} --batch-size-per-worker 256 {nce} --num-envs {envs} --savedir ./out --optim adam --multistep {multistep} --epoch-steps 20 --visit-temp {visit-temp} --num-trainers 3 --num-simulations 10 --eval-simulations 25 {prioritized} --no-gpu-0-train --learning-rate {lr} --target-update-interval {uti}  --c1 {c1} --jumps 5 --replay-ratio {replay-ratio}  {reanalyze} --dirichlet-alpha {dalpha} --buffer-size 5000000  --training-start 60000 --adam-eps 1e-5
   type: grid
   max_trials: 24
   params:
@@ -43,34 +43,37 @@ search:
       values: ['ms_pacman']
     - name: nce
       spec: discrete
-      values: ['--no-nce --value-loss-weight 0.1']
+      values: ['--no-nce --value-loss-weight 0.25']
     - name: envs
       spec: discrete
       values: [64]
     - name: reanalyze
       spec: discrete
-      values: ['']
+      values: ['--reanalyze --num-reanalyze-envs 128 --debug-reanalyze']
     - name: uti
       spec: discrete
       values: [100]
     - name: multistep
       spec: discrete
-      values: [10]
+      values: [5]
     - name: c1
       spec: discrete
       values: [1.25]
     - name: search-targets
       spec: discrete
-      values: ['']
+      values: ['--no-search-value-targets --local-target-net']
     - name: visit-temp
       spec: discrete
       values: [0.5]
+    - name: dalpha
+      spec: discrete
+      values: [0.25, 0.2, 0.3]
     - name: replay-ratio
       spec: discrete
-      values: [2]
+      values: [2, 4, 8]
     - name: prioritized
       spec: discrete
-      values: ['']
+      values: ['--prioritized --input-priorities']
     - name: lr
       spec: discrete
-      values: [0.0001]
+      values: [0.0003]
