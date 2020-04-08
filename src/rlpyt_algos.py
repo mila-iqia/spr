@@ -128,6 +128,10 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
     """Distributional DQN with fixed probability bins for the Q-value of each
     action, a.k.a. categorical."""
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy
+
     def optim_initialize(self, rank=0):
         """Called in initilize or by async runner after forking sampler."""
         self.rank = rank
@@ -177,17 +181,6 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                 self.model.dynamics_model.parameters(), self.clip_grad_norm)
             self.optimizer.step()
             self.model_optimizer.step()
-            # else:
-            #     self.optimizer.zero_grad()
-            #     loss.backward()
-            #     grad_norm = torch.nn.utils.clip_grad_norm_(
-            #         self.model.stem_parameters(), self.clip_grad_norm)
-            #     self.optimizer.step()
-            #     self.model_optimizer.zero_grad()
-            #     model_loss.backward()
-            #     model_grad_norm = torch.nn.utils.clip_grad_norm_(
-            #         self.model.dynamics_model.parameters(), self.clip_grad_norm)
-            #     self.model_optimizer.step()
 
             if self.prioritized_replay:
                 self.replay_buffer.update_batch_priorities(td_abs_errors)

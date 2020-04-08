@@ -467,8 +467,14 @@ class VectorizedQMCTS(VectorizedMCTS):
             self.backup(self.id_final, sim_id, value)
 
         # Get action, policy and value from the root after the search has finished
+        # If choosing actions by search is disabled as a control experiment,
+        # just overwrite search-updated Q values.
+        if self.args.no_search_control:
+            self.q[:, 0] = initial_value.to(self.device)
         action = self.select_action()
         value = self.q[self.batch_range, 0, action]
+        if self.args.q_dirichlet:
+            self.remove_exploration_noise(initial_value.to(self.device))
 
         # end = time.time()
         # print("Searched {} environments with {} sims, took {}".format(obs.shape[0], self.n_sims, end-start))
