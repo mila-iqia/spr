@@ -29,13 +29,15 @@ class VectorizedMCTS:
         self.n_runs = n_runs
         self.n_sims = n_sims
         self.id_null = self.n_sims + 1
-        self.warmup_sims = min(self.n_sims // 3 + 1, n_actions)
+        self.warmup_sims = 2
         self.virtual_threads = args.virtual_threads
         self.vl_c = args.virtual_loss_c
         self.env_steps = 0
         self.cpu_search = args.cpu_search
         self.search_device = "cpu" if self.cpu_search else self.device
         self.eval = eval
+        if self.eval:
+            self.root_exploration_fraction = 0.
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
@@ -86,10 +88,9 @@ class VectorizedMCTS:
         #     return -self.virtual_loss
         valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
         if sim_id <= self.warmup_sims:
-            return -self.visit_count
+            return self.q
         values = self.q - (valid_indices * self.min_q[:, None, None])
         values /= (self.max_q - self.min_q)[:, None, None]
-        # values = valid_indices * values - self.virtual_loss
         values = valid_indices * values
         return values
 
@@ -207,8 +208,7 @@ class VectorizedMCTS:
 
             # Update q and count at the parent for the actions taken then
             self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
-            self.virtual_loss[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze() * \
-                                (self.vl_c / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()])**2)
+            # self.virtual_loss[self.batch_range, parent_id.squeeze(), actions.squeeze()] += (self.vl_c * not_done_mask.squeeze())
             values = ((self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] *
                        self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()]) + returns) \
                      / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] + 1)
@@ -242,16 +242,18 @@ class VectorizedMCTS:
     def select_action(self):
         t = self.visit_softmax_temperature()
         policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
-        action = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t)).sample()
-        # action = policy.sample()
+        if self.eval:
+            action = self.visit_count[:, 0].argmax(dim=-1)
+        else:
+            action = policy.sample()
         return action, policy.probs
 
     def visit_softmax_temperature(self):
         # TODO: Change the temperature schedule
         return self.visit_temp
-        # if self.eval:
-        #     return 0.25
-        # if self.env_steps < 5e6:
+        # if self.env_steps < 1e5:
+        #     return 1.
+        # if self.env_steps < 1e6:
         #     return 0.5
         # return 0.25
 
