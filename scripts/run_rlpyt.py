@@ -176,6 +176,7 @@ if __name__ == "__main__":
     parser.add_argument('--latent-size', type=int, default=256)
     parser.add_argument('--virtual-threads', type=int, default=3)
     parser.add_argument('--q-dirichlet', type=int, default=0)
+    parser.add_argument('--no-search-control', type=int, default=0, help='Do search to adjust replay ratio etc, but take actions based on original q values')
     parser.add_argument('--search-epsilon', type=float, default=0.01, help='Epsilon for search e-greedy')
     parser.add_argument('--virtual-loss-c', type=int, default=1.)
     parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')

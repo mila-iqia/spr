@@ -194,9 +194,12 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
         return conv_out
 
-    def head_forward(self, conv_out, prev_action, prev_reward):
+    def head_forward(self, conv_out, prev_action, prev_reward, target=False):
         lead_dim, T, B, img_shape = infer_leading_dims(conv_out, 3)
-        p = self.head(conv_out)
+        if target:
+            p = self.target_head(conv_out)
+        else:
+            p = self.head(conv_out)
         p = F.softmax(p, dim=-1)
 
         # Restore leading dimensions: [T,B], [B], or [], as input.
@@ -233,7 +236,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 pred_reward.append(pred_rew)
                 pred_ps.append(self.head_forward(latent,
                                                  prev_action[j],
-                                                 prev_reward[j]))
+                                                 prev_reward[j],
+                                                 target=self.detach_model))
 
             # end = time.time()
             # print("Forward took {}".format(end - start))
