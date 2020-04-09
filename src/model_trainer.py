@@ -556,7 +556,7 @@ class MCTSModel(nn.Module):
                        current_reward_loss*self.args.reward_loss_weight -
                        pred_entropy * self.args.entropy_loss_weight).mean())
 
-            total_losses[i] += is_weights * (current_value_loss*self.args.value_loss_weight +
+            total_losses[i] += (current_value_loss*self.args.value_loss_weight +
                                 current_policy_loss*self.args.policy_loss_weight +
                                 current_reward_loss*self.args.reward_loss_weight +
                                 pred_entropy*self.args.entropy_loss_weight).detach().mean().cpu().item()
