@@ -546,17 +546,17 @@ class MCTSModel(nn.Module):
             pred_reward = F.log_softmax(pred_reward, -1)
             pred_policy = F.log_softmax(pred_policy, -1)
 
-            current_reward_loss = -torch.sum(reward_target * pred_reward, -1).mean()
-            current_value_loss = -torch.sum(value_target * pred_value, -1).mean()
-            current_policy_loss = -torch.sum(policies[i] * pred_policy, -1).mean()
+            current_reward_loss = -torch.sum(reward_target * pred_reward, -1)
+            current_value_loss = -torch.sum(value_target * pred_value, -1)
+            current_policy_loss = -torch.sum(policies[i] * pred_policy, -1)
 
             loss = loss + loss_scale * (is_weights * (
                        current_value_loss*self.args.value_loss_weight +
                        current_policy_loss*self.args.policy_loss_weight +
                        current_reward_loss*self.args.reward_loss_weight -
-                       pred_entropy * self.args.entropy_loss_weight))
+                       pred_entropy * self.args.entropy_loss_weight).mean())
 
-            total_losses[i] += (current_value_loss*self.args.value_loss_weight +
+            total_losses[i] += is_weights * (current_value_loss*self.args.value_loss_weight +
                                 current_policy_loss*self.args.policy_loss_weight +
                                 current_reward_loss*self.args.reward_loss_weight +
                                 pred_entropy*self.args.entropy_loss_weight).detach().mean().cpu().item()
