@@ -36,8 +36,6 @@ class VectorizedMCTS:
         self.cpu_search = args.cpu_search
         self.search_device = "cpu" if self.cpu_search else self.device
         self.eval = eval
-        if self.eval:
-            self.root_exploration_fraction = 0.
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
@@ -460,8 +458,15 @@ class VectorizedQMCTS(VectorizedMCTS):
 class VectorizedQSimMCTS(VectorizedMCTS):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.root_exploration_fraction = 0.
         self.warmup_sims = self.num_actions
+        self.eps_init = 1.
+        self.eps = 1.
+        self.eps_final = 0.01
+        self.eps_decay_final_steps = int(1e6)
+
+    def set_epsilon(self, env_steps):
+        prog = min(1, max(0, env_steps - self.args.training_start) / (self.eps_decay_final_steps - self.args.training_start))
+        self.eps = prog * self.eps_final + (1 - prog) * self.eps_init
 
     def value_score(self, sim_id):
         """normalized_q(s,a)."""
@@ -470,10 +475,9 @@ class VectorizedQSimMCTS(VectorizedMCTS):
             return -self.visit_count
 
     def select_action(self):
-        epsilon = self.args.epsilon
         if self.eval:
-            epsilon *= 0.1
-        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.search_device) < epsilon).long()
+            self.eps = 0.001
+        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.search_device) < self.eps).long()
         random_actions = torch.randint(self.num_actions, size=(self.n_runs,), device=self.search_device)
         max_actions = self.q[:, 0].argmax(dim=-1)
         actions = e_action * random_actions + (1-e_action) * max_actions
