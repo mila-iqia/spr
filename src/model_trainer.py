@@ -113,7 +113,8 @@ class TrainingWorker(object):
             self.args.device = torch.device('cpu')
             self.backend = 'gloo'
 
-        setup(self.rank, self.size, self.args.seed, self.port, self.backend)
+        if self.args.num_trainers > 1:
+            setup(self.rank, self.size, self.args.seed, self.port, self.backend)
         self.model, self.optimizer, self.scheduler = create_network(self.args)
         print("{} started on gpu {}".format(self.rank, self.args.device),flush=True)
         if self.rank == 0:
@@ -387,6 +388,7 @@ class MCTSModel(nn.Module):
         reward = inverse_transform(from_categorical(reward_logits, logits=True))
         return NetworkOutput(hidden_state, reward, policy_logits, value)
 
+    @torch.no_grad()
     def value_target_network(self, obs, actions):
         if len(obs.shape) < 5:
             obs = obs.unsqueeze(0)

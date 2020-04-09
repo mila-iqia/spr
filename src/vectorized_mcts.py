@@ -29,7 +29,7 @@ class VectorizedMCTS:
         self.n_runs = n_runs
         self.n_sims = n_sims
         self.id_null = self.n_sims + 1
-        self.warmup_sims = 2
+        self.warmup_sims = n_actions
         self.virtual_threads = args.virtual_threads
         self.vl_c = args.virtual_loss_c
         self.env_steps = 0
@@ -455,6 +455,29 @@ class VectorizedQMCTS(VectorizedMCTS):
         max_actions = self.q[:, 0].argmax(dim=-1)
         actions = e_action * random_actions + (1-e_action) * max_actions
         return actions
+
+
+class VectorizedQSimMCTS(VectorizedMCTS):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.root_exploration_fraction = 0.
+        self.warmup_sims = self.num_actions
+
+    def value_score(self, sim_id):
+        """normalized_q(s,a)."""
+        # valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
+        if sim_id <= self.warmup_sims:
+            return -self.visit_count
+
+    def select_action(self):
+        epsilon = self.args.epsilon
+        if self.eval:
+            epsilon *= 0.1
+        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.search_device) < epsilon).long()
+        random_actions = torch.randint(self.num_actions, size=(self.n_runs,), device=self.search_device)
+        max_actions = self.q[:, 0].argmax(dim=-1)
+        actions = e_action * random_actions + (1-e_action) * max_actions
+        return actions, self.prior[:, 0]
 
 
 class AsyncEval:

@@ -19,7 +19,7 @@ import wandb
 import numpy as np
 import gym
 
-from src.vectorized_mcts import VectorizedMCTS, AsyncEval, VectorizedQMCTS
+from src.vectorized_mcts import VectorizedMCTS, AsyncEval, VectorizedQMCTS, VectorizedQSimMCTS
 
 
 def run_pizero(args):
@@ -81,15 +81,15 @@ def run_pizero(args):
                                               target_network,
                                               eval=True)
     else:
-        vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs,
-                                         args.num_simulations,
-                                         target_network)
-        eval_vectorized_mcts = VectorizedMCTS(args,
-                                              env.action_space[0].n,
-                                              args.evaluation_episodes,
-                                              args.eval_simulations,
-                                              target_network,
-                                              eval=True)
+        vectorized_mcts = VectorizedQSimMCTS(args, env.action_space[0].n, args.num_envs,
+                                             env.action_space[0].n,
+                                             target_network)
+        eval_vectorized_mcts = VectorizedQSimMCTS(args,
+                                                  env.action_space[0].n,
+                                                  args.evaluation_episodes,
+                                                  env.action_space[0].n,
+                                                  target_network,
+                                                  eval=True)
 
     async_eval = AsyncEval(eval_vectorized_mcts)
     total_episodes = 0
@@ -188,7 +188,7 @@ def run_pizero(args):
                     print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
                     wandb.log({'eval_env_steps': eval_env_step, 'Average Eval Score': avg_reward})
 
-            if env_steps % args.evaluation_interval == 0 and env_steps > 0:
+            if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
                 print("Starting evaluation run")
                 eval_state_dict = copy.deepcopy(network.state_dict())
                 async_eval.send_queue.put(('evaluate', env_steps, eval_state_dict))
@@ -199,6 +199,7 @@ def run_pizero(args):
             env_steps += args.num_envs
             vectorized_mcts.env_steps = env_steps
             eval_vectorized_mcts.env_steps = env_steps
+            print(env_steps)
 
     except (KeyboardInterrupt, Exception):
         traceback.print_exc()
