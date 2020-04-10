@@ -147,7 +147,7 @@ class VectorizedMCTS:
         self.env_steps = 0
         self.eval = eval
         if self.eval:
-            self.visit_temp = self.visit_temp / 2.
+            self.root_exploration_fraction = 0.
         self.initialize_on_device("cpu") # Need to have a CPU setup to generate examples.
 
     def set_eval(self):

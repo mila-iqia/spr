@@ -29,13 +29,15 @@ class VectorizedMCTS:
         self.n_runs = n_runs
         self.n_sims = n_sims
         self.id_null = self.n_sims + 1
-        self.warmup_sims = min(self.n_sims // 3 + 1, n_actions)
+        self.warmup_sims = 2
         self.virtual_threads = args.virtual_threads
         self.vl_c = args.virtual_loss_c
         self.env_steps = 0
         self.cpu_search = args.cpu_search
         self.search_device = "cpu" if self.cpu_search else self.device
         self.eval = eval
+        if self.eval:
+            self.root_exploration_fraction = 0.
 
         # Initialize search tensors on the current device.
         # These are overwritten rather than reinitalized.
@@ -86,7 +88,7 @@ class VectorizedMCTS:
         #     return -self.virtual_loss
         valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
         if sim_id <= self.warmup_sims:
-            return -self.visit_count
+            return self.q
         values = self.q - (valid_indices * self.min_q[:, None, None])
         values /= (self.max_q - self.min_q)[:, None, None]
         values = valid_indices * values
@@ -240,7 +242,10 @@ class VectorizedMCTS:
     def select_action(self):
         t = self.visit_softmax_temperature()
         policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
-        action = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t)).sample()
+        if self.eval:
+            action = self.visit_count[:, 0].argmax(dim=-1)
+        else:
+            action = policy.sample()
         return action, policy.probs
 
     def visit_softmax_temperature(self):
