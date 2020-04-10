@@ -8,7 +8,8 @@ from rlpyt.models.utils import scale_grad
 from rlpyt.runners.async_rl import AsyncRlEval
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
 from rlpyt.utils.tensor import infer_leading_dims, restore_leading_dims
-from src.model_trainer import ValueNetwork, TransitionModel, RepNet, NetworkOutput, from_categorical, ScaleGradient
+from src.model_trainer import ValueNetwork, TransitionModel, RepNet,\
+    NetworkOutput, from_categorical, ScaleGradient, BlockNCE, init
 import numpy as np
 from rlpyt.utils.logging import logger
 import wandb
@@ -146,7 +147,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             grayscale=True,
             actions=False,
             jumps=0,
-            detach_model=True
+            detach_model=True,
+            nce=False,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -156,6 +158,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.conv = RepNet(framestack, grayscale, actions)
         self.jumps = jumps
         self.detach_model = detach_model
+        self.nce = nce
         # conv_out_size = self.conv.conv_out_size(h, w)
         # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
         # self.reward_network = ValueNetwork(conv_out_size)
@@ -169,6 +172,15 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                               pixels=30,
                                               limit=1,
                                               blocks=16)
+
+        if self.nce:
+            self.nce_target_encoder = SmallEncoder(256, 1 if grayscale else 3)
+            self.classifier = nn.Sequential(nn.Linear(256, 256),
+                                            nn.ReLU(),
+                                            nn.Linear(256, 256),
+                                            nn.ReLU())
+            self.nce = BlockNCE(self.classifier,
+                                use_self_targets=False)
 
         if self.detach_model:
             if dueling:
@@ -213,12 +225,16 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         if jumps:
             pred_ps = []
             pred_reward = []
+            pred_latents = []
+            target_latents = []
             latent = self.stem_forward(observation[0],
                                        prev_action[0],
                                        prev_reward[0])
             pred_ps.append(self.head_forward(latent,
                                              prev_action[0],
                                              prev_reward[0]),)
+
+            pred_latents.append(latent)
 
             if self.detach_model and self.jumps > 0:
                 # copy_start = time.time()
@@ -232,6 +248,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
             for j in range(1, self.jumps + 1):
                 latent, pred_rew, _, _ = self.step(latent, prev_action[j])
+                pred_latents.append(latent)
                 latent = ScaleGradient.apply(latent, 0.5)
                 pred_reward.append(pred_rew)
                 pred_ps.append(self.head_forward(latent,
@@ -239,9 +256,31 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  prev_reward[j],
                                                  target=self.detach_model))
 
+            if self.nce:
+                target_images = observation[0:self.jumps + 1, :, 0].transpose(0, 1)
+                target_images = target_images.type(torch.float)  # Expect torch.uint8 inputs
+                target_images = target_images.mul_(1. / 255)  # From [0-255] to [0-1], in place.
+                if len(target_images.shape) == 4:
+                    target_images = target_images.unsqueeze(2)
+                target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
+                target_latents = target_latents.view(observation.shape[1], -1,
+                                                     *target_latents.shape[1:])
+                target_latents = target_latents.flatten(3, 4).permute(3, 0, 1, 2)
+                target_latents = target_latents.permute(0, 2, 1, 3)
+                nce_input = torch.stack(pred_latents, 1).flatten(3, 4).permute(3, 1, 0, 2)
+                nce_loss, nce_accs = self.nce.forward(nce_input, target_latents)
+                nce_loss = nce_loss.mean(0)
+                nce_accs = nce_accs.mean()
+
+            else:
+                nce_loss = 0
+                nce_accs = 0
+
             # end = time.time()
             # print("Forward took {}".format(end - start))
-            return pred_ps, [F.log_softmax(ps, -1) for ps in pred_reward]
+            return pred_ps,\
+                   [F.log_softmax(ps, -1) for ps in pred_reward],\
+                   nce_loss, nce_accs
 
         else:
             img = observation.type(torch.float)  # Expect torch.uint8 inputs
@@ -348,3 +387,34 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
         x = self.advantage_out(x)
         x = x.view(-1, self._output_size, self._n_atoms)
         return x + self.advantage_bias
+
+
+class SmallEncoder(nn.Module):
+    def __init__(self, feature_size, input_channels):
+        super().__init__()
+        self.feature_size = feature_size
+        self.input_channels = input_channels
+        init_ = lambda m: init(m,
+                               nn.init.orthogonal_,
+                               lambda x: nn.init.constant_(x, 0),
+                               nn.init.calculate_gain('relu'))
+
+        self.main = nn.Sequential(
+            init_(nn.Conv2d(self.input_channels, 32, 8, stride=2, padding=3)),  # 48x48
+            nn.ReLU(),
+            nn.BatchNorm2d(32),
+            init_(nn.Conv2d(32, 64, 4, stride=2, padding=1)),  # 24x24
+            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            init_(nn.Conv2d(64, 128, 4, stride=2, padding=1)),  # 12 x 12
+            nn.ReLU(),
+            nn.BatchNorm2d(128),
+            init_(nn.Conv2d(128, self.feature_size, 4, stride=2, padding=1)),  # 6 x 6
+            nn.ReLU(),
+            init_(nn.Conv2d(self.feature_size, self.feature_size, 1, stride=1, padding=0)),
+            nn.ReLU())
+        self.train()
+
+    def forward(self, inputs):
+        fmaps = self.main(inputs)
+        return fmaps

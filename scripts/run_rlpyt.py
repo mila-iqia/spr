@@ -55,6 +55,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     if model:
         config["model"]["jumps"] = args.jumps
         config["model"]["detach_model"] = detach_model
+        config["model"]["nce"] = args.nce
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
@@ -97,8 +98,8 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
     config['env']['game'] = game
     config["eval_env"]["game"] = config["env"]["game"]
     config["algo"]["n_step_return"] = 5
-    config["algo"]["batch_size"] = 256
-    config["algo"]["learning_rate"] = 1.25e-4
+    config["algo"]["batch_size"] = 128
+    config["algo"]["learning_rate"] = 6.25e-5
     # config["sampler"]["max_decorrelation_steps"] = 0
     # config["algo"]["min_steps_learn"] = 2e4
     config['sampler']['batch_B'] = 16
@@ -119,6 +120,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
     if model:
         config["model"]["jumps"] = args.jumps
         config["model"]["detach_model"] = detach_model
+        config["model"]["nce"] = args.nce
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
@@ -165,9 +167,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='ms_pacman')
     parser.add_argument('--debug', action="store_true")
-    parser.add_argument('--model', action="store_true")
+    parser.add_argument('--learn-model', action="store_true")
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=4)
+    parser.add_argument('--nce', type=int, default=0)
     parser.add_argument('--detach-model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     # MCTS arguments
@@ -184,18 +187,18 @@ if __name__ == "__main__":
     parser.add_argument('--visit-temp', type=float, default=0.5, help='Visit counts softmax temperature for sampling actions')
 
     args = parser.parse_args()
-    wandb.init(project='rlpyt', entity='abs-world-models')
+    wandb.init(project='rlpyt', entity='abs-world-models', config=args)
     if args.debug:
         debug_build_and_train(game=args.game,
                               cuda_idx=args.debug_cuda_idx,
-                              model=args.model,
+                              model=args.learn_model,
                               detach_model=args.detach_model,
                               args=args,
                               )
     else:
         build_and_train(
             game=args.game,
-            model=args.model,
+            model=args.learn_model,
             detach_model=args.detach_model,
             args=args,
         )
