@@ -15,7 +15,7 @@ from rlpyt.samplers.async_.gpu_sampler import AsyncGpuSampler
 from rlpyt.samplers.parallel.gpu.sampler import GpuSampler
 from rlpyt.samplers.serial.sampler import SerialSampler
 from rlpyt.samplers.parallel.gpu.collectors import GpuWaitResetCollector
-from rlpyt.envs.atari.atari_env import AtariEnv, AtariTrajInfo
+from rlpyt.envs.atari.atari_env import AtariTrajInfo
 from rlpyt.algos.dqn.dqn import DQN
 from rlpyt.agents.dqn.atari.atari_dqn_agent import AtariDqnAgent
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
@@ -28,6 +28,7 @@ import psutil
 from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
 from src.rlpyt_agents import DQNSearchAgent
+from src.rlpyt_atari_env import AtariEnv
 
 
 def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach_model=1, args=None):
@@ -56,6 +57,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["jumps"] = args.jumps
         config["model"]["detach_model"] = detach_model
         config["model"]["nce"] = args.nce
+        config["model"]["augmentation"] = args.augmentation
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
@@ -121,6 +123,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
         config["model"]["jumps"] = args.jumps
         config["model"]["detach_model"] = detach_model
         config["model"]["nce"] = args.nce
+        config["model"]["augmentation"] = args.augmentation
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
@@ -171,6 +174,7 @@ if __name__ == "__main__":
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=4)
     parser.add_argument('--nce', type=int, default=0)
+    parser.add_argument('--augmentation', type=int, default=0)
     parser.add_argument('--detach-model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     # MCTS arguments

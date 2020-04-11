@@ -1,10 +1,12 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+from torchvision.transforms import Compose, RandomCrop,\
+    ToPILImage, ToTensor, RandomChoice, RandomAffine, CenterCrop
 
 from rlpyt.models.dqn.atari_catdqn_model import DistributionalHeadModel
 from rlpyt.models.dqn.dueling import DistributionalDuelingHeadModel
-from rlpyt.models.utils import scale_grad
+from rlpyt.models.utils import scale_grad, update_state_dict
 from rlpyt.runners.async_rl import AsyncRlEval
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
 from rlpyt.utils.tensor import infer_leading_dims, restore_leading_dims
@@ -149,6 +151,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             jumps=0,
             detach_model=True,
             nce=False,
+            augmentation=False,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -159,17 +162,21 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.jumps = jumps
         self.detach_model = detach_model
         self.nce = nce
+        self.augmentation = augmentation
+        self.pixels = 25 if self.augmentation else 36
         # conv_out_size = self.conv.conv_out_size(h, w)
         # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
         # self.reward_network = ValueNetwork(conv_out_size)
         if dueling:
-            self.head = PizeroDistributionalDuelingHeadModel(256, output_size)
+            self.head = PizeroDistributionalDuelingHeadModel(256, output_size,
+                                                             pixels=self.pixels)
         else:
-            self.head = PizeroDistributionalHeadModel(256, output_size)
+            self.head = PizeroDistributionalHeadModel(256, output_size,
+                                                      pixels=self.pixels)
 
         self.dynamics_model = TransitionModel(channels=256,
                                               num_actions=output_size,
-                                              pixels=30,
+                                              pixels=self.pixels,
                                               limit=1,
                                               blocks=16)
 
@@ -184,22 +191,42 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         if self.detach_model:
             if dueling:
-                self.target_head = PizeroDistributionalDuelingHeadModel(256, output_size)
+                self.target_head = PizeroDistributionalDuelingHeadModel(256, output_size, pixels=self.pixels)
             else:
-                self.target_head = PizeroDistributionalHeadModel(256, output_size)
+                self.target_head = PizeroDistributionalHeadModel(256, output_size, pixels=self.pixels)
 
             for param in self.target_head.parameters():
                 param.requires_grad = False
 
+        if self.augmentation:
+            transforms = list()
+            transforms.append(ToPILImage())
+            transforms.append(RandomCrop((84, 84)))
+            transforms.append(ToTensor())
+            self.transforms = Compose(transforms)
+            eval_transforms = list()
+            eval_transforms.append(ToPILImage())
+            eval_transforms.append(CenterCrop((84, 84)))
+            eval_transforms.append(ToTensor())
+            self.eval_transforms = Compose(eval_transforms)
+
+    def transform(self, images, eval=False):
+        if not self.augmentation:
+            return images.float()/255. if \
+                images.dtype == torch.uint8 else images
+        flat_images = images.view(-1, *images.shape[-3:])
+        transforms = self.eval_transforms if eval else self.transforms
+        processed_images = [transforms(i.cpu()) for i in flat_images]
+        processed_images = torch.stack(processed_images).to(images.device)
+        processed_images.view(*images.shape[:-3], *processed_images.shape[1:])
+        return processed_images
+
     def stem_parameters(self):
         return list(self.conv.parameters()) + list(self.head.parameters())
 
-    def stem_forward(self, observation, prev_action, prev_reward):
+    def stem_forward(self, img, prev_action, prev_reward):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
-        img = observation.type(torch.float)  # Expect torch.uint8 inputs
-        img = img.mul_(1. / 255)  # From [0-255] to [0-1], in place.
-
         # Infer (presence of) leading dimensions: [T,B], [B], or [].
         lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
 
@@ -226,8 +253,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             pred_ps = []
             pred_reward = []
             pred_latents = []
-            target_latents = []
-            latent = self.stem_forward(observation[0],
+            input_obs = self.transform(observation[0])
+            latent = self.stem_forward(input_obs,
                                        prev_action[0],
                                        prev_reward[0])
             pred_ps.append(self.head_forward(latent,
@@ -235,6 +262,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                              prev_reward[0]),)
 
             pred_latents.append(latent)
+
 
             if self.detach_model and self.jumps > 0:
                 # copy_start = time.time()
@@ -258,8 +286,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
             if self.nce:
                 target_images = observation[0:self.jumps + 1, :, 0].transpose(0, 1)
-                target_images = target_images.type(torch.float)  # Expect torch.uint8 inputs
-                target_images = target_images.mul_(1. / 255)  # From [0-255] to [0-1], in place.
+                target_images = self.transform(target_images)
                 if len(target_images.shape) == 4:
                     target_images = target_images.unsqueeze(2)
                 target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
@@ -283,8 +310,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                    nce_loss, nce_accs
 
         else:
-            img = observation.type(torch.float)  # Expect torch.uint8 inputs
-            img = img.mul_(1. / 255)  # From [0-255] to [0-1], in place.
+            # img = observation.type(torch.float)  # Expect torch.uint8 inputs
+            # img = img.mul_(1. / 255)  # From [0-255] to [0-1], in place.
+            img = self.transform(observation, True)
 
             # Infer (presence of) leading dimensions: [T,B], [B], or [].
             lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
@@ -298,6 +326,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             return p
 
     def initial_inference(self, obs, actions=None, logits=False):
+        obs = self.transform(obs, True)
         if len(obs.shape) == 5:
             obs = obs.flatten(1, 2)
         hidden_state = self.conv(obs, actions)
