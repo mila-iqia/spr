@@ -52,6 +52,7 @@ def run_pizero(args):
     print("Received target network from trainer")
     target_network = copy.deepcopy(network)
     target_network.to(args.device)
+    target_network.eval()
     target_network.share_memory()
 
     if args.reanalyze:
@@ -154,7 +155,7 @@ def run_pizero(args):
             if force_wait:
                 print("Runner waiting; needs more train steps to continue")
 
-            if force_wait or not send_queue.empty():
+            if force_wait:
                 steps, log = send_queue.get()
                 log_results(log, steps)
                 total_train_steps = steps
@@ -190,7 +191,7 @@ def run_pizero(args):
 
             if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
                 print("Starting evaluation run")
-                eval_state_dict = copy.deepcopy(network.state_dict())
+                eval_state_dict = copy.deepcopy(target_network.state_dict())
                 async_eval.send_queue.put(('evaluate', env_steps, eval_state_dict))
                 del eval_state_dict
                 torch.cuda.empty_cache()

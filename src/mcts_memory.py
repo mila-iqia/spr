@@ -102,6 +102,7 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                 values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
                 batch = list(batch)
                 batch = SamplesFromReplayExt(*batch, policy_probs=policies, values=values)
+                return batch
                 return self.sanitize_batch(batch)
             except:
                 print("FAILED TO LOAD BATCH")
@@ -118,10 +119,10 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                 continue
             batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
             batch.policy_probs[ind+1:, i] = batch.policy_probs[ind, i]
-            batch.all_reward[ind+1:, i] = 0
-            batch.return_[ind+1:, i] = 0
+            batch.all_reward[ind+1:, i] = batch.all_reward[ind, i]
+            batch.return_[ind+1:, i] = batch.return_[ind, i]
             batch.done_n[ind+1:, i] = True
-            batch.values[ind:, i] = 0
+            batch.values[ind+1:, i] = batch.values[ind, i]
         return batch
 
 
@@ -149,6 +150,7 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                 values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
                 batch = list(batch)
                 batch = SamplesFromReplayPriExt(*batch, is_weights=is_weights, policy_probs=policies, values=values)
+                return batch
                 return self.sanitize_batch(batch)
             except Exception as e:
                 print("FAILED TO LOAD BATCH")

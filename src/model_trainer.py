@@ -453,6 +453,7 @@ class MCTSModel(nn.Module):
             values = values.float().to(self.args.device)
             return_ = return_.float().to(self.args.device)
             done_n = 1 - done_n.float().to(self.args.device)
+            done = done.float().to(self.args.device)
             initial_actions = actions[0]
 
             if self.use_target_network:
@@ -516,6 +517,7 @@ class MCTSModel(nn.Module):
                                 pred_value))
             pred_states.append(current_state)
 
+        not_done_mask = torch.ones_like(done[0], device=self.args.device)
         for i, prediction in enumerate(predictions):
             # recall that predictions_i is r_i, pi_i+1, v_i+1
             loss_scale, pred_reward, pred_policy, pred_value = prediction
@@ -527,7 +529,7 @@ class MCTSModel(nn.Module):
 
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
-            reward_target = to_categorical(transform(rewards[i]))
+            reward_target = to_categorical(transform(rewards[i+1]))
 
             pred_rewards.append(inverse_transform(from_categorical(
                 pred_reward.detach(), logits=True)))
@@ -550,7 +552,7 @@ class MCTSModel(nn.Module):
             current_value_loss = -torch.sum(value_target * pred_value, -1)
             current_policy_loss = -torch.sum(policies[i] * pred_policy, -1)
 
-            loss = loss + loss_scale * (is_weights * (
+            loss = loss + loss_scale * (not_done_mask * is_weights * (
                        current_value_loss*self.args.value_loss_weight +
                        current_policy_loss*self.args.policy_loss_weight +
                        current_reward_loss*self.args.reward_loss_weight -
@@ -564,6 +566,7 @@ class MCTSModel(nn.Module):
             reward_losses.append(current_reward_loss.detach().mean().cpu().item())
             value_losses.append(current_value_loss.detach().mean().cpu().item())
             policy_losses.append(current_policy_loss.detach().mean().cpu().item())
+            not_done_mask *= (1 - done[i])
 
         if not self.no_nce:
             # if self.use_all_targets:
@@ -753,9 +756,9 @@ class FiLMResidualBlock(nn.Module):
         self.block = nn.Sequential(
             Conv2dSame(in_channels, out_channels, 3),
             nn.ReLU(),
-            nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels, momentum=None),
             Conv2dSame(out_channels, out_channels, 3),
-            nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels, momentum=None),
         )
 
     def forward(self, x, a):

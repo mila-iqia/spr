@@ -462,7 +462,7 @@ class VectorizedQSimMCTS(VectorizedMCTS):
         self.eps_init = 1.
         self.eps = 1.
         self.eps_final = 0.01
-        self.eps_decay_final_steps = int(1e6)
+        self.eps_decay_final_steps = int(2.5e5)
 
     def set_epsilon(self, env_steps):
         prog = min(1, max(0, env_steps - self.args.training_start) / (self.eps_decay_final_steps - self.args.training_start))
@@ -515,6 +515,7 @@ def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
             command, env_step, network = send_queue.get()
             if command == 'evaluate':
                 eval_mcts.network.load_state_dict(network)
+                eval_mcts.network.eval()
                 avg_reward = eval_mcts.evaluate(env_step)
                 recieve_queue.put(((env_step, avg_reward), True))
                 del network
