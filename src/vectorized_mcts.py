@@ -29,7 +29,7 @@ class VectorizedMCTS:
         self.n_runs = n_runs
         self.n_sims = n_sims
         self.id_null = self.n_sims + 1
-        self.warmup_sims = n_actions
+        self.warmup_sims = 2
         self.virtual_threads = args.virtual_threads
         self.vl_c = args.virtual_loss_c
         self.env_steps = 0
@@ -110,6 +110,7 @@ class VectorizedMCTS:
         hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
         self.prior[:, 0] = F.softmax(policy_logits, dim=-1).to(self.search_device)
+        self.q[:, 0, :] = initial_value.unsqueeze(-1)
         self.add_exploration_noise()
 
         for sim_id in range(1, self.n_sims+1):
@@ -159,6 +160,7 @@ class VectorizedMCTS:
             self.hidden_state[:, sim_id, :] = hidden_state
             self.reward[self.batch_range, sim_id, self.actions_final.squeeze()] = reward.to(self.search_device)
             self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1).to(self.search_device)
+            self.q[:, sim_id, :] = value.unsqueeze(-1)
 
             # Store the pointers from parent to new node and back.
             self.id_children[self.batch_range, self.id_final.squeeze(), self.actions_final.squeeze()] = sim_id
@@ -205,11 +207,11 @@ class VectorizedMCTS:
             returns = returns*self.args.discount + reward
 
             # Update q and count at the parent for the actions taken then
-            self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
             # self.virtual_loss[self.batch_range, parent_id.squeeze(), actions.squeeze()] += (self.vl_c * not_done_mask.squeeze())
             values = ((self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] *
                        self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()]) + returns) \
                      / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] + 1)
+            self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
             values *= not_done_mask.squeeze()
             self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] = values
             values = values.squeeze()
@@ -515,7 +517,6 @@ def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
             command, env_step, network = send_queue.get()
             if command == 'evaluate':
                 eval_mcts.network.load_state_dict(network)
-                eval_mcts.network.eval()
                 avg_reward = eval_mcts.evaluate(env_step)
                 recieve_queue.put(((env_step, avg_reward), True))
                 del network

@@ -52,7 +52,7 @@ def run_pizero(args):
     print("Received target network from trainer")
     target_network = copy.deepcopy(network)
     target_network.to(args.device)
-    target_network.eval()
+    # target_network.eval()
     target_network.share_memory()
 
     if args.reanalyze:
@@ -82,13 +82,13 @@ def run_pizero(args):
                                               target_network,
                                               eval=True)
     else:
-        vectorized_mcts = VectorizedQSimMCTS(args, env.action_space[0].n, args.num_envs,
-                                             env.action_space[0].n,
+        vectorized_mcts = VectorizedMCTS(args, env.action_space[0].n, args.num_envs,
+                                             args.num_simulations,
                                              target_network)
-        eval_vectorized_mcts = VectorizedQSimMCTS(args,
+        eval_vectorized_mcts = VectorizedMCTS(args,
                                                   env.action_space[0].n,
                                                   args.evaluation_episodes,
-                                                  env.action_space[0].n,
+                                                  args.eval_simulations,
                                                   target_network,
                                                   eval=True)
 
@@ -199,7 +199,7 @@ def run_pizero(args):
             obs.copy_(torch.from_numpy(next_obs))
             env_steps += args.num_envs
             vectorized_mcts.env_steps = env_steps
-            vectorized_mcts.set_epsilon(env_steps)
+            # vectorized_mcts.set_epsilon(env_steps)
             eval_vectorized_mcts.env_steps = env_steps
 
     except (KeyboardInterrupt, Exception):
