@@ -529,7 +529,7 @@ class MCTSModel(nn.Module):
 
             value_targets.append(value_target)
             value_target = to_categorical(transform(value_target))
-            reward_target = to_categorical(transform(rewards[i+1]))
+            reward_target = to_categorical(transform(rewards[i]))
 
             pred_rewards.append(inverse_transform(from_categorical(
                 pred_reward.detach(), logits=True)))
@@ -626,13 +626,13 @@ class SmallEncoder(nn.Module):
         self.main = nn.Sequential(
             init_(nn.Conv2d(self.input_channels, 32, 8, stride=2, padding=3)),  # 48x48
             nn.ReLU(),
-            nn.BatchNorm2d(32),
+            nn.BatchNorm2d(32, momentum=0.01),
             init_(nn.Conv2d(32, 64, 4, stride=2, padding=1)),  # 24x24
             nn.ReLU(),
-            nn.BatchNorm2d(64),
+            nn.BatchNorm2d(64, momentum=0.01),
             init_(nn.Conv2d(64, 128, 4, stride=2, padding=1)),  # 12 x 12
             nn.ReLU(),
-            nn.BatchNorm2d(128),
+            nn.BatchNorm2d(128, momentum=0.01),
             init_(nn.Conv2d(128, self.feature_size, 4, stride=2, padding=1)),  # 6 x 6
             nn.ReLU(),
             init_(nn.Conv2d(self.feature_size, self.feature_size, 1, stride=1, padding=0)),
@@ -658,7 +658,7 @@ class TransitionModel(nn.Module):
         self.args = args
         layers = [Conv2dSame(channels+action_dim, hidden_size, 3),
                   nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size)]
+                  nn.BatchNorm2d(hidden_size, momentum=0.01)]
         for _ in range(blocks):
             layers.append(ResidualBlock(hidden_size, hidden_size))
         layers.extend([Conv2dSame(hidden_size, channels, 3),
@@ -756,9 +756,9 @@ class FiLMResidualBlock(nn.Module):
         self.block = nn.Sequential(
             Conv2dSame(in_channels, out_channels, 3),
             nn.ReLU(),
-            nn.BatchNorm2d(out_channels, momentum=None),
+            nn.BatchNorm2d(out_channels),
             Conv2dSame(out_channels, out_channels, 3),
-            nn.BatchNorm2d(out_channels, momentum=None),
+            nn.BatchNorm2d(out_channels),
         )
 
     def forward(self, x, a):
@@ -776,9 +776,9 @@ class ResidualBlock(nn.Module):
         self.block = nn.Sequential(
             Conv2dSame(in_channels, out_channels, 3),
             nn.ReLU(),
-            nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels, momentum=0.01),
             Conv2dSame(out_channels, out_channels, 3),
-            nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels, momentum=0.01),
         )
 
     def forward(self, x):
@@ -809,7 +809,7 @@ class QNetwork(nn.Module):
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size),
+                  nn.BatchNorm2d(hidden_size, affine=False, momentum=0.01),
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 512),
                   nn.ReLU(),
@@ -832,7 +832,7 @@ class ValueNetwork(nn.Module):
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size),
+                  nn.BatchNorm2d(hidden_size, affine=False, momentum=0.01),
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
@@ -850,7 +850,7 @@ class PolicyNetwork(nn.Module):
         self.hidden_size = hidden_size
         layers = [Conv2dSame(input_channels, hidden_size, 3),
                   nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size),
+                  nn.BatchNorm2d(hidden_size, affine=False, momentum=0.01),
                   nn.Flatten(-3, -1),
                   init_small(nn.Linear(pixels * hidden_size, num_actions))]
         self.network = nn.Sequential(*layers)
@@ -871,13 +871,13 @@ class RepNet(nn.Module):
         hidden_channels = 128
         layers.append(nn.Conv2d(self.input_channels, hidden_channels, kernel_size=3, stride=2, padding=1))
         layers.append(nn.ReLU())
-        layers.append(nn.BatchNorm2d(hidden_channels))
+        layers.append(nn.BatchNorm2d(hidden_channels, momentum=0.01))
         for _ in range(2):
             layers.append(ResidualBlock(hidden_channels, hidden_channels))
         layers.append(nn.Conv2d(hidden_channels, hidden_channels * 2, kernel_size=3, stride=2, padding=1))
         hidden_channels = hidden_channels * 2
         layers.append(nn.ReLU())
-        layers.append(nn.BatchNorm2d(hidden_channels))
+        layers.append(nn.BatchNorm2d(hidden_channels, momentum=0.01))
         for _ in range(3):
             layers.append(ResidualBlock(hidden_channels, hidden_channels))
         layers.append(nn.AvgPool2d(2))
