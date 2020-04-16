@@ -17,7 +17,11 @@ AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 from src.model_trainer import from_categorical
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.parallel import DistributedDataParallelCPU as DDPC
-from torch.cuda.amp import autocast
+try:
+    from torch.cuda.amp import autocast
+    AMP = True
+except:
+    AMP = False
 
 class PizeroAgent(AtariCatDqnAgent):
     def data_parallel(self):
@@ -108,7 +112,10 @@ class DQNSearchAgent(PizeroAgent):
     def step(self, observation, prev_action, prev_reward):
         """Compute the discrete distribution for the Q-value for each
         action for each state/observation (no grad)."""
-        with autocast():
+        if AMP:
+            with autocast():
+                action, p, value, initial_value = self.search.run(observation.to(self.search.device))
+        else:
             action, p, value, initial_value = self.search.run(observation.to(self.search.device))
         p = p.cpu()
 
