@@ -114,7 +114,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
     config["algo"]["learning_rate"] = 6.25e-5
     # config["sampler"]["max_decorrelation_steps"] = 0
     # config["algo"]["min_steps_learn"] = 2e4
-    config['sampler']['batch_B'] = 16
+    config['sampler']['batch_B'] = 32
     # config['sampler']['batch_T'] = 2
     config['sampler']['eval_n_envs'] = 8
     config["sampler"]["eval_max_steps"] = int(125e3)
@@ -193,7 +193,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
-    parser.add_argument('--eval-simulations', type=int, default=25)
+    parser.add_argument('--eval-simulations', type=int, default=20)
     parser.add_argument('--latent-size', type=int, default=256)
     parser.add_argument('--virtual-threads', type=int, default=3)
     parser.add_argument('--q-dirichlet', type=int, default=0)
@@ -206,6 +206,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     wandb.init(project='rlpyt', entity='abs-world-models', config=args)
+    wandb.config.update(vars(args))
     if args.debug:
         debug_build_and_train(game=args.game,
                               cuda_idx=args.debug_cuda_idx,
