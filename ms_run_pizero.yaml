@@ -1,12 +1,12 @@
 description: AWM
 
 target:
-  cluster: rr1
-  vc: resrchprojvc20
+  cluster: sc3
+  vc: resrchprojvc5
 
 environment:
-  image: philly/jobs/custom/pytorch:pytorch1.4-py37-cuda10.1
-  registry: phillyregistry.azurecr.io
+  image: ankeshanand/pytorch-nightly:latest
+  registry: docker.io
   setup:
     - export PATH=$$PATH:~/.local/bin
     - export LC_ALL=C.UTF-8

@@ -145,6 +145,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
         agent=agent,
         sampler=sampler,
         affinity=affinity,
+        seed=42,
         **config["runner"]
     )
     name = "dqn_" + game
