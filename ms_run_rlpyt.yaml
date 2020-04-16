@@ -1,12 +1,12 @@
 description: AWM
 
 target:
-  cluster: sc3
-  vc: resrchprojvc5
+  cluster: wu2
+  vc: msrlabs
 
 environment:
-  image: ankeshanand/pytorch-nightly:latest
-  registry: docker.io
+  image: philly/jobs/custom/pytorch:pytorch1.3.1-py36-cuda10.0
+  registry: phillyregistry.azurecr.io
   setup:
     - export PATH=$$PATH:~/.local/bin
     - export LC_ALL=C.UTF-8
@@ -35,7 +35,7 @@ search:
     name: rlpyt_nce_{game:s}_{random_string:s}
     sku: G4
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {arguments} --learn-model
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {arguments} --learn-model --stack-actions 1
   type: grid
   max_trials: 16
   params:
@@ -44,4 +44,4 @@ search:
       values: ['ms_pacman']
     - name: arguments
       spec: discrete
-      values: ['--nce 1', '--nce 1 --augmentation 1']
+      values: ['--nce 1', '--nce 1 --augmentation 1', '']
