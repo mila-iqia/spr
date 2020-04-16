@@ -1,11 +1,11 @@
 description: AWM
 
 target:
-  cluster: sc3
-  vc: resrchprojvc5
+  cluster: eu1
+  vc: msrlabs
 
 environment:
-  image: ankeshanand/pytorch-nightly:latest
+  image: ankeshanand/pytorch-nightly:cuda100
   registry: docker.io
   setup:
     - export PATH=$$PATH:~/.local/bin
@@ -14,6 +14,7 @@ environment:
     - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill
     - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
     - pip install --user git+git://github.com/astooke/rlpyt
+    - pip install --user pillow==6.2.1 scikit-image
     - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
 
 # azure storage configuration
@@ -34,7 +35,7 @@ search:
     name: rlpyt_nce_{game:s}_{random_string:s}
     sku: G4
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {arguments}
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {arguments} --learn-model --stack-actions 1
   type: grid
   max_trials: 16
   params:
@@ -43,4 +44,4 @@ search:
       values: ['ms_pacman']
     - name: arguments
       spec: discrete
-      values: ['--model --nce 1', '--model --nce 1 --augmentation 1']
+      values: ['--nce 1', '--nce 1 --augmentation 1', '']
