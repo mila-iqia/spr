@@ -1,6 +1,7 @@
 from collections import deque
 import torch.multiprocessing as mp
 import torch.nn as nn
+from torch.cuda.amp import autocast
 
 from rlpyt.utils.synchronize import find_port
 import traceback
@@ -99,7 +100,8 @@ def run_pizero(args):
     try:
         while env_steps < args.total_env_steps:
             # Run MCTS for the vectorized observation
-            actions, policies, values, value_estimates = vectorized_mcts.run(obs)
+            with autocast():
+                actions, policies, values, value_estimates = vectorized_mcts.run(obs)
             next_obs, reward, done, infos = env.step(actions.cpu().numpy())
             reward, done = torch.from_numpy(reward).float(), torch.from_numpy(done).float()
             obs, actions, reward, done, policies, values, value_estimates = obs.cpu(), actions.cpu(), reward.cpu(),\
@@ -185,9 +187,10 @@ def run_pizero(args):
                            'env_steps': env_steps})
                 eval_result = async_eval.get_eval_results()
                 if eval_result:
-                    eval_env_step, avg_reward = eval_result
+                    eval_env_step, avg_reward, avg_reward_prior = eval_result
                     print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
-                    wandb.log({'eval_env_steps': eval_env_step, 'Average Eval Score': avg_reward})
+                    wandb.log({'eval_env_steps': eval_env_step, 'Average Eval Score': avg_reward,
+                               'Average Eval Score (Prior)': avg_reward_prior})
 
             if env_steps % args.evaluation_interval == 0 and env_steps > 0:
                 print("Starting evaluation run")

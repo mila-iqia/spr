@@ -239,13 +239,11 @@ class VectorizedMCTS:
         total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True) + 1
         pb_c = self.pb_c_init * (torch.sqrt(total_visits) / (1 + self.visit_count[:, :depth])) * self.prior[:, :depth]
         value_score = self.value_score(depth)
-        print(value_score[0, 0])
         return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
     def select_action(self):
         t = self.visit_softmax_temperature()
         policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
-        print(self.visit_count[:, 0])
         if self.eval:
             action = self.visit_count[:, 0].argmax(dim=-1)
         else:
@@ -284,6 +282,33 @@ class VectorizedMCTS:
 
         avg_reward = sum(T_rewards) / len(T_rewards)
         return avg_reward
+
+    def evaluate_prior(self):
+        env = gym.vector.make('atari-v0', num_envs=self.n_runs, asynchronous=False, args=self.args)
+        for e in env.envs:
+            e.eval()
+        T_rewards = []
+        dones, reward_sums, envs_done = [False] * self.n_runs, np.array([0.] * self.n_runs), 0
+
+        obs = env.reset()
+        obs = torch.from_numpy(obs)
+        while envs_done < self.n_runs:
+            obs = obs.to(self.device).float() / 255.
+            hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
+            actions = policy_logits.argmax(dim=-1)
+            next_obs, reward, done, _ = env.step(actions.cpu().numpy())
+            reward_sums += np.array(reward)
+            for i, d in enumerate(done):
+                if done[i] and not dones[i]:
+                    T_rewards.append(reward_sums[i])
+                    dones[i] = True
+                    envs_done += 1
+            obs.copy_(torch.from_numpy(next_obs))
+        env.close()
+
+        avg_reward = sum(T_rewards) / len(T_rewards)
+        return avg_reward
+
 
 
 class VectorizedQMCTS(VectorizedMCTS):
@@ -520,7 +545,8 @@ def eval_wrapper(eval_mcts, name, send_queue, recieve_queue, error_queue):
             if command == 'evaluate':
                 eval_mcts.network.load_state_dict(network)
                 avg_reward = eval_mcts.evaluate(env_step)
-                recieve_queue.put(((env_step, avg_reward), True))
+                avg_reward_prior = eval_mcts.evaluate_prior()
+                recieve_queue.put(((env_step, avg_reward, avg_reward_prior), True))
                 del network
                 torch.cuda.empty_cache()
             else:
