@@ -9,6 +9,7 @@ import traceback
 import sys
 import wandb
 import copy
+from torch.cuda.amp import autocast
 
 MAXIMUM_FLOAT_VALUE = torch.finfo().max / 10
 MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
@@ -269,7 +270,8 @@ class VectorizedMCTS:
         obs = env.reset()
         obs = torch.from_numpy(obs)
         while envs_done < self.n_runs:
-            actions, policy, value, _ = self.run(obs)
+            with autocast():
+                actions, policy, value, _ = self.run(obs)
             next_obs, reward, done, _ = env.step(actions.cpu().numpy())
             reward_sums += np.array(reward)
             for i, d in enumerate(done):
@@ -294,7 +296,8 @@ class VectorizedMCTS:
         obs = torch.from_numpy(obs)
         while envs_done < self.n_runs:
             obs = obs.to(self.device).float() / 255.
-            hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
+            with autocast():
+                hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
             actions = policy_logits.argmax(dim=-1)
             next_obs, reward, done, _ = env.step(actions.cpu().numpy())
             reward_sums += np.array(reward)
