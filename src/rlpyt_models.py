@@ -14,6 +14,7 @@ from src.model_trainer import ValueNetwork, TransitionModel, \
     NetworkOutput, from_categorical, ScaleGradient, BlockNCE, init, \
     ResidualBlock, renormalize
 import numpy as np
+from skimage.util import view_as_windows
 from rlpyt.utils.logging import logger
 import wandb
 import time
@@ -208,27 +209,38 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             for param in self.target_head.parameters():
                 param.requires_grad = False
 
-        if self.augmentation:
-            transforms = list()
-            transforms.append(ToPILImage())
-            transforms.append(RandomCrop((84, 84)))
-            transforms.append(ToTensor())
-            self.transforms = Compose(transforms)
-            eval_transforms = list()
-            eval_transforms.append(ToPILImage())
-            eval_transforms.append(CenterCrop((84, 84)))
-            eval_transforms.append(ToTensor())
-            self.eval_transforms = Compose(eval_transforms)
+        # if self.augmentation:
+        #     transforms = list()
+        #     transforms.append(ToPILImage())
+        #     transforms.append(RandomCrop((84, 84)))
+        #     transforms.append(ToTensor())
+        #     self.transforms = Compose(transforms)
+        #     eval_transforms = list()
+        #     eval_transforms.append(ToPILImage())
+        #     eval_transforms.append(CenterCrop((84, 84)))
+        #     eval_transforms.append(ToTensor())
+        #     self.eval_transforms = Compose(eval_transforms)
 
     def transform(self, images, eval=False):
+        images = images.float()/255. if images.dtype == torch.uint8 else images
         if not self.augmentation:
-            return images.float()/255. if \
-                images.dtype == torch.uint8 else images
+            return images
         flat_images = images.view(-1, *images.shape[-3:])
-        transforms = self.eval_transforms if eval else self.transforms
-        processed_images = [transforms(i.cpu()) for i in flat_images]
-        processed_images = torch.stack(processed_images).to(images.device)
+        if eval:
+            processed_images = flat_images[:, :, 8:-8, 8:-8]
+        else:
+            flat_images = flat_images.cpu().numpy()
+            processed_images = curl_random_crop(flat_images, 84)
+            processed_images = torch.from_numpy(processed_images).to(images.device)
+
         processed_images.view(*images.shape[:-3], *processed_images.shape[1:])
+        #
+        # transforms = self.eval_transforms if eval else self.transforms
+        # if eval:
+        #
+        # processed_images = [transforms(i.cpu()) for i in flat_images]
+        # processed_images = torch.stack(processed_images).to(images.device)
+        # processed_images.view(*images.shape[:-3], *processed_images.shape[1:])
         return processed_images
 
     def stem_parameters(self):
@@ -495,3 +507,24 @@ class RepNet(nn.Module):
             x = x.unsqueeze(0)
         latent = self.network(x)
         return renormalize(latent, 1)
+
+def curl_random_crop(imgs, out):
+    """
+    Vectorized random crop
+    args:
+    imgs: shape (B,C,H,W)
+    out: output size (e.g. 84)
+    """
+    # n: batch size.
+    n = imgs.shape[0]
+    img_size = imgs.shape[-1] # e.g. 100
+    crop_max = img_size - out
+    imgs = np.transpose(imgs, (0, 2, 3, 1))
+    w1 = np.random.randint(0, crop_max, n)
+    h1 = np.random.randint(0, crop_max, n)
+    # creates all sliding window
+    # combinations of size (out)
+    windows = view_as_windows(imgs, (1, out, out, 1))[..., 0,:,:, 0]
+    # selects a random window# for each batch element
+    cropped = windows[np.arange(n), w1, h1]
+    return cropped
