@@ -36,6 +36,10 @@ class VectorizedMCTS:
         self.env_steps = 0
         self.cpu_search = args.cpu_search
         self.search_device = "cpu" if self.cpu_search else self.device
+        self.eps_init = 1.
+        self.eps = 1.
+        self.eps_final = 0.01
+        self.eps_decay_final_steps = int(2.5e5)
         self.eval = eval
 
         # Initialize search tensors on the current device.
@@ -174,7 +178,7 @@ class VectorizedMCTS:
             self.backup(self.id_final, sim_id, value.to(self.search_device))
 
         # Get action, policy and value from the root after the search has finished
-        action, policy = self.select_action()
+        action, policy = self.select_action_e_greedy()
         if self.args.no_search_value_targets:
             value = initial_value
         else:
@@ -250,6 +254,21 @@ class VectorizedMCTS:
         else:
             action = policy.sample()
         return action, policy.probs
+
+    def set_epsilon(self, env_steps):
+        prog = min(1, max(0, env_steps - self.args.training_start) / (self.eps_decay_final_steps - self.args.training_start))
+        self.eps = prog * self.eps_final + (1 - prog) * self.eps_init
+
+    def select_action_e_greedy(self):
+        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
+        if self.eval:
+            self.eps = 0.001
+        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.search_device) < self.eps).long()
+        random_actions = torch.randint(self.num_actions, size=(self.n_runs,), device=self.search_device)
+        # Select most visited node, break ties by action score
+        max_actions = (self.visit_count[:, 0] + (self.q[:, 0] / 10000.)).argmax(dim=-1)
+        actions = e_action * random_actions + (1-e_action) * max_actions
+        return actions, policy.probs
 
     def visit_softmax_temperature(self):
         # TODO: Change the temperature schedule
@@ -491,14 +510,6 @@ class VectorizedQSimMCTS(VectorizedMCTS):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.warmup_sims = self.num_actions
-        self.eps_init = 1.
-        self.eps = 1.
-        self.eps_final = 0.01
-        self.eps_decay_final_steps = int(2.5e5)
-
-    def set_epsilon(self, env_steps):
-        prog = min(1, max(0, env_steps - self.args.training_start) / (self.eps_decay_final_steps - self.args.training_start))
-        self.eps = prog * self.eps_final + (1 - prog) * self.eps_init
 
     def value_score(self, sim_id):
         """normalized_q(s,a)."""
