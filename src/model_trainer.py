@@ -434,7 +434,7 @@ class MCTSModel(nn.Module):
                 policies, values = buffer.sample_batch(self.args.batch_size_per_worker)
                 is_weights = 1.
 
-            target_images = states[0:self.jumps+1, :, 0].transpose(0, 1)
+            target_images = states[0:self.jumps+1, :, -1].transpose(0, 1)
             target_images = target_images.reshape(-1, *states.shape[-3:])
             initial_states = states[0]
             target_images = target_images.to(self.args.device).float()/255.
