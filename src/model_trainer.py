@@ -836,7 +836,7 @@ class ValueNetwork(nn.Module):
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
-                  init_small(nn.Linear(256, limit*2 + 1))]
+                  nn.Linear(256, limit*2 + 1)]
         self.network = nn.Sequential(*layers)
         self.train()
 

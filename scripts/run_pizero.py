@@ -52,7 +52,7 @@ def run_pizero(args):
     print("Received target network from trainer")
     target_network = copy.deepcopy(network)
     target_network.to(args.device)
-    # target_network.eval()
+    # target_network.eval() # TODO: Figure out why batchnorm doesn't work well in eval mode
     target_network.share_memory()
 
     if args.reanalyze:
@@ -189,7 +189,7 @@ def run_pizero(args):
                     print('Env steps: {}, Avg_Reward: {}'.format(eval_env_step, avg_reward))
                     wandb.log({'eval_env_steps': eval_env_step, 'Average Eval Score': avg_reward})
 
-            if env_steps % args.evaluation_interval == 0 and env_steps >= 0:
+            if env_steps % args.evaluation_interval == 0 and env_steps > 0:
                 print("Starting evaluation run")
                 eval_state_dict = copy.deepcopy(target_network.state_dict())
                 async_eval.send_queue.put(('evaluate', env_steps, eval_state_dict))

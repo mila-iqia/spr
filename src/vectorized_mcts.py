@@ -29,7 +29,7 @@ class VectorizedMCTS:
         self.n_runs = n_runs
         self.n_sims = n_sims
         self.id_null = self.n_sims + 1
-        self.warmup_sims = 2
+        self.warmup_sims = 1
         self.virtual_threads = args.virtual_threads
         self.vl_c = args.virtual_loss_c
         self.env_steps = 0
@@ -84,12 +84,10 @@ class VectorizedMCTS:
         #     self.virtual_loss.fill_(0)
         # if sim_id <= 2:
         #     return -self.virtual_loss
-        valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
         if sim_id <= self.warmup_sims:
             return self.q
-        values = self.q - (valid_indices * self.min_q[:, None, None])
+        values = self.q - self.min_q[:, None, None]
         values /= (self.max_q - self.min_q)[:, None, None]
-        values = valid_indices * values
         return values
 
     def reset_tensors(self):
@@ -111,6 +109,8 @@ class VectorizedMCTS:
         self.hidden_state[:, 0, :] = hidden_state
         self.prior[:, 0] = F.softmax(policy_logits, dim=-1).to(self.search_device)
         self.q[:, 0, :] = initial_value.unsqueeze(-1)
+        self.min_q = torch.min(self.min_q, initial_value)
+        self.max_q = torch.max(self.max_q, initial_value)
         self.add_exploration_noise()
 
         for sim_id in range(1, self.n_sims+1):
@@ -161,6 +161,8 @@ class VectorizedMCTS:
             self.reward[self.batch_range, sim_id, self.actions_final.squeeze()] = reward.to(self.search_device)
             self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1).to(self.search_device)
             self.q[:, sim_id, :] = value.unsqueeze(-1)
+            self.min_q = torch.min(self.min_q, value)
+            self.max_q = torch.max(self.max_q, value)
 
             # Store the pointers from parent to new node and back.
             self.id_children[self.batch_range, self.id_final.squeeze(), self.actions_final.squeeze()] = sim_id
@@ -237,11 +239,13 @@ class VectorizedMCTS:
         total_visits = torch.sum(self.visit_count[:, :depth], -1, keepdim=True) + 1
         pb_c = self.pb_c_init * (torch.sqrt(total_visits) / (1 + self.visit_count[:, :depth])) * self.prior[:, :depth]
         value_score = self.value_score(depth)
+        print(value_score[0, 0])
         return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
     def select_action(self):
         t = self.visit_softmax_temperature()
         policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
+        print(self.visit_count[:, 0])
         if self.eval:
             action = self.visit_count[:, 0].argmax(dim=-1)
         else:
@@ -373,12 +377,10 @@ class VectorizedQMCTS(VectorizedMCTS):
 
     def value_score(self, sim_id):
         """normalized_q(s,a)."""
-        valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
-        # if sim_id <= self.warmup_sims:
-        #     return -self.visit_count
-        values = self.q - (valid_indices * self.min_q[:, None, None])
+        if sim_id <= self.warmup_sims:
+            return -self.q
+        values = self.q - self.min_q[:, None, None]
         values /= (self.max_q - self.min_q)[:, None, None]
-        values = valid_indices * values
         return values
 
     def add_exploration_noise(self):
