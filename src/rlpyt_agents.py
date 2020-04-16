@@ -141,7 +141,7 @@ class VectorizedMCTS:
         self.train_n_sims = args.num_simulations
         self.eval_n_sims = args.eval_simulations
         self.n_sims = args.num_simulations
-        self.warmup_sims = min(self.n_sims // 3 + 1, self.num_actions)
+        self.warmup_sims = 1
         self.max_n_sims = max(self.train_n_sims, self.eval_n_sims)
         self.id_null = self.max_n_sims + 1
         self.virtual_threads = args.virtual_threads
@@ -155,12 +155,12 @@ class VectorizedMCTS:
     def set_eval(self):
         self.n_sims = self.eval_n_sims
         self.eval = True
-        self.warmup_sims = min(self.n_sims // 3 + 1, self.num_actions)
+        self.warmup_sims = 1
 
     def set_train(self):
         self.n_sims = self.train_n_sims
         self.eval = False
-        self.warmup_sims = min(self.n_sims // 3 + 1, self.num_actions)
+        self.warmup_sims = 1
 
     def initialize_on_device(self, device):
         # Initialize search tensors on the current device.
@@ -466,6 +466,8 @@ class VectorizedQMCTS(VectorizedMCTS):
             self.reward[self.batch_range, sim_id, self.actions_final.squeeze()] = reward.to(self.device)
             # self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1)
             self.q[:, sim_id] = value
+            self.min_q = torch.min(self.q[:, sim_id], dim=-1)[0]
+            self.max_q = torch.max(self.q[:, sim_id], dim=-1)[0]
 
             # Store the pointers from parent to new node and back.
             self.id_children[self.batch_range, self.id_final.squeeze(), self.actions_final.squeeze()] = sim_id
@@ -492,12 +494,10 @@ class VectorizedQMCTS(VectorizedMCTS):
 
     def value_score(self, sim_id):
         """normalized_q(s,a)."""
-        valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
-        # if sim_id <= self.warmup_sims:
-        #     return -self.visit_count
-        values = self.q - (valid_indices * self.min_q[:, None, None])
+        if sim_id <= self.warmup_sims:
+            return self.q
+        values = self.q - self.min_q[:, None, None]
         values /= (self.max_q - self.min_q)[:, None, None]
-        values = valid_indices * values
         return values
 
     def add_exploration_noise(self):
@@ -538,10 +538,10 @@ class VectorizedQMCTS(VectorizedMCTS):
             returns = returns*self.args.discount + reward
 
             # Update q and count at the parent for the actions taken then
-            self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
             values = ((self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] *
                        self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()]) + returns) \
                      / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] + 1)
+            self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
             values *= not_done_mask.squeeze()
             self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] = values
             values = values.squeeze()
