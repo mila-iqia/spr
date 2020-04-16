@@ -1,12 +1,12 @@
 description: AWM
 
 target:
-  cluster: rr1
-  vc: resrchprojvc20
+  cluster: sc3
+  vc: resrchprojvc5
 
 environment:
-  image: philly/jobs/custom/pytorch:pytorch1.4-py37-cuda10.1
-  registry: phillyregistry.azurecr.io
+  image: ankeshanand/pytorch-nightly:latest
+  registry: docker.io
   setup:
     - export PATH=$$PATH:~/.local/bin
     - export LC_ALL=C.UTF-8
@@ -31,16 +31,16 @@ storage:
 
 search:
   job_template:
-    name: rlpyt_async_{game:s}_{random_string:s}
+    name: rlpyt_nce_{game:s}_{random_string:s}
     sku: G4
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {simulations}
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {arguments}
   type: grid
   max_trials: 16
   params:
     - name: game
       spec: discrete
-      values: ['qbert', 'ms_pacman']
-    - name: simulations
+      values: ['ms_pacman']
+    - name: arguments
       spec: discrete
-      values: ['--model', '--model --num-simulations 0 --eval-simulations 0 --jumps 0']
+      values: ['--model --nce', '--model --nce --augmentation']
