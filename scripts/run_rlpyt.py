@@ -35,8 +35,13 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config = configs['ernbw']
     config['runner']['log_interval_steps'] = 1e5
     config['env']['game'] = game
+    config["env"]["stack_actions"] = args.stack_actions
+    config["env"]["grayscale"] = args.grayscale
     config["eval_env"]["game"] = config["env"]["game"]
+    config["eval_env"]["stack_actions"] = args.stack_actions
+    config["eval_env"]["grayscale"] = args.grayscale
     config["algo"]["n_step_return"] = 5
+    config["algo"]["replay_size"] = 1e5
     config["algo"]["prioritized_replay"] = True
     config["algo"]["min_steps_learn"] = 1e3
     config["sampler"]["eval_max_trajectories"] = 5
@@ -46,7 +51,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     sampler = SerialSampler(
         EnvCls=AtariEnv,
         TrajInfoCls=AtariTrajInfo,  # default traj info + GameScore
-        env_kwargs=dict(game=game),
+        env_kwargs=config["env"],
         eval_env_kwargs=dict(game=game),
         batch_T=4,  # Four time-steps per sampler iteration.
         batch_B=16,
@@ -58,6 +63,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["detach_model"] = detach_model
         config["model"]["nce"] = args.nce
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["stack_actions"] = args.stack_actions
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
@@ -98,7 +104,11 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
     config = configs['ernbw']
     config['runner']['log_interval_steps'] = 1e5
     config['env']['game'] = game
+    config["env"]["stack_actions"] = args.stack_actions
+    config["env"]["grayscale"] = args.grayscale
     config["eval_env"]["game"] = config["env"]["game"]
+    config["eval_env"]["stack_actions"] = args.stack_actions
+    config["eval_env"]["grayscale"] = args.grayscale
     config["algo"]["n_step_return"] = 5
     config["algo"]["batch_size"] = 128
     config["algo"]["learning_rate"] = 6.25e-5
@@ -124,6 +134,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
         config["model"]["detach_model"] = detach_model
         config["model"]["nce"] = args.nce
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["stack_actions"] = args.stack_actions
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
@@ -171,6 +182,8 @@ if __name__ == "__main__":
     parser.add_argument('--game', help='Atari game', default='ms_pacman')
     parser.add_argument('--debug', action="store_true")
     parser.add_argument('--learn-model', action="store_true")
+    parser.add_argument('--stack-actions', type=int, default=0)
+    parser.add_argument('--grayscale', type=int, default=1)
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=4)
     parser.add_argument('--nce', type=int, default=0)
