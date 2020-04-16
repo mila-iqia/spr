@@ -43,4 +43,4 @@ search:
       values: ['ms_pacman']
     - name: arguments
       spec: discrete
-      values: ['--model --nce', '--model --nce --augmentation']
+      values: ['--model --nce 1', '--model --nce 1 --augmentation 1']
