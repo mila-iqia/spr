@@ -73,6 +73,8 @@ class AtariEnv(Env):
                  max_start_noops=30,
                  repeat_action_probability=0.,
                  horizon=27000,
+                 stack_actions=0,
+                 grayscale=True,
                  ):
         save__init__args(locals(), underscore=True)
         # ALE
@@ -85,12 +87,17 @@ class AtariEnv(Env):
         self.ale.loadROM(game_path)
 
         # Spaces
+        self.stack_actions = stack_actions
         self._action_set = self.ale.getMinimalActionSet()
         self._action_space = IntBox(low=0, high=len(self._action_set))
-        obs_shape = (num_img_obs, H, W)
+        self.channels = 1 if grayscale else 3
+        self.grayscale = grayscale
+        if self.stack_actions: self.channels += 1
+        obs_shape = (num_img_obs, self.channels, H, W)
         self._observation_space = IntBox(low=0, high=255, shape=obs_shape,
             dtype="uint8")
-        self._max_frame = self.ale.getScreenGrayscale()
+        self._max_frame = self.ale.getScreenGrayscale() if self.grayscale \
+            else self.ale.getScreenRGB()
         self._raw_frame_1 = self._max_frame.copy()
         self._raw_frame_2 = self._max_frame.copy()
         self._obs = np.zeros(shape=obs_shape, dtype="uint8")
@@ -108,7 +115,7 @@ class AtariEnv(Env):
         self._life_reset()
         for _ in range(np.random.randint(0, self._max_start_noops + 1)):
             self.ale.act(0)
-        self._update_obs()  # (don't bother to populate any frame history)
+        self._update_obs(0)  # (don't bother to populate any frame history)
         self._step_counter = 0
         return self.get_obs()
 
@@ -122,7 +129,7 @@ class AtariEnv(Env):
         lost_life = self._check_life()  # Advances from lost_life state.
         if lost_life and self._episodic_lives:
             self._reset_obs()  # Internal reset.
-        self._update_obs()
+        self._update_obs(action)
         reward = np.sign(game_score) if self._clip_reward else game_score
         game_over = self.ale.game_over() or self._step_counter >= self.horizon
         done = game_over or (self._episodic_lives and lost_life)
@@ -149,13 +156,24 @@ class AtariEnv(Env):
 
     def _get_screen(self, frame=1):
         frame = self._raw_frame_1 if frame == 1 else self._raw_frame_2
-        self.ale.getScreenGrayscale(frame)
+        if self.grayscale:
+            self.ale.getScreenGrayscale(frame)
+        else:
+            self.ale.getScreenRGB(frame)
 
-    def _update_obs(self):
+    def _update_obs(self, action):
         """Max of last two frames; crop two rows; downsample by 2x."""
         self._get_screen(2)
         np.maximum(self._raw_frame_1, self._raw_frame_2, self._max_frame)
-        img = cv2.resize(self._max_frame[1:-1], (W, H), cv2.INTER_NEAREST)
+        img = cv2.resize(self._max_frame, (W, H), cv2.INTER_NEAREST)
+        if len(img.shape) == 2:
+            img = img[np.newaxis]
+        else:
+            img = np.transpose(img, (2, 0, 1))
+        if self.stack_actions:
+            action = int(255.*action/self._action_space.n)
+            action = np.ones_like(img[:1])*action
+            img = np.concatenate([img, action], 0)
         # NOTE: order OLDEST to NEWEST should match use in frame-wise buffer.
         self._obs = np.concatenate([self._obs[1:], img[np.newaxis]])
 

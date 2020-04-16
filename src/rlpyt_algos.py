@@ -14,7 +14,9 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
 
 OptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr"])
 ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
-                                      "tdAbsErr", "modelLoss",
+                                      "tdAbsErr",
+                                      "modelRLLoss",
+                                      "RewardLoss",
                                       "modelGradNorm",
                                       "NCELoss",
                                       "NCEAcc"])
@@ -170,8 +172,10 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             return opt_info
         for _ in range(self.updates_per_optimize):
             samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
-            loss, td_abs_errors, model_loss, nce_loss, nce_accs = self.loss(samples_from_replay)
-            total_loss = loss + model_loss + nce_loss
+            loss, td_abs_errors, model_rl_loss, reward_loss,\
+            nce_loss, nce_accs = self.loss(samples_from_replay)
+
+            total_loss = loss + model_rl_loss + nce_loss + reward_loss
             self.optimizer.zero_grad()
             total_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -184,10 +188,11 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                 self.replay_buffer.update_batch_priorities(td_abs_errors)
             opt_info.loss.append(loss.item())
             opt_info.gradNorm.append(grad_norm)
-            opt_info.modelLoss.append(model_loss.item())
+            opt_info.modelRLLoss.append(model_rl_loss.item())
+            opt_info.RewardLoss.append(reward_loss.item())
             opt_info.modelGradNorm.append(model_grad_norm)
             opt_info.NCELoss.append(nce_loss.item())
-            opt_info.NCEAcc.append(nce_accs.item())
+            opt_info.NCEAcc.append(nce_accs)
             opt_info.tdAbsErr.extend(td_abs_errors[::8].numpy())  # Downsample.
             self.update_counter += 1
             if self.update_counter % self.target_update_interval == 0:
@@ -270,15 +275,14 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         pred_rew = torch.stack(pred_rew, 0)
         with torch.no_grad():
             reward_target = to_categorical(samples.all_reward[:self.jumps+1].flatten().to(self.agent.device), limit=1).view(*pred_rew.shape)
-        model_loss = -torch.sum(reward_target * pred_rew, (0, 2))
+        reward_loss = -torch.sum(reward_target * pred_rew, (0, 2))
+        model_loss = torch.zeros_like(reward_loss)
 
         for i in range(1, self.jumps+1):
-            jump_rl_loss, _ = self.rl_loss(pred_ps[i],
+            jump_rl_loss, model_KL = self.rl_loss(pred_ps[i],
                                            samples,
                                            i)
             model_loss = model_loss + jump_rl_loss.to(self.agent.device)
-
-        model_loss = model_loss
 
         if self.prioritized_replay:
             weights = samples.is_weights.to(self.agent.device)
@@ -287,5 +291,6 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
 
         return rl_loss, KL, \
                model_loss.mean().cpu(),\
+               reward_loss.mean().cpu(), \
                nce_loss.mean().cpu(), \
                nce_acc
