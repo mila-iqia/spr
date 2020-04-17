@@ -11,6 +11,11 @@ import traceback
 from src.vectorized_mcts import VectorizedMCTS as MCTS
 from src.vectorized_mcts import VectorizedQMCTS as QMCTS
 from recordclass import dataobject
+try:
+    from torch.cuda.amp import autocast
+    AMP = True
+except:
+    AMP = False
 
 
 class AsyncState(Enum):
@@ -304,6 +309,10 @@ class ReanalyzeWorker:
                 self.current_read_episodes[i] = \
                     self.load_episode()
 
-        _, policies, values, value_estimates = self.mcts.run(observations)
+        if AMP:
+            with autocast():
+                _, policies, values, value_estimates = self.mcts.run(observations)
+        else:
+            _, policies, values, value_estimates = self.mcts.run(observations)
         return observations, actions, rewards, dones, policies, values, value_estimates
 
