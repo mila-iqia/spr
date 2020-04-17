@@ -9,8 +9,11 @@ import traceback
 import sys
 import wandb
 import copy
-from torch.cuda.amp import autocast
-
+try:
+    from torch.cuda.amp import autocast
+    AMP = True
+except:
+    AMP = False
 MAXIMUM_FLOAT_VALUE = torch.finfo().max / 10
 MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
 
@@ -260,7 +263,8 @@ class VectorizedMCTS:
         self.eps = prog * self.eps_final + (1 - prog) * self.eps_init
 
     def select_action_e_greedy(self):
-        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0])
+        t = self.visit_softmax_temperature()
+        policy = torch.distributions.Categorical(probs=self.visit_count[:, 0]**(1/t))
         if self.eval:
             self.eps = 0.001
         e_action = (torch.rand_like(self.q[:, 0, 0], device=self.search_device) < self.eps).long()
@@ -289,7 +293,10 @@ class VectorizedMCTS:
         obs = env.reset()
         obs = torch.from_numpy(obs)
         while envs_done < self.n_runs:
-            with autocast():
+            if AMP:
+                with autocast():
+                    actions, policy, value, _ = self.run(obs)
+            else:
                 actions, policy, value, _ = self.run(obs)
             next_obs, reward, done, _ = env.step(actions.cpu().numpy())
             reward_sums += np.array(reward)
@@ -315,7 +322,10 @@ class VectorizedMCTS:
         obs = torch.from_numpy(obs)
         while envs_done < self.n_runs:
             obs = obs.to(self.device).float() / 255.
-            with autocast():
+            if AMP:
+                with autocast():
+                    hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
+            else:
                 hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
             actions = policy_logits.argmax(dim=-1)
             next_obs, reward, done, _ = env.step(actions.cpu().numpy())

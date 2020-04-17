@@ -1,7 +1,11 @@
 from collections import deque
 import torch.multiprocessing as mp
 import torch.nn as nn
-from torch.cuda.amp import autocast
+try:
+    from torch.cuda.amp import autocast
+    AMP = True
+except:
+    AMP = False
 
 from rlpyt.utils.synchronize import find_port
 import traceback
@@ -100,7 +104,10 @@ def run_pizero(args):
     try:
         while env_steps < args.total_env_steps:
             # Run MCTS for the vectorized observation
-            with autocast():
+            if AMP:
+                with autocast():
+                    actions, policies, values, value_estimates = vectorized_mcts.run(obs)
+            else:
                 actions, policies, values, value_estimates = vectorized_mcts.run(obs)
             next_obs, reward, done, infos = env.step(actions.cpu().numpy())
             reward, done = torch.from_numpy(reward).float(), torch.from_numpy(done).float()
@@ -204,6 +211,7 @@ def run_pizero(args):
             vectorized_mcts.env_steps = env_steps
             vectorized_mcts.set_epsilon(env_steps)
             eval_vectorized_mcts.env_steps = env_steps
+            print(env_steps)
 
     except (KeyboardInterrupt, Exception):
         traceback.print_exc()
