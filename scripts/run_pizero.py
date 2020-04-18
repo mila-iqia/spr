@@ -211,7 +211,6 @@ def run_pizero(args):
             vectorized_mcts.env_steps = env_steps
             vectorized_mcts.set_epsilon(env_steps)
             eval_vectorized_mcts.env_steps = env_steps
-            print(env_steps)
 
     except (KeyboardInterrupt, Exception):
         traceback.print_exc()
