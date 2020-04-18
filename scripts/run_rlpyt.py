@@ -14,7 +14,7 @@ from rlpyt.samplers.async_.collectors import DbGpuResetCollector, DbGpuWaitReset
 from rlpyt.samplers.async_.gpu_sampler import AsyncGpuSampler
 from rlpyt.samplers.parallel.gpu.sampler import GpuSampler
 from rlpyt.samplers.serial.sampler import SerialSampler
-from rlpyt.samplers.parallel.gpu.collectors import GpuWaitResetCollector
+from rlpyt.samplers.parallel.gpu.collectors import GpuWaitResetCollector, GpuResetCollector
 from rlpyt.envs.atari.atari_env import AtariTrajInfo
 from rlpyt.algos.dqn.dqn import DQN
 from rlpyt.agents.dqn.atari.atari_dqn_agent import AtariDqnAgent
@@ -25,7 +25,8 @@ from rlpyt.utils.logging.context import logger_context
 import wandb
 import psutil
 
-from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel
+from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel, \
+    SyncRlEvalWandb
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
 from src.rlpyt_agents import DQNSearchAgent
 from src.rlpyt_atari_env import AtariEnv
@@ -89,14 +90,26 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
 
 def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, args=None):
     affinity_dict = dict(
-        n_cpu_core=10,
-        n_gpu=4,
-        async_sample=True,
+        n_cpu_core=args.n_gpu*4,
+        n_gpu=args.n_gpu,
         n_socket=1,
-        gpu_per_run=3,
-        sample_gpu_per_run=1,
-        # alternating=True
+        gpu_per_run=args.n_gpu,
     )
+    samplerCls = GpuSampler
+    collectorCls = GpuResetCollector
+    runnerCls = SyncRlEvalWandb
+
+    if args.async_sample:
+        affinity_dict['async_sample'] = True
+        affinity_dict['sample_gpu_per_run'] = 1
+        affinity_dict['gpu_per_run'] = args.n_gpu - 1
+        samplerCls = AsyncGpuSampler
+        collectorCls = DbGpuResetCollector
+        runnerCls = AsyncRlEvalWandb
+
+    if args.n_gpu == 1:
+        runnerCls = MinibatchRlEvalWandb
+
     affinity = make_affinity(**affinity_dict)
 
     if args.beluga:
@@ -115,6 +128,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
     config["algo"]["n_step_return"] = 5
     config["algo"]["batch_size"] = 128
     config["algo"]["learning_rate"] = 6.25e-5
+    config['algo']['replay_ratio'] = args.replay_ratio
     # config["sampler"]["max_decorrelation_steps"] = 0
     # config["algo"]["min_steps_learn"] = 2e4
     config['sampler']['batch_B'] = 32
@@ -123,10 +137,10 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
     config["sampler"]["eval_max_steps"] = int(125e3)
     config["sampler"]["eval_max_trajectories"] = 8
     wandb.config.update(config)
-    sampler = AsyncGpuSampler(
+    sampler = samplerCls(
         EnvCls=AtariEnv,
         env_kwargs=config["env"],
-        CollectorCls=DbGpuResetCollector,
+        CollectorCls=collectorCls,
         TrajInfoCls=AtariTrajInfo,
         eval_env_kwargs=config["eval_env"],
         **config["sampler"]
@@ -146,7 +160,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
-    runner = AsyncRlEvalWandb(
+    runner = runnerCls(
         algo=algo,
         agent=agent,
         sampler=sampler,
@@ -187,12 +201,15 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='ms_pacman')
+    parser.add_argument('--n-gpu', type=int, default=4)
     parser.add_argument('--debug', action="store_true")
+    parser.add_argument('--async-sample', action="store_true")
     parser.add_argument('--learn-model', action="store_true")
     parser.add_argument('--stack-actions', type=int, default=0)
     parser.add_argument('--grayscale', type=int, default=1)
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=4)
+    parser.add_argument('--replay-ratio', type=int, default=2)
     parser.add_argument('--dynamics-blocks', type=int, default=16)
     parser.add_argument('--norm-type', type=str, default='bn', choices=["bn", "ln", "in", "none"], help='Optimizer')
     parser.add_argument('--film', type=int, default=0)

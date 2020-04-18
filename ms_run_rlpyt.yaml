@@ -32,10 +32,10 @@ storage:
 
 search:
   job_template:
-    name: rlpyt_nce_{game:s}_{random_string:s}
-    sku: G4
+    name: rlpyt_nce_{game:s}_{norm:s}_{replay-ratio:d}_{random_string:s}
+    sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {arguments} --learn-model
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {arguments} --learn-model --norm-type {norm} --replay-ratio {replay-ratio} --n-gpu 1
   type: grid
   max_trials: 16
   params:
@@ -45,3 +45,9 @@ search:
     - name: arguments
       spec: discrete
       values: ['--nce 1 --num-simulations 0 --eval-simulations 0 --jumps 0', '--num-simulations 0 --eval-simulations 0 --jumps 0']
+    - name: norm
+      spec: discrete
+      values: ['bn', 'in', 'ln']
+    - name: replay-ratio
+      spec: discrete
+      values: [2, 4]
