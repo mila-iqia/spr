@@ -187,10 +187,10 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             if self.prioritized_replay:
                 self.replay_buffer.update_batch_priorities(td_abs_errors)
             opt_info.loss.append(loss.item())
-            opt_info.gradNorm.append(grad_norm)
+            opt_info.gradNorm.append(grad_norm.item())
             opt_info.modelRLLoss.append(model_rl_loss.item())
             opt_info.RewardLoss.append(reward_loss.item())
-            opt_info.modelGradNorm.append(model_grad_norm)
+            opt_info.modelGradNorm.append(model_grad_norm.item())
             opt_info.NCELoss.append(nce_loss.item())
             opt_info.NCEAcc.append(nce_accs)
             opt_info.tdAbsErr.extend(td_abs_errors[::8].numpy())  # Downsample.

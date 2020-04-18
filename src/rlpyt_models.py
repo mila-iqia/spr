@@ -12,7 +12,7 @@ from rlpyt.runners.minibatch_rl import MinibatchRlEval
 from rlpyt.utils.tensor import infer_leading_dims, restore_leading_dims
 from src.model_trainer import ValueNetwork, TransitionModel, \
     NetworkOutput, from_categorical, ScaleGradient, BlockNCE, init, \
-    ResidualBlock, renormalize
+    ResidualBlock, renormalize, FiLMTransitionModel, init_normalization
 import numpy as np
 from skimage.util import view_as_windows
 from rlpyt.utils.logging import logger
@@ -158,41 +158,50 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             nce=False,
             augmentation=False,
             stack_actions=False,
+            dynamics_blocks=16,
+            film=False,
+            norm_type="bn"
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
         super().__init__()
         self.dueling = dueling
         f, c, h, w = image_shape
-        self.conv = RepNet(f*c)
+        self.conv = RepNet(f*c, norm_type=norm_type)
         self.jumps = jumps
         self.detach_model = detach_model
         self.nce = nce
         self.augmentation = augmentation
         self.stack_actions = stack_actions
         self.pixels = 25 if self.augmentation else 36
-        # conv_out_size = self.conv.conv_out_size(h, w)
-        # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
-        # self.reward_network = ValueNetwork(conv_out_size)
         if dueling:
             self.head = PizeroDistributionalDuelingHeadModel(256, output_size,
-                                                             pixels=self.pixels)
+                                                             pixels=self.pixels,
+                                                             norm_type=norm_type)
         else:
             self.head = PizeroDistributionalHeadModel(256, output_size,
-                                                      pixels=self.pixels)
+                                                      pixels=self.pixels,
+                                                      norm_type=norm_type)
+            
+        if film:
+            dynamics_model = FiLMTransitionModel
+        else:
+            dynamics_model = TransitionModel
 
-        self.dynamics_model = TransitionModel(channels=256,
-                                              num_actions=output_size,
-                                              pixels=self.pixels,
-                                              limit=1,
-                                              blocks=16)
+        self.dynamics_model = dynamics_model(channels=256,
+                                             num_actions=output_size,
+                                             pixels=self.pixels,
+                                             limit=1,
+                                             blocks=dynamics_blocks,
+                                             norm_type=norm_type)
 
         if self.nce:
             if self.stack_actions:
                 input_size = c - 1
             else:
                 input_size = c
-            self.nce_target_encoder = SmallEncoder(256, input_size)
+            self.nce_target_encoder = SmallEncoder(256, input_size,
+                                                   norm_type=norm_type)
             self.classifier = nn.Sequential(nn.Linear(256, 256),
                                             nn.ReLU(),
                                             nn.Linear(256, 256),
@@ -202,9 +211,13 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         if self.detach_model:
             if dueling:
-                self.target_head = PizeroDistributionalDuelingHeadModel(256, output_size, pixels=self.pixels)
+                self.target_head = PizeroDistributionalDuelingHeadModel(256, output_size,
+                                                                        pixels=self.pixels,
+                                                                        norm_type=norm_type)
             else:
-                self.target_head = PizeroDistributionalHeadModel(256, output_size, pixels=self.pixels)
+                self.target_head = PizeroDistributionalHeadModel(256, output_size,
+                                                                 pixels=self.pixels,
+                                                                 norm_type=norm_type)
 
             for param in self.target_head.parameters():
                 param.requires_grad = False
@@ -299,8 +312,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
             for j in range(1, self.jumps + 1):
                 latent, pred_rew, _, _ = self.step(latent, prev_action[j])
-                pred_latents.append(latent)
                 latent = ScaleGradient.apply(latent, 0.5)
+                pred_latents.append(latent)
                 pred_reward.append(pred_rew)
                 pred_ps.append(self.head_forward(latent,
                                                  prev_action[j],
@@ -310,7 +323,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             if self.nce:
                 if self.stack_actions:
                     observation = observation[:, :, :, :-1]
-                target_images = observation[0:self.jumps + 1, :, -1].transpose(0, 1)
+                if self.jumps > 0:
+                    target_images = observation[0:self.jumps + 1, :, -1].transpose(0, 1)
+                else:
+                    target_images = observation[1, :, -1].transpose(0, 1)
                 target_images = self.transform(target_images)
                 if len(target_images.shape) == 4:
                     target_images = target_images.unsqueeze(2)
@@ -387,12 +403,18 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 class PizeroDistributionalHeadModel(torch.nn.Module):
     """An MLP head which reshapes output to [B, output_size, n_atoms]."""
 
-    def __init__(self, input_channels, output_size, hidden_size=128, pixels=30, n_atoms=51):
+    def __init__(self,
+                 input_channels,
+                 output_size,
+                 hidden_size=128,
+                 pixels=30,
+                 n_atoms=51,
+                 norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size),
+                  init_normalization(hidden_size, norm_type),
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 512),
                   nn.ReLU(),
@@ -408,12 +430,19 @@ class PizeroDistributionalHeadModel(torch.nn.Module):
 class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
     """An MLP head which reshapes output to [B, output_size, n_atoms]."""
 
-    def __init__(self, input_channels, output_size, hidden_size=128, pixels=30, n_atoms=51, grad_scale=2 ** (-1 / 2)):
+    def __init__(self,
+                 input_channels,
+                 output_size,
+                 hidden_size=128,
+                 pixels=30,
+                 n_atoms=51,
+                 grad_scale=2 ** (-1 / 2),
+                 norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
-                  nn.BatchNorm2d(hidden_size),
+                  init_normalization(hidden_size, norm_type),
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 512),
                   nn.ReLU(),
@@ -421,7 +450,7 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
         self.advantage_hidden = nn.Sequential(
             nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
             nn.ReLU(),
-            nn.BatchNorm2d(hidden_size),
+            init_normalization(hidden_size, norm_type),
             nn.Flatten(-3, -1))
         self.advantage_out = torch.nn.Linear(pixels*hidden_size,
                                              output_size * n_atoms, bias=False)
@@ -445,7 +474,10 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
 
 
 class SmallEncoder(nn.Module):
-    def __init__(self, feature_size, input_channels):
+    def __init__(self,
+                 feature_size,
+                 input_channels,
+                 norm_type="bn"):
         super().__init__()
         self.feature_size = feature_size
         self.input_channels = input_channels
@@ -457,16 +489,17 @@ class SmallEncoder(nn.Module):
         self.main = nn.Sequential(
             init_(nn.Conv2d(self.input_channels, 32, 8, stride=2, padding=3)),  # 48x48
             nn.ReLU(),
-            nn.BatchNorm2d(32),
+            init_normalization(32, norm_type),
             init_(nn.Conv2d(32, 64, 4, stride=2, padding=1)),  # 24x24
             nn.ReLU(),
-            nn.BatchNorm2d(64),
+            init_normalization(64, norm_type),
             init_(nn.Conv2d(64, 128, 4, stride=2, padding=1)),  # 12 x 12
             nn.ReLU(),
-            nn.BatchNorm2d(128),
+            init_normalization(128, norm_type),
             init_(nn.Conv2d(128, self.feature_size, 4, stride=2, padding=1)),  # 6 x 6
             nn.ReLU(),
-            init_(nn.Conv2d(self.feature_size, self.feature_size, 1, stride=1, padding=0)),
+            init_(nn.Conv2d(self.feature_size, self.feature_size,
+                            1, stride=1, padding=0)),
             nn.ReLU())
         self.train()
 
@@ -476,25 +509,33 @@ class SmallEncoder(nn.Module):
 
 
 class RepNet(nn.Module):
-    def __init__(self, channels=3):
+    def __init__(self, channels=3, norm_type="bn"):
         super().__init__()
         self.input_channels = channels
         layers = nn.ModuleList()
         hidden_channels = 128
-        layers.append(nn.Conv2d(self.input_channels, hidden_channels, kernel_size=3, stride=2, padding=1))
+        layers.append(nn.Conv2d(self.input_channels, hidden_channels,
+                                kernel_size=3, stride=2, padding=1))
         layers.append(nn.ReLU())
-        layers.append(nn.BatchNorm2d(hidden_channels))
+        layers.append(init_normalization(hidden_channels, norm_type))
         for _ in range(2):
-            layers.append(ResidualBlock(hidden_channels, hidden_channels))
-        layers.append(nn.Conv2d(hidden_channels, hidden_channels * 2, kernel_size=3, stride=2, padding=1))
+            layers.append(ResidualBlock(hidden_channels,
+                                        hidden_channels,
+                                        norm_type))
+        layers.append(nn.Conv2d(hidden_channels, hidden_channels * 2,
+                                kernel_size=3, stride=2, padding=1))
         hidden_channels = hidden_channels * 2
         layers.append(nn.ReLU())
-        layers.append(nn.BatchNorm2d(hidden_channels))
+        layers.append(init_normalization(hidden_channels, norm_type))
         for _ in range(3):
-            layers.append(ResidualBlock(hidden_channels, hidden_channels))
+            layers.append(ResidualBlock(hidden_channels,
+                                        hidden_channels,
+                                        norm_type))
         layers.append(nn.AvgPool2d(2))
         for _ in range(3):
-            layers.append(ResidualBlock(hidden_channels, hidden_channels))
+            layers.append(ResidualBlock(hidden_channels,
+                                        hidden_channels,
+                                        norm_type))
         layers.append(nn.AvgPool2d(2))
         self.network = nn.Sequential(*layers)
         self.train()
