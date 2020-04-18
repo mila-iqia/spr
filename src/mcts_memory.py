@@ -17,6 +17,8 @@ from rlpyt.utils.collections import namedarraytuple
 from rlpyt.utils.misc import extract_sequences
 import traceback
 
+from src.model_trainer import transform
+
 Transition = recordclass('Transition', ('timestep', 'state', 'action', 'reward', 'value', 'policy', 'nonterminal'))
 blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)  # TODO: Set appropriate default policy value
 blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)
@@ -164,7 +166,8 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
     def update_batch_priorities(self, priorities):
         with self.rw_lock.write_lock:
             priorities = numpify_buffer(priorities)
-            self.default_priority = max(priorities)
+            if not self.input_priorities:
+                self.default_priority = max(priorities)
             self.priority_tree.update_batch_priorities(priorities ** self.alpha)
 
     def sanitize_batch(self, batch):
@@ -233,7 +236,7 @@ class LocalBuffer:
 
         value_targets = discounted_rewards + value_targets
 
-        errors = torch.abs(value_estimates[self.args.multistep:] - value_targets) + 0.001
+        errors = transform(torch.abs(value_estimates[self.args.multistep:] - value_targets) + 1e-5)
 
         return errors
 

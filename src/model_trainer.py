@@ -584,7 +584,7 @@ class MCTSModel(nn.Module):
             nce_losses = np.zeros(self.jumps + 1)
 
         if self.args.prioritized:
-            buffer.update_batch_priorities(value_errors[0] + 1e-5)
+            buffer.update_batch_priorities(transform(value_errors[0] + 1e-5))
 
         mean_values = torch.mean(torch.stack(pred_values, 0), -1).detach().cpu().numpy()
         mean_rewards = torch.mean(torch.stack(pred_rewards, 0), -1).detach().cpu().numpy()
