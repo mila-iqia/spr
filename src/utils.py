@@ -82,7 +82,6 @@ def get_args():
     parser.add_argument('--entropy-loss-weight', type=float, default=0.0)
     parser.add_argument('--init-value-scale', type=float, default=1.)
     parser.add_argument('--film', action='store_true')
-    parser.add_argument('--profile', action='store_true')
     parser.add_argument('--no-nce', action='store_true')
     parser.add_argument('--reanalyze', action='store_true')
     parser.add_argument('--use-all-targets', action='store_true')
