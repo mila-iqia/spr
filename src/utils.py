@@ -91,6 +91,7 @@ def get_args():
     parser.add_argument('--epsilon', type=int, default=0.01)
     parser.add_argument('--no-search-value-targets', action='store_true')
     parser.add_argument('--prioritized', action='store_true')
+    parser.add_argument('--norm-type', type=str, default='bn', choices=["bn", "ln", "in", "none"])
     parser.add_argument('--evaluation-interval', type=int, default=80000,
                         help='Evaluate after every {evaluation-interval} env steps')
     parser.add_argument('--log-interval', type=int, default=3200,
