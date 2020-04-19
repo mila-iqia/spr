@@ -684,7 +684,7 @@ class TransitionModel(nn.Module):
 
     def forward(self, x, action):
         # Tranform action to one-hot planes of size num*actions*6*6
-        action_onehot = torch.zeros(action.shape[0], self.num_actions, 6, 6)
+        action_onehot = torch.zeros(action.shape[0], self.num_actions, 6, 6, device=action.device)
         action_onehot[:, action, :, :] = 1
         stacked_image = torch.cat([x, action_onehot], 1)
         next_state = self.network(stacked_image)
