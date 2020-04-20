@@ -396,6 +396,7 @@ class MCTSModel(nn.Module):
         reward = inverse_transform(from_categorical(reward_logits, logits=True))
         return NetworkOutput(hidden_state, reward, policy_logits, value)
 
+    @torch.no_grad()
     def value_target_network(self, obs, actions):
         if len(obs.shape) < 5:
             obs = obs.unsqueeze(0)
@@ -684,8 +685,9 @@ class TransitionModel(nn.Module):
 
     def forward(self, x, action):
         # Tranform action to one-hot planes of size num*actions*6*6
+        batch_range = torch.arange(action.shape[0], device=action.device)
         action_onehot = torch.zeros(action.shape[0], self.num_actions, 6, 6, device=action.device)
-        action_onehot[:, action, :, :] = 1
+        action_onehot[batch_range, action, :, :] = 1
         stacked_image = torch.cat([x, action_onehot], 1)
         next_state = self.network(stacked_image)
         next_state = renormalize(next_state, 1)
@@ -975,7 +977,7 @@ class RepNet(nn.Module):
 
 
 def transform(value, eps=0.001):
-    value = value.float()  # Avoid any fp16 shenanigans
+    # value = value.float()  # Avoid any fp16 shenanigans
     value = torch.sign(value) * (torch.sqrt(torch.abs(value) + 1) - 1) + eps * value
     return value
 
@@ -986,7 +988,7 @@ def inverse_transform(value, eps=0.001):
 
 
 def to_categorical(value, limit=300):
-    value = value.float()  # Avoid any fp16 shenanigans
+    # value = value.float()  # Avoid any fp16 shenanigans
     value = value.clamp(-limit, limit)
     distribution = torch.zeros(value.shape[0], (limit*2+1), device=value.device)
     lower = value.floor().long() + limit

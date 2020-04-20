@@ -272,6 +272,8 @@ class VectorizedMCTS:
         # Select most visited node, break ties by action score
         max_actions = (self.visit_count[:, 0] + (self.q[:, 0] / 10000.)).argmax(dim=-1)
         actions = e_action * random_actions + (1-e_action) * max_actions
+        # policy = torch.zeros_like(self.visit_count[:, 0]**(1/t), device=self.visit_count.device)
+        # policy[self.batch_range, max_actions] = 1.
         return actions, policy.probs
 
     def visit_softmax_temperature(self):
