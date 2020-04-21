@@ -656,8 +656,9 @@ class TransitionModel(nn.Module):
                  norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
+        self.num_actions = num_actions
         self.args = args
-        layers = [Conv2dSame(channels+action_dim, hidden_size, 3),
+        layers = [Conv2dSame(channels+num_actions, hidden_size, 3),
                   nn.ReLU(),
                   init_normalization(hidden_size, norm_type)]
         for _ in range(blocks):
