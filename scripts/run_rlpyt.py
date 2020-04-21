@@ -34,19 +34,18 @@ from src.rlpyt_atari_env import AtariEnv
 
 def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach_model=1, args=None):
     config = configs['ernbw']
-    config['runner']['log_interval_steps'] = 1e5
     config['env']['game'] = game
     config["env"]["stack_actions"] = args.stack_actions
     config["env"]["grayscale"] = args.grayscale
     config["eval_env"]["game"] = config["env"]["game"]
     config["eval_env"]["stack_actions"] = args.stack_actions
     config["eval_env"]["grayscale"] = args.grayscale
-    config["algo"]["n_step_return"] = 5
     config["algo"]["prioritized_replay"] = True
     config["algo"]["min_steps_learn"] = 1e3
     config["algo"]["n_step_return"] = 20
     config["algo"]["batch_size"] = 64
     config["algo"]["learning_rate"] = 0.0001
+    config['algo']['replay_ratio'] = args.replay_ratio
     config["sampler"]["eval_max_trajectories"] = 5
     config["sampler"]["eval_n_envs"] = 5
     wandb.config.update(config)
