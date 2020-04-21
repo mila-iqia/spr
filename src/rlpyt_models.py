@@ -1,8 +1,6 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-from torchvision.transforms import Compose, RandomCrop,\
-    ToPILImage, ToTensor, RandomChoice, RandomAffine, CenterCrop
 
 from rlpyt.models.dqn.atari_catdqn_model import DistributionalHeadModel
 from rlpyt.models.dqn.dueling import DistributionalDuelingHeadModel
@@ -13,11 +11,11 @@ from rlpyt.utils.tensor import infer_leading_dims, restore_leading_dims
 from src.model_trainer import ValueNetwork, TransitionModel, \
     NetworkOutput, from_categorical, ScaleGradient, BlockNCE, init, \
     ResidualBlock, renormalize, FiLMTransitionModel, init_normalization
+from src.buffered_nce import BufferedNCE
 import numpy as np
-from skimage.util import view_as_windows
+from kornia.augmentation import RandomAffine, RandomCrop, CenterCrop
 from rlpyt.utils.logging import logger
 import wandb
-import time
 
 
 class AsyncRlEvalWandb(AsyncRlEval):
@@ -156,7 +154,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             jumps=0,
             detach_model=True,
             nce=False,
-            augmentation=False,
+            nce_type="stdim",
+            augmentation="none",
             stack_actions=False,
             dynamics_blocks=16,
             film=False,
@@ -171,9 +170,23 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.jumps = jumps
         self.detach_model = detach_model
         self.nce = nce
-        self.augmentation = augmentation
+        self.nce_type = nce_type
+        self.augmentation = augmentation.lower()
         self.stack_actions = stack_actions
-        self.pixels = 25 if self.augmentation else 36
+
+        assert self.augmentation in ["affine", "crop", "none"]
+        if self.augmentation == "affine":
+            self.transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
+            self.eval_transformation = nn.Identity()
+            self.pixels = 36
+        elif self.augmentation == "crop":
+            self.transformation = RandomCrop((84, 84))
+            self.eval_transformation = CenterCrop((84, 84))
+            self.pixels = 25
+        else:
+            self.transformation = self.eval_transformation = nn.Identity()
+            self.pixels = 36
+
         if dueling:
             self.head = PizeroDistributionalDuelingHeadModel(256, output_size,
                                                              pixels=self.pixels,
@@ -182,7 +195,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.head = PizeroDistributionalHeadModel(256, output_size,
                                                       pixels=self.pixels,
                                                       norm_type=norm_type)
-            
+
         if film:
             dynamics_model = FiLMTransitionModel
         else:
@@ -195,7 +208,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                              blocks=dynamics_blocks,
                                              norm_type=norm_type)
 
-        if self.nce:
+        assert self.nce_type in ["stdim", "moco"]
+        if self.nce and self.nce_type == "stdim":
             if self.stack_actions:
                 input_size = c - 1
             else:
@@ -208,6 +222,25 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                             nn.ReLU())
             self.nce = BlockNCE(self.classifier,
                                 use_self_targets=False)
+        elif self.nce and self.nce_type == "moco":
+            self.nce_target_encoder = RepNet(f*c, norm_type=norm_type)
+            self.nce = BufferedNCE(256, 2**14, buffer_names=["main"])
+            self.classifier = \
+                PizeroDistributionalDuelingHeadModel(256, 1,
+                                                     pixels=self.pixels,
+                                                     norm_type=norm_type,
+                                                     n_atoms=256)
+            self.target_classifier =\
+                PizeroDistributionalDuelingHeadModel(256, 1,
+                                                     pixels=self.pixels,
+                                                     norm_type=norm_type,
+                                                     n_atoms=256)
+            # self.target_classifier.load_state_dict(self.classifier.state_dict())
+            # self.nce_target_encoder.load_state_dict(self.conv.state_dict())
+            for param in self.target_classifier.parameters():
+                param.requires_grad = False
+            for param in self.nce_target_encoder.parameters():
+                param.requires_grad = False
 
         if self.detach_model:
             if dueling:
@@ -222,38 +255,56 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             for param in self.target_head.parameters():
                 param.requires_grad = False
 
-        # if self.augmentation:
-        #     transforms = list()
-        #     transforms.append(ToPILImage())
-        #     transforms.append(RandomCrop((84, 84)))
-        #     transforms.append(ToTensor())
-        #     self.transforms = Compose(transforms)
-        #     eval_transforms = list()
-        #     eval_transforms.append(ToPILImage())
-        #     eval_transforms.append(CenterCrop((84, 84)))
-        #     eval_transforms.append(ToTensor())
-        #     self.eval_transforms = Compose(eval_transforms)
+    def do_moco_nce(self, pred_latents, observation):
+        pred_latents = torch.stack(pred_latents, 1).flatten(0, 1)
+        pred_latents = self.classifier(pred_latents)[:, 0, :]
+        if self.stack_actions:
+            observation = observation[:, :, :, :-1]
+        target_images = observation[0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
+        target_images = self.transform(target_images)
+        with torch.no_grad():
+            target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
+            target_latents = self.target_classifier(target_latents)[:, 0, :]
+            update_state_dict(self.nce_target_encoder, self.conv.state_dict(), 0.001)
+            update_state_dict(self.target_classifier, self.classifier.state_dict(), 0.001)
+
+        nce_loss, _, nce_accs = self.nce.compute_loss(pred_latents, target_latents, "main")
+        nce_loss = nce_loss.mean(0)
+        nce_accs = nce_accs.mean().item()
+        self.nce.update_buffer(target_latents, "main")
+
+        return nce_loss, nce_accs
+
+    def do_stdim_nce(self, pred_latents, observation):
+        if self.stack_actions:
+            observation = observation[:, :, :, :-1]
+        if self.jumps > 0:
+            target_images = observation[0:self.jumps + 1, :, -1].transpose(0, 1)
+        else:
+            target_images = observation[1, :, -1].transpose(0, 1)
+        target_images = self.transform(target_images)
+        if len(target_images.shape) == 4:
+            target_images = target_images.unsqueeze(2)
+        target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
+        target_latents = target_latents.view(observation.shape[1], -1,
+                                             *target_latents.shape[1:])
+        target_latents = target_latents.flatten(3, 4).permute(3, 0, 1, 2)
+        target_latents = target_latents.permute(0, 2, 1, 3)
+        nce_input = torch.stack(pred_latents, 1).flatten(3, 4).permute(3, 1, 0, 2)
+        nce_loss, nce_accs = self.nce.forward(nce_input, target_latents)
+        nce_loss = nce_loss.mean(0)
+        nce_accs = nce_accs.mean()
+
+        return nce_loss, nce_accs
 
     def transform(self, images, eval=False):
         images = images.float()/255. if images.dtype == torch.uint8 else images
-        if not self.augmentation:
-            return images
-        flat_images = images.view(-1, *images.shape[-3:])
+        flat_images = images.reshape(-1, *images.shape[-3:])
         if eval:
-            processed_images = flat_images[:, :, 8:-8, 8:-8]
+            processed_images = self.eval_transformation(flat_images)
         else:
-            flat_images = flat_images.cpu().numpy()
-            processed_images = curl_random_crop(flat_images, 84)
-            processed_images = torch.from_numpy(processed_images).to(images.device)
-
-        processed_images.view(*images.shape[:-3], *processed_images.shape[1:])
-        #
-        # transforms = self.eval_transforms if eval else self.transforms
-        # if eval:
-        #
-        # processed_images = [transforms(i.cpu()) for i in flat_images]
-        # processed_images = torch.stack(processed_images).to(images.device)
-        # processed_images.view(*images.shape[:-3], *processed_images.shape[1:])
+            processed_images = self.transformation(flat_images)
+        processed_images = processed_images.view(*images.shape[:-3], *processed_images.shape[1:])
         return processed_images
 
     def stem_parameters(self):
@@ -299,7 +350,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
             pred_latents.append(latent)
 
-
             if self.detach_model and self.jumps > 0:
                 # copy_start = time.time()
                 self.target_head.load_state_dict(self.head.state_dict())
@@ -320,26 +370,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  prev_reward[j],
                                                  target=self.detach_model))
 
-            if self.nce:
-                if self.stack_actions:
-                    observation = observation[:, :, :, :-1]
-                if self.jumps > 0:
-                    target_images = observation[0:self.jumps + 1, :, -1].transpose(0, 1)
-                else:
-                    target_images = observation[1, :, -1].transpose(0, 1)
-                target_images = self.transform(target_images)
-                if len(target_images.shape) == 4:
-                    target_images = target_images.unsqueeze(2)
-                target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
-                target_latents = target_latents.view(observation.shape[1], -1,
-                                                     *target_latents.shape[1:])
-                target_latents = target_latents.flatten(3, 4).permute(3, 0, 1, 2)
-                target_latents = target_latents.permute(0, 2, 1, 3)
-                nce_input = torch.stack(pred_latents, 1).flatten(3, 4).permute(3, 1, 0, 2)
-                nce_loss, nce_accs = self.nce.forward(nce_input, target_latents)
-                nce_loss = nce_loss.mean(0)
-                nce_accs = nce_accs.mean()
-
+            if self.nce and self.nce_type == "stdim":
+                nce_loss, nce_accs = self.do_stdim_nce(pred_latents, observation)
+            elif self.nce and self.nce_type == "moco":
+                nce_loss, nce_accs = self.do_moco_nce(pred_latents, observation)
             else:
                 nce_loss = 0
                 nce_accs = 0
@@ -372,9 +406,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, True)
         hidden_state = self.conv(obs)
-        # if not self.args.q_learning:
-        #     policy_logits = self.policy_model(hidden_state)
-        # else:
         policy_logits = None
         value_logits = self.head(hidden_state)
         reward_logits = self.dynamics_model.reward_predictor(hidden_state)
@@ -399,6 +430,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         policy_logits = None
         value_logits = self.head(next_state)
         return next_state, reward_logits, policy_logits, value_logits
+
 
 class PizeroDistributionalHeadModel(torch.nn.Module):
     """An MLP head which reshapes output to [B, output_size, n_atoms]."""
