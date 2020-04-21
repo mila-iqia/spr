@@ -656,8 +656,9 @@ class TransitionModel(nn.Module):
                  norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
+        self.num_actions = num_actions
         self.args = args
-        layers = [Conv2dSame(channels+action_dim, hidden_size, 3),
+        layers = [Conv2dSame(channels+num_actions, hidden_size, 3),
                   nn.ReLU(),
                   init_normalization(hidden_size, norm_type)]
         for _ in range(blocks):
@@ -677,8 +678,10 @@ class TransitionModel(nn.Module):
         self.train()
 
     def forward(self, x, action):
-        action_embedding = self.action_embedding(action).view(x.shape[0], -1, x.shape[-2], x.shape[-1])
-        stacked_image = torch.cat([x, action_embedding], 1)
+        batch_range = torch.arange(action.shape[0], device=action.device)
+        action_onehot = torch.zeros(action.shape[0], self.num_actions, 6, 6, device=action.device)
+        action_onehot[batch_range, action, :, :] = 1
+        stacked_image = torch.cat([x, action_onehot], 1)
         next_state = self.network(stacked_image)
         next_state = renormalize(next_state, 1)
         next_reward = self.reward_predictor(next_state)

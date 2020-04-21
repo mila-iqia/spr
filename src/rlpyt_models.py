@@ -7,6 +7,7 @@ from rlpyt.models.dqn.dueling import DistributionalDuelingHeadModel
 from rlpyt.models.utils import scale_grad, update_state_dict
 from rlpyt.runners.async_rl import AsyncRlEval
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
+from rlpyt.runners.sync_rl import SyncRlMixin, SyncWorkerEval
 from rlpyt.utils.tensor import infer_leading_dims, restore_leading_dims
 from src.model_trainer import ValueNetwork, TransitionModel, \
     NetworkOutput, from_categorical, ScaleGradient, BlockNCE, init, \
@@ -76,6 +77,22 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
                 logger.record_tabular_misc_stat(k, v)
                 self.wandb_info[k] = np.average(v)
         self._opt_infos = {k: list() for k in self._opt_infos}  # (reset)
+
+
+class SyncRlEvalWandb(SyncRlMixin, MinibatchRlEvalWandb):
+    """
+    Multi-process RL with offline agent performance evaluation.  Only the
+    master process runs agent evaluation.
+    """
+
+    @property
+    def WorkerCls(self):
+        return SyncWorkerEval
+
+    def log_diagnostics(self, *args, **kwargs):
+        super().log_diagnostics(*args, **kwargs)
+        self.par.barrier.wait()
+
 
 class PizeroCatDqnModel(torch.nn.Module):
     """2D conlutional network feeding into MLP with ``n_atoms`` outputs
