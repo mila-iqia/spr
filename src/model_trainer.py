@@ -347,9 +347,15 @@ class MCTSModel(nn.Module):
                                                   norm_type=args.norm_type)
         if self.args.q_learning:
             self.value_model = QNetwork(args.hidden_size, num_actions, args.norm_type)
+            self.value_model = QNetwork(input_channels=args.hidden_size,
+                                        num_actions=num_actions,
+                                        norm_type=args.norm_type)
         else:
-            self.value_model = ValueNetwork(args.hidden_size, args.norm_type)
-            self.policy_model = PolicyNetwork(args.hidden_size, num_actions, args.norm_type)
+            self.value_model = ValueNetwork(input_channels=args.hidden_size,
+                                            norm_type=args.norm_type)
+            self.policy_model = PolicyNetwork(input_channels=args.hidden_size,
+                                              num_actions=num_actions,
+                                              norm_type=args.norm_type)
         self.encoder = RepNet(args.framestack,
                               grayscale=args.grayscale,
                               actions=False,
