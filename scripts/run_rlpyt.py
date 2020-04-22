@@ -58,7 +58,10 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         eval_env_kwargs=dict(game=game),
         batch_T=1,  # Four time-steps per sampler iteration.
         batch_B=1,
-        max_decorrelation_steps=0
+        max_decorrelation_steps=0,
+        eval_n_envs=4,
+        eval_max_steps=int(125e3),
+        eval_max_trajectories=100,
     )
     args.discount = config["algo"]["discount"]
     if model:
