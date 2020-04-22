@@ -83,6 +83,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         n_steps=50e4,
         log_interval_steps=1e4,
         affinity=dict(cuda_idx=cuda_idx),
+        seed=42
     )
     config = dict(game=game)
     name = "dqn_" + game
