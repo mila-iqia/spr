@@ -76,7 +76,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
-    runner = MinibatchRl(
+    runner = MinibatchRlEvalWandb(
         algo=algo,
         agent=agent,
         sampler=sampler,
