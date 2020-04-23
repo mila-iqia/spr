@@ -48,8 +48,8 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = 25
     config['algo']['eps_steps'] = int(5e4)
-    config["sampler"]["eval_max_trajectories"] = 10
-    config["sampler"]["eval_n_envs"] = 10
+    config["sampler"]["eval_max_trajectories"] = 50
+    config["sampler"]["eval_n_envs"] = 50
     wandb.config.update(config)
     sampler = SerialSampler(
         EnvCls=AtariEnv,
