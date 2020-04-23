@@ -102,9 +102,8 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                 batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
                 policies = torch.from_numpy(extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
                 values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
-                batch = list(batch)
-                batch = SamplesFromReplayExt(*batch, policy_probs=policies, values=values)
-                return batch
+                batch = [batch.__getattribute__(field).clone() if batch.__getattribute__(field) is not None else None for field in batch._fields]
+                batch = SamplesFromReplayExt(*batch, policy_probs=policies.clone(), values=values.clone())
                 return self.sanitize_batch(batch)
             except:
                 print("FAILED TO LOAD BATCH")
@@ -150,9 +149,8 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
 
                 policies = torch.from_numpy(extract_sequences(self.samples.policy_probs, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
                 values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
-                batch = list(batch)
+                batch = [batch.__getattribute__(field).clone() if batch.__getattribute__(field) is not None else None for field in batch._fields]
                 batch = SamplesFromReplayPriExt(*batch, is_weights=is_weights, policy_probs=policies, values=values)
-                return batch
                 return self.sanitize_batch(batch)
             except Exception as e:
                 print("FAILED TO LOAD BATCH")
@@ -175,7 +173,6 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
         for i, (has_done, ind) in enumerate(zip(has_dones, inds)):
             if not has_done:
                 continue
-            batch.all_observation[ind+1:, i] = batch.all_observation[ind, i]
             batch.policy_probs[ind+1:, i] = batch.policy_probs[ind, i]
             batch.all_reward[ind+1:, i] = 0
             batch.return_[ind+1:, i] = 0

@@ -523,7 +523,6 @@ class MCTSModel(nn.Module):
                                 pred_value))
             pred_states.append(current_state)
 
-        not_done_mask = torch.ones_like(done[0], device=self.args.device)
         for i, prediction in enumerate(predictions):
             # recall that predictions_i is r_i, pi_i+1, v_i+1
             loss_scale, pred_reward, pred_policy, pred_value = prediction
@@ -558,7 +557,7 @@ class MCTSModel(nn.Module):
             current_value_loss = -torch.sum(value_target * pred_value, -1)
             current_policy_loss = -torch.sum(policies[i] * pred_policy, -1)
 
-            loss = loss + loss_scale * (not_done_mask * is_weights * (
+            loss = loss + loss_scale * (is_weights * (
                        current_value_loss*self.args.value_loss_weight +
                        current_policy_loss*self.args.policy_loss_weight +
                        current_reward_loss*self.args.reward_loss_weight -
@@ -572,7 +571,6 @@ class MCTSModel(nn.Module):
             reward_losses.append(current_reward_loss.detach().mean().cpu().item())
             value_losses.append(current_value_loss.detach().mean().cpu().item())
             policy_losses.append(current_policy_loss.detach().mean().cpu().item())
-            not_done_mask *= (1 - done[i])
 
         if not self.no_nce:
             # if self.use_all_targets:
