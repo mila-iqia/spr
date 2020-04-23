@@ -11,7 +11,7 @@ environment:
     - export PATH=$$PATH:~/.local/bin
     - export LC_ALL=C.UTF-8
     - export LANG=C.UTF-8
-    - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill
+    - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill kornia
     - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
     - pip install --user git+git://github.com/astooke/rlpyt
     - pip install --user pillow==6.2.1 scikit-image
@@ -29,25 +29,24 @@ storage:
 
 # data
 #   data upload is not required for this example
-
 search:
   job_template:
-    name: rlpyt_nce_{game:s}_{norm:s}_{replay-ratio:d}_{random_string:s}
-    sku: G1
+    name: rlpyt_nce_{jumps:d}_{replay-ratio:d}_{arguments:s}_{random_string:s}
+    sku: G2
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {arguments} --learn-model --norm-type {norm} --replay-ratio {replay-ratio} --n-gpu 1
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4
   type: grid
-  max_trials: 16
+  max_trials: 100
   params:
     - name: game
       spec: discrete
       values: ['ms_pacman']
     - name: arguments
       spec: discrete
-      values: ['--nce 1 --num-simulations 0 --eval-simulations 0 --jumps 0', '--num-simulations 0 --eval-simulations 0 --jumps 0']
-    - name: norm
+      values: ['', '--nce 1', '--nce 1 --nce-type moco', '--nce 1 --augmentation crop --nce-type moco', '--nce 1 --augmentation crop --nce-type moco --eval-augmentation 1 --target-augmentation 1', '--augmentation crop --nce-type moco', '--augmentation crop --nce-type moco --eval-augmentation 1 --target-augmentation 1', '--augmentation affine --nce-type moco']
+    - name: jumps
       spec: discrete
-      values: ['bn', 'in', 'ln']
+      values: [0, 4]
     - name: replay-ratio
       spec: discrete
-      values: [2, 4]
+      values: [32, 256]
