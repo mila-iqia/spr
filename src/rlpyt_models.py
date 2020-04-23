@@ -180,10 +180,13 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             film=False,
             norm_type="bn",
             encoder="repnet",
+            noisy_nets=0
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
         super().__init__()
+
+        self.noisy = noisy_nets
 
         self.augmentation = augmentation.lower()
         assert self.augmentation in ["affine", "crop", "none"]
@@ -249,8 +252,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 input_size = c - 1
             else:
                 input_size = c
-            self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
-                                                   norm_type=norm_type)
+            if encoder == "curl":
+                self.nce_target_encoder = CurlEncoder(input_size, norm_type=norm_type)
+            else:
+                self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
+                                                       norm_type=norm_type)
             self.classifier = nn.Sequential(nn.Linear(self.hidden_size, self.hidden_size),
                                             nn.ReLU(),
                                             nn.Linear(self.hidden_size, self.hidden_size),
