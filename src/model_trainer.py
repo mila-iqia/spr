@@ -347,9 +347,15 @@ class MCTSModel(nn.Module):
                                                   norm_type=args.norm_type)
         if self.args.q_learning:
             self.value_model = QNetwork(args.hidden_size, num_actions, args.norm_type)
+            self.value_model = QNetwork(input_channels=args.hidden_size,
+                                        num_actions=num_actions,
+                                        norm_type=args.norm_type)
         else:
-            self.value_model = ValueNetwork(args.hidden_size, args.norm_type)
-            self.policy_model = PolicyNetwork(args.hidden_size, num_actions, args.norm_type)
+            self.value_model = ValueNetwork(input_channels=args.hidden_size,
+                                            norm_type=args.norm_type)
+            self.policy_model = PolicyNetwork(input_channels=args.hidden_size,
+                                              num_actions=num_actions,
+                                              norm_type=args.norm_type)
         self.encoder = RepNet(args.framestack,
                               grayscale=args.grayscale,
                               actions=False,
@@ -679,7 +685,11 @@ class TransitionModel(nn.Module):
 
     def forward(self, x, action):
         batch_range = torch.arange(action.shape[0], device=action.device)
-        action_onehot = torch.zeros(action.shape[0], self.num_actions, 6, 6, device=action.device)
+        action_onehot = torch.zeros(action.shape[0],
+                                    self.num_actions,
+                                    x.shape[-2],
+                                    x.shape[-1],
+                                    device=action.device)
         action_onehot[batch_range, action, :, :] = 1
         stacked_image = torch.cat([x, action_onehot], 1)
         next_state = self.network(stacked_image)
@@ -832,13 +842,15 @@ class Conv2dSame(torch.nn.Module):
                  out_channels,
                  kernel_size,
                  bias=True,
+                 stride=1,
                  padding_layer=nn.ReflectionPad2d):
         super().__init__()
         ka = kernel_size // 2
         kb = ka - 1 if kernel_size % 2 == 0 else ka
         self.net = torch.nn.Sequential(
             padding_layer((ka, kb, ka, kb)),
-            torch.nn.Conv2d(in_channels, out_channels, kernel_size, bias=bias)
+            torch.nn.Conv2d(in_channels, out_channels, kernel_size, bias=bias,
+                            stride=stride)
         )
 
     def forward(self, x):
