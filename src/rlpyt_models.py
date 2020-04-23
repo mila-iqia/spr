@@ -16,6 +16,7 @@ from src.buffered_nce import BufferedNCE
 import numpy as np
 from kornia.augmentation import RandomAffine, RandomCrop, CenterCrop
 from rlpyt.utils.logging import logger
+import copy
 import wandb
 
 
@@ -228,11 +229,13 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         if dueling:
             self.head = PizeroDistributionalDuelingHeadModel(self.hidden_size, output_size,
                                                              pixels=self.pixels,
-                                                             norm_type=norm_type)
+                                                             norm_type=norm_type,
+                                                             noisy=self.noisy)
         else:
             self.head = PizeroDistributionalHeadModel(self.hidden_size, output_size,
                                                       pixels=self.pixels,
-                                                      norm_type=norm_type)
+                                                      norm_type=norm_type,
+                                                      noisy=self.noisy)
 
         if film:
             dynamics_model = FiLMTransitionModel
@@ -264,20 +267,20 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.nce = BlockNCE(self.classifier,
                                 use_self_targets=False)
         elif self.nce and self.nce_type == "moco":
-            self.nce_target_encoder = RepNet(f*c, norm_type=norm_type)
+            self.nce_target_encoder = copy.deepcopy(self.conv)
             self.nce = BufferedNCE(self.hidden_size, 2**14, buffer_names=["main"])
             self.classifier = \
-                PizeroDistributionalDuelingHeadModel(self.hidden_size, 1,
-                                                     pixels=self.pixels,
-                                                     norm_type=norm_type,
-                                                     n_atoms=self.hidden_size)
+                PizeroDistributionalHeadModel(self.hidden_size, 1,
+                                              pixels=self.pixels,
+                                              norm_type=norm_type,
+                                              n_atoms=self.hidden_size,
+                                              noisy=self.noisy)
             self.target_classifier =\
-                PizeroDistributionalDuelingHeadModel(self.hidden_size, 1,
-                                                     pixels=self.pixels,
-                                                     norm_type=norm_type,
-                                                     n_atoms=self.hidden_size)
-            # self.target_classifier.load_state_dict(self.classifier.state_dict())
-            # self.nce_target_encoder.load_state_dict(self.conv.state_dict())
+                PizeroDistributionalHeadModel(self.hidden_size, 1,
+                                              pixels=self.pixels,
+                                              norm_type=norm_type,
+                                              n_atoms=self.hidden_size,
+                                              noisy=self.noisy)
             for param in self.target_classifier.parameters():
                 param.requires_grad = False
             for param in self.nce_target_encoder.parameters():
@@ -377,6 +380,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
         # start = time.time()
+
+        if self.noisy:
+            self.head.reset_noise()
+
         if jumps:
             pred_ps = []
             pred_reward = []
@@ -389,7 +396,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             pred_ps.append(self.head_forward(latent,
                                              prev_action[0],
                                              prev_reward[0]),)
-
             pred_latents.append(latent)
 
             if self.detach_model and self.jumps > 0:
@@ -492,13 +498,15 @@ class PizeroDistributionalHeadModel(torch.nn.Module):
         else:
             linear = nn.Linear
         self.hidden_size = hidden_size
+        self.linears = [linear(pixels*hidden_size, 512),
+                        linear(512, output_size * n_atoms)]
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   init_normalization(hidden_size, norm_type),
                   nn.Flatten(-3, -1),
-                  linear(pixels*hidden_size, 512),
+                  self.linears[0],
                   nn.ReLU(),
-                  linear(512, output_size*n_atoms)]
+                  self.linears[1]]
         self.network = nn.Sequential(*layers)
         self._output_size = output_size
         self._n_atoms = n_atoms
@@ -506,6 +514,9 @@ class PizeroDistributionalHeadModel(torch.nn.Module):
     def forward(self, input):
         return self.network(input).view(-1, self._output_size, self._n_atoms)
 
+    def reset_noise(self):
+        for module in self.linears:
+            module.reset_noise()
 
 class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
     """An MLP head which reshapes output to [B, output_size, n_atoms]."""
@@ -522,20 +533,24 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         linear = NoisyLinear if noisy else nn.Linear
+        self.linears = [linear(pixels*hidden_size, 512),
+                        linear(512, n_atoms),
+                        linear(pixels * hidden_size,
+                               output_size * n_atoms, bias=False)
+                        ]
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   init_normalization(hidden_size, norm_type),
                   nn.Flatten(-3, -1),
-                  linear(pixels*hidden_size, 512),
+                  self.linears[0],
                   nn.ReLU(),
-                  linear(512, n_atoms)]
+                  self.linears[1]]
         self.advantage_hidden = nn.Sequential(
             nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
             nn.ReLU(),
             init_normalization(hidden_size, norm_type),
             nn.Flatten(-3, -1))
-        self.advantage_out = linear(pixels*hidden_size,
-                                    output_size * n_atoms, bias=False)
+        self.advantage_out = self.linears[2]
         self.advantage_bias = torch.nn.Parameter(torch.zeros(n_atoms))
         self.value = nn.Sequential(*layers)
         self._grad_scale = grad_scale
@@ -554,6 +569,9 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
         x = x.view(-1, self._output_size, self._n_atoms)
         return x + self.advantage_bias
 
+    def reset_noise(self):
+        for module in self.linears:
+            module.reset_noise()
 
 class CurlEncoder(nn.Module):
     def __init__(self,
