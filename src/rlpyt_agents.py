@@ -504,7 +504,11 @@ class VectorizedQMCTS(VectorizedMCTS):
 
         # end = time.time()
         # print("Searched {} environments with {} sims, took {}".format(obs.shape[0], self.n_sims, end-start))
-        return action.squeeze(), self.q[:, 0].squeeze(), \
+        if len(action.size()) == 0:
+            action = action.unsqueeze(-1)
+        elif len(action.size()) > 1:
+            action = action.squeeze()
+        return action, self.q[:, 0].squeeze(), \
                value.squeeze(), initial_value
 
     def value_score(self, sim_id):

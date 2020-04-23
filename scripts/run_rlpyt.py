@@ -46,17 +46,22 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["algo"]["batch_size"] = 64
     config["algo"]["learning_rate"] = 0.0001
     config['algo']['replay_ratio'] = args.replay_ratio
-    config["sampler"]["eval_max_trajectories"] = 5
-    config["sampler"]["eval_n_envs"] = 5
+    config['algo']['target_update_interval'] = 25
+    config['algo']['eps_steps'] = int(5e4)
+    config["sampler"]["eval_max_trajectories"] = 10
+    config["sampler"]["eval_n_envs"] = 10
     wandb.config.update(config)
     sampler = SerialSampler(
         EnvCls=AtariEnv,
         TrajInfoCls=AtariTrajInfo,  # default traj info + GameScore
         env_kwargs=config["env"],
         eval_env_kwargs=dict(game=game),
-        batch_T=4,  # Four time-steps per sampler iteration.
-        batch_B=4,
-        max_decorrelation_steps=1000,
+        batch_T=1,  # Four time-steps per sampler iteration.
+        batch_B=1,
+        max_decorrelation_steps=0,
+        eval_n_envs=4,
+        eval_max_steps=int(125e3),
+        eval_max_trajectories=100,
     )
     args.discount = config["algo"]["discount"]
     if model:
@@ -77,13 +82,14 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
-    runner = MinibatchRl(
+    runner = MinibatchRlEvalWandb(
         algo=algo,
         agent=agent,
         sampler=sampler,
-        n_steps=50e6,
-        log_interval_steps=1e3,
+        n_steps=50e4,
+        log_interval_steps=1e4,
         affinity=dict(cuda_idx=cuda_idx),
+        seed=42
     )
     config = dict(game=game)
     name = "dqn_" + game
