@@ -183,12 +183,17 @@ class VectorizedMCTS:
         if self.network.pixels == 36:
             self.pixels_shape = (6, 6)
             self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
-                                             self.args.latent_size, 6, 6),
+                                             self.network.hidden_size, 6, 6),
                                             device=self.device)
         if self.network.pixels == 25:
             self.pixels_shape = (5, 5)
             self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
-                                             self.args.latent_size, 5, 5),
+                                             self.network.hidden_size, 5, 5),
+                                            device=self.device)
+        if self.network.pixels == 16:
+            self.pixels_shape = (4, 4)
+            self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
+                                             self.network.hidden_size, 4, 4),
                                             device=self.device)
         self.min_q, self.max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \
                                  torch.zeros((self.n_runs,), device=device).fill_(MINIMUM_FLOAT_VALUE)

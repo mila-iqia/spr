@@ -832,13 +832,15 @@ class Conv2dSame(torch.nn.Module):
                  out_channels,
                  kernel_size,
                  bias=True,
+                 stride=1,
                  padding_layer=nn.ReflectionPad2d):
         super().__init__()
         ka = kernel_size // 2
         kb = ka - 1 if kernel_size % 2 == 0 else ka
         self.net = torch.nn.Sequential(
             padding_layer((ka, kb, ka, kb)),
-            torch.nn.Conv2d(in_channels, out_channels, kernel_size, bias=bias)
+            torch.nn.Conv2d(in_channels, out_channels, kernel_size, bias=bias,
+                            stride=stride)
         )
 
     def forward(self, x):

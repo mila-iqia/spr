@@ -67,7 +67,10 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["norm_type"] = args.norm_type
         config["model"]["nce"] = args.nce
         config["model"]["nce_type"] = args.nce_type
+        config["model"]["encoder"] = args.encoder
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["target_augmentation"] = args.target_augmentation
+        config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
@@ -153,9 +156,12 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
         config["model"]["dynamics_blocks"] = args.dynamics_blocks
         config["model"]["film"] = args.film
         config["model"]["nce"] = args.nce
+        config["model"]["encoder"] = args.encoder
         config["model"]["nce_type"] = args.nce_type
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["target_augmentation"] = args.target_augmentation
+        config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
@@ -214,10 +220,13 @@ if __name__ == "__main__":
     parser.add_argument('--replay-ratio', type=int, default=2)
     parser.add_argument('--dynamics-blocks', type=int, default=16)
     parser.add_argument('--norm-type', type=str, default='bn', choices=["bn", "ln", "in", "none"], help='Normalization')
+    parser.add_argument('--encoder', type=str, default='repnet', choices=["repnet", "curl", "midsize"], help='Normalization')
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
     parser.add_argument('--nce-type', type=str, default='stdim', choices=["stdim", "moco"], help='Style of NCE')
     parser.add_argument('--augmentation', type=str, default='none', choices=["none", "affine", "crop"], help='Style of augmentation')
+    parser.add_argument('--target-augmentation', type=int, default=0, help='Use augmentation on inputs to target networks')
+    parser.add_argument('--eval-augmentation', type=int, default=0, help='Use augmentation on inputs at evaluation time')
     parser.add_argument('--detach-model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     # MCTS arguments
