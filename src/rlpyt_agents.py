@@ -181,14 +181,19 @@ class VectorizedMCTS:
         self.virtual_loss = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
         self.reward = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
         if self.network.pixels == 36:
-            self.pixels_shape = (6, 6)
+            self.pixels_shape = (self.network.hidden_size, 6, 6)
             self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
-                                             self.args.latent_size, 6, 6),
+                                             self.network.hidden_size, 6, 6),
                                             device=self.device)
         if self.network.pixels == 25:
-            self.pixels_shape = (5, 5)
+            self.pixels_shape = (self.network.hidden_size, 5, 5)
             self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
-                                             self.args.latent_size, 5, 5),
+                                             self.network.hidden_size, 5, 5),
+                                            device=self.device)
+        if self.network.pixels == 16:
+            self.pixels_shape = (self.network.hidden_size, 4, 4)
+            self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
+                                             self.network.hidden_size, 4, 4),
                                             device=self.device)
         self.min_q, self.max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \
                                  torch.zeros((self.n_runs,), device=device).fill_(MINIMUM_FLOAT_VALUE)
@@ -303,7 +308,8 @@ class VectorizedMCTS:
                 if torch.all(done_mask):
                     break
 
-            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, *self.pixels_shape).to(self.device)).squeeze()
+            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1,
+                                                                                                   self.pixels_shape).to(self.device)).squeeze()
             hidden_state, reward, policy_logits, value = self.network.inference(
                 input_state, self.actions_final.to(self.device))
 
@@ -465,7 +471,7 @@ class VectorizedQMCTS(VectorizedMCTS):
                 if torch.all(done_mask):
                     break
 
-            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, 256, *self.pixels_shape).to(self.device)).squeeze(1)
+            input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, *self.pixels_shape).to(self.device)).squeeze(1)
             hidden_state, reward, policy_logits, value = self.network.inference(
                 input_state, self.actions_final.to(self.device))
             value = value.to(self.device)
