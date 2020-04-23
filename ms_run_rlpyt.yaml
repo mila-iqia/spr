@@ -1,17 +1,17 @@
 description: AWM
 
 target:
-  cluster: sc3
-  vc: resrchprojvc5
+  cluster: eu2
+  vc: msrlabs
 
 environment:
-  image: philly/jobs/custom/pytorch:pytorch1.4-py37-cuda10.1
+  image: philly/jobs/custom/pytorch:pytorch1.3.1-py36-cuda10.0
   registry: phillyregistry.azurecr.io
   setup:
     - export PATH=$$PATH:~/.local/bin
     - export LC_ALL=C.UTF-8
     - export LANG=C.UTF-8
-    - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill
+    - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill kornia
     - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
     - pip install --user git+git://github.com/astooke/rlpyt
     - pip install --user pillow==6.2.1 scikit-image
@@ -32,22 +32,22 @@ storage:
 
 search:
   job_template:
-    name: rlpyt_nce_{game:s}_{norm:s}_{replay-ratio:d}_{random_string:s}
+    name: rlpyt_nce_{norm:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --game {game} {arguments} --learn-model --norm-type {norm} --replay-ratio {replay-ratio} --n-gpu 1
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --norm-type {norm} --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --jumps 0
   type: grid
-  max_trials: 16
+  max_trials: 100
   params:
     - name: game
       spec: discrete
       values: ['ms_pacman']
     - name: arguments
       spec: discrete
-      values: ['--nce 1 --num-simulations 0 --eval-simulations 0 --jumps 0', '--num-simulations 0 --eval-simulations 0 --jumps 0']
+      values: ['', '--nce 1 --nce-type stdim', '--nce 1 --nce-type moco', '--augmentation crop','--nce 1 --augmentation crop', '--augmentation affine']
     - name: norm
       spec: discrete
-      values: ['bn', 'in', 'ln']
+      values: ['bn', 'in']
     - name: replay-ratio
       spec: discrete
-      values: [2, 4]
+      values: [256]
