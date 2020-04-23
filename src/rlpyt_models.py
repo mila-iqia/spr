@@ -380,7 +380,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
         # start = time.time()
-
         if self.noisy:
             self.head.reset_noise()
 
@@ -450,6 +449,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             return p
 
     def initial_inference(self, obs, actions=None, logits=False):
+        if self.noisy:
+            self.head.reset_noise()
         if len(obs.shape) == 5:
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, self.eval_augmentation)
