@@ -462,6 +462,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         return NetworkOutput(next_state, reward, policy_logits, value)
 
     def step(self, state, action):
+
         next_state, reward_logits = self.dynamics_model(state, action)
         policy_logits = None
         value_logits = self.head(next_state)
