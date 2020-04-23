@@ -59,9 +59,9 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         batch_T=1,  # Four time-steps per sampler iteration.
         batch_B=1,
         max_decorrelation_steps=0,
-        eval_n_envs=4,
+        eval_n_envs=config["sampler"]["eval_n_envs"],
         eval_max_steps=int(125e3),
-        eval_max_trajectories=100,
+        eval_max_trajectories=config["sampler"]["eval_max_trajectories"],
     )
     args.discount = config["algo"]["discount"]
     if model:
@@ -229,6 +229,7 @@ if __name__ == "__main__":
     parser.add_argument('--encoder', type=str, default='repnet', choices=["repnet", "curl", "midsize"], help='Normalization')
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
+    parser.add_argument('--noisy-nets', type=int, default=0)
     parser.add_argument('--nce-type', type=str, default='stdim', choices=["stdim", "moco"], help='Style of NCE')
     parser.add_argument('--augmentation', type=str, default='none', choices=["none", "affine", "crop"], help='Style of augmentation')
     parser.add_argument('--target-augmentation', type=int, default=0, help='Use augmentation on inputs to target networks')
