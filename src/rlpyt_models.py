@@ -407,7 +407,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         flat_images = images.reshape(-1, *images.shape[-3:])
         if augment:
             processed_images = self.transformation(flat_images)
-            if self.nce_type != "crop":
+            if self.augmentation != "crop":
                 mask = torch.rand((processed_images.shape[0], 1, 1, 1),
                                    device=processed_images.device)
                 mask = (mask < self.aug_prob).float()
