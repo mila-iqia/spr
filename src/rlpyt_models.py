@@ -383,7 +383,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
     def do_stdim_nce(self, pred_latents, observation):
         if self.stack_actions:
             observation = observation[:, :, :, :-1]
-        if self.jumps > 0:
+        if self.jumps > 0 or self.augmentation != "none":
             target_images = observation[0:self.jumps + 1, :, -1].transpose(0, 1)
         else:
             target_images = observation[1, :, -1].transpose(0, 1)
@@ -639,6 +639,7 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
     def reset_noise(self):
         for module in self.linears:
             module.reset_noise()
+
 
 class CurlEncoder(nn.Module):
     def __init__(self,
