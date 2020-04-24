@@ -16,7 +16,10 @@ from src.model_trainer import ValueNetwork, TransitionModel, \
     ResidualBlock, renormalize, FiLMTransitionModel, init_normalization
 from src.buffered_nce import BufferedNCE
 import numpy as np
-from kornia.augmentation import RandomAffine, RandomCrop, CenterCrop
+from kornia.augmentation import RandomAffine,\
+    RandomCrop,\
+    CenterCrop, \
+    RandomResizedCrop
 from rlpyt.utils.logging import logger
 import copy
 import wandb
@@ -230,7 +233,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             film=False,
             norm_type="bn",
             encoder="repnet",
-            noisy_nets=0
+            noisy_nets=0,
+            aug_prob=0.8,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -239,7 +243,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.noisy = noisy_nets
 
         self.augmentation = augmentation.lower()
-        assert self.augmentation in ["affine", "crop", "none"]
+        self.aug_prob = aug_prob
+        assert self.augmentation in ["affine", "crop", "rrc", "none"]
         if self.augmentation == "affine":
             self.transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
             self.eval_transformation = nn.Identity()
@@ -247,6 +252,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         elif self.augmentation == "crop":
             self.transformation = RandomCrop((84, 84))
             self.eval_transformation = CenterCrop((84, 84))
+            imagesize = 84
+        elif self.augmentation == "rrc":
+            self.transformation = RandomResizedCrop((100, 100), (0.8, 1))
+            self.eval_transformation = nn.Identity()
             imagesize = 84
         else:
             self.transformation = self.eval_transformation = nn.Identity()
@@ -353,7 +362,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         pred_latents = self.classifier(pred_latents)[:, 0, :]
         if self.stack_actions:
             observation = observation[:, :, :, :-1]
-        target_images = observation[0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
+        if self.jumps > 0:
+            target_images = observation[0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
+        else:
+            target_images = observation[1].transpose(0, 1).flatten(2, 3)
         target_images = self.transform(target_images, True)
         with torch.no_grad():
             target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
@@ -395,6 +407,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         flat_images = images.reshape(-1, *images.shape[-3:])
         if augment:
             processed_images = self.transformation(flat_images)
+            if self.nce_type != "crop":
+                mask = torch.rand((processed_images.shape[0], 1, 1, 1),
+                                   device=processed_images.device)
+                mask = (mask < self.aug_prob).float()
+                processed_images = mask*processed_images + (1 - mask)*flat_images
         else:
             processed_images = self.eval_transformation(flat_images)
         processed_images = processed_images.view(*images.shape[:-3],
