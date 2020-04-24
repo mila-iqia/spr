@@ -26,7 +26,7 @@ import wandb
 import psutil
 
 from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel, \
-    SyncRlEvalWandb
+    SyncRlEvalWandb, SerialEvalCollectorFixed
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
 from src.rlpyt_agents import DQNSearchAgent
 from src.rlpyt_atari_env import AtariEnv
@@ -46,7 +46,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["algo"]["batch_size"] = 64
     config["algo"]["learning_rate"] = 0.0001
     config['algo']['replay_ratio'] = args.replay_ratio
-    config['algo']['target_update_interval'] = 25
+    config['algo']['target_update_interval'] = 2000
     config['algo']['eps_steps'] = int(5e4)
     config["sampler"]["eval_max_trajectories"] = 50
     config["sampler"]["eval_n_envs"] = 50
@@ -63,6 +63,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         batch_T=1,  # Four time-steps per sampler iteration.
         batch_B=1,
         max_decorrelation_steps=0,
+        eval_CollectorCls=SerialEvalCollectorFixed,
         eval_n_envs=config["sampler"]["eval_n_envs"],
         eval_max_steps=int(125e3),
         eval_max_trajectories=config["sampler"]["eval_max_trajectories"],
