@@ -99,7 +99,8 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                 is_weights = torchify_buffer(is_weights).float()
 
                 batch = SamplesFromReplayPri(*batch, is_weights=is_weights)
-                return self.sanitize_batch(batch)
+                batch = self.sanitize_batch(batch)
+                return batch
 
             except Exception as e:
                 print("FAILED TO LOAD BATCH")
