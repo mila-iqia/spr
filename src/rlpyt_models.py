@@ -365,7 +365,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         if self.jumps > 0 or self.augmentation != "none":
             target_images = observation[0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
         else:
-            target_images = observation[1].flatten(2, 3)
+            target_images = observation[1:2].transpose(0, 1).flatten(2, 3)
         target_images = self.transform(target_images, True)
         with torch.no_grad():
             target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
