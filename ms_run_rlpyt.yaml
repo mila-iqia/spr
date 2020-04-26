@@ -1,11 +1,11 @@
 description: AWM
 
 target:
-  cluster: sc3
-  vc: resrchprojvc5
+  cluster: eu1
+  vc: msrlabs
 
 environment:
-  image: philly/jobs/custom/pytorch:pytorch1.4-py37-cuda10.1
+  image: philly/jobs/custom/pytorch:pytorch1.3.1-py36-cuda10.0
   registry: phillyregistry.azurecr.io
   setup:
     - export PATH=$$PATH:~/.local/bin
@@ -32,9 +32,9 @@ storage:
 search:
   job_template:
     name: rlpyt_nce_{jumps:d}_{replay-ratio:d}_{arguments:s}_{random_string:s}
-    sku: G2
+    sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy}
   type: grid
   max_trials: 100
   params:
@@ -46,7 +46,10 @@ search:
       values: ['', '--nce 1', '--nce 1 --nce-type moco', '--nce 1 --augmentation crop --nce-type moco', '--nce 1 --augmentation crop --nce-type moco --eval-augmentation 1 --target-augmentation 1', '--augmentation crop --nce-type moco', '--augmentation crop --nce-type moco --eval-augmentation 1 --target-augmentation 1', '--augmentation affine --nce-type moco']
     - name: jumps
       spec: discrete
-      values: [0, 4]
+      values: [0]
+    - name: noisy
+      spec: discrete
+      values: [0, 1]
     - name: replay-ratio
       spec: discrete
-      values: [32, 256]
+      values: [256]

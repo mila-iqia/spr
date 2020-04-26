@@ -40,7 +40,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["eval_env"]["game"] = config["env"]["game"]
     config["eval_env"]["stack_actions"] = args.stack_actions
     config["eval_env"]["grayscale"] = args.grayscale
-    config["model"]["dueling"] = False
+    config["model"]["dueling"] = True
     config["algo"]["min_steps_learn"] = 1600
     config["algo"]["n_step_return"] = 20
     config["algo"]["batch_size"] = 32
