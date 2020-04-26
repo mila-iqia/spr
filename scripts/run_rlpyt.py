@@ -40,14 +40,16 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["eval_env"]["game"] = config["env"]["game"]
     config["eval_env"]["stack_actions"] = args.stack_actions
     config["eval_env"]["grayscale"] = args.grayscale
-    config["algo"]["prioritized_replay"] = True
-    config["algo"]["min_steps_learn"] = 1e3
+    config["model"]["dueling"] = False
+    config["algo"]["min_steps_learn"] = 1600
     config["algo"]["n_step_return"] = 20
-    config["algo"]["batch_size"] = 64
+    config["algo"]["batch_size"] = 32
     config["algo"]["learning_rate"] = 0.0001
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = 2000
     config['algo']['eps_steps'] = int(5e4)
+    config['algo']['pri_alpha'] = 0.5
+    config['algo']['pri_beta_steps'] = int(10e4)
     config["sampler"]["eval_max_trajectories"] = 50
     config["sampler"]["eval_n_envs"] = 50
     if args.noisy_nets:
@@ -92,9 +94,9 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         algo=algo,
         agent=agent,
         sampler=sampler,
-        n_steps=50e4,
+        n_steps=10e4,
         log_interval_steps=1e4,
-        affinity=dict(cuda_idx=cuda_idx),
+        affinity=dict(cuda_idx=None),
         seed=42
     )
     config = dict(game=game)

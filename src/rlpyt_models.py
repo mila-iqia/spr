@@ -284,16 +284,24 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.eval_augmentation = eval_augmentation
         self.stack_actions = stack_actions
 
-        if dueling:
-            self.head = PizeroDistributionalDuelingHeadModel(self.hidden_size, output_size,
-                                                             pixels=self.pixels,
-                                                             norm_type=norm_type,
-                                                             noisy=self.noisy)
+        if encoder in ["repnet", "midsize"]:
+            if dueling:
+                self.head = PizeroDistributionalDuelingHeadModel(self.hidden_size, output_size,
+                                                                 pixels=self.pixels,
+                                                                 norm_type=norm_type,
+                                                                 noisy=self.noisy)
+            else:
+                self.head = PizeroDistributionalHeadModel(self.hidden_size, output_size,
+                                                          pixels=self.pixels,
+                                                          norm_type=norm_type,
+                                                          noisy=self.noisy)
         else:
-            self.head = PizeroDistributionalHeadModel(self.hidden_size, output_size,
-                                                      pixels=self.pixels,
-                                                      norm_type=norm_type,
-                                                      noisy=self.noisy)
+            if dueling:
+                self.head = DQNDistributionalDuelingHeadModel(self.hidden_size, output_size,
+                                                              pixels=self.pixels, noisy=self.noisy)
+            else:
+                self.head = DQNDistributionalHeadModel(self.hidden_size, output_size,
+                                                       pixels=self.pixels, noisy=self.noisy)
 
         if film:
             dynamics_model = FiLMTransitionModel
@@ -548,6 +556,82 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         return next_state, reward_logits, policy_logits, value_logits
 
 
+class DQNDistributionalHeadModel(torch.nn.Module):
+    def __init__(self,
+                 input_channels,
+                 output_size,
+                 hidden_size=128,
+                 pixels=30,
+                 n_atoms=51,
+                 noisy=0):
+        super().__init__()
+        if noisy:
+            linear = NoisyLinear
+        else:
+            linear = nn.Linear
+        self.linears = [linear(input_channels*pixels, 256),
+                        linear(256, output_size * n_atoms)]
+        layers = [nn.Flatten(-3, -1),
+                  self.linears[0],
+                  nn.ReLU(),
+                  self.linears[1]]
+        self.network = nn.Sequential(*layers)
+        self._output_size = output_size
+        self._n_atoms = n_atoms
+
+    def forward(self, input):
+        return self.network(input).view(-1, self._output_size, self._n_atoms)
+
+    def reset_noise(self):
+        for module in self.linears:
+            module.reset_noise()
+
+
+class DQNDistributionalDuelingHeadModel(torch.nn.Module):
+    """An MLP head with optional noisy layers which reshapes output to [B, output_size, n_atoms]."""
+
+    def __init__(self,
+                 input_channels,
+                 output_size,
+                 pixels=30,
+                 n_atoms=51,
+                 grad_scale=2 ** (-1 / 2),
+                 noisy=0):
+        super().__init__()
+        linear = NoisyLinear if noisy else nn.Linear
+        self.advantage_layers = [nn.Flatten(-3, -1),
+                                 linear(pixels * input_channels, 256),
+                                 nn.ReLU(),
+                                 linear(256, output_size * n_atoms, bias=False)]
+        self.value_layers = [nn.Flatten(-3, -1),
+                             linear(pixels * input_channels, 256),
+                             nn.ReLU(),
+                             linear(256, n_atoms)]
+        self.advantage_hidden = nn.Sequential(*self.advantage_layers[:3])
+        self.advantage_out = self.advantage_layers[3]
+        self.advantage_bias = torch.nn.Parameter(torch.zeros(n_atoms))
+        self.value = nn.Sequential(*self.value_layers)
+        self._grad_scale = grad_scale
+        self._output_size = output_size
+        self._n_atoms = n_atoms
+
+    def forward(self, input):
+        x = scale_grad(input, self._grad_scale)
+        advantage = self.advantage(x)
+        value = self.value(x).view(-1, 1, self._n_atoms)
+        return value + (advantage - advantage.mean(dim=1, keepdim=True))
+
+    def advantage(self, input):
+        x = self.advantage_hidden(input)
+        x = self.advantage_out(x)
+        x = x.view(-1, self._output_size, self._n_atoms)
+        return x + self.advantage_bias
+
+    def reset_noise(self):
+        for module in self.linears:
+            module.reset_noise()
+
+
 class PizeroDistributionalHeadModel(torch.nn.Module):
     """An MLP head which reshapes output to [B, output_size, n_atoms]."""
 
@@ -584,6 +668,7 @@ class PizeroDistributionalHeadModel(torch.nn.Module):
     def reset_noise(self):
         for module in self.linears:
             module.reset_noise()
+
 
 class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
     """An MLP head which reshapes output to [B, output_size, n_atoms]."""
@@ -654,7 +739,6 @@ class CurlEncoder(nn.Module):
         self.main = nn.Sequential(
             Conv2dSame(self.input_channels, 32, 5, stride=5),  # 20x20
             nn.ReLU(),
-            init_normalization(32, norm_type),
             Conv2dSame(32, 64, 5, stride=5),  #4x4
             nn.ReLU())
         self.train()
