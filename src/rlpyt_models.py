@@ -599,14 +599,19 @@ class DQNDistributionalDuelingHeadModel(torch.nn.Module):
                  noisy=0):
         super().__init__()
         linear = NoisyLinear if noisy else nn.Linear
+        self.linears = [linear(pixels * input_channels, 256),
+                        linear(256, output_size * n_atoms, bias=False),
+                        linear(pixels * input_channels, 256),
+                        linear(256, n_atoms)
+                        ]
         self.advantage_layers = [nn.Flatten(-3, -1),
-                                 linear(pixels * input_channels, 256),
+                                 self.linears[0],
                                  nn.ReLU(),
-                                 linear(256, output_size * n_atoms, bias=False)]
+                                 self.linears[1]]
         self.value_layers = [nn.Flatten(-3, -1),
-                             linear(pixels * input_channels, 256),
+                             self.linears[2],
                              nn.ReLU(),
-                             linear(256, n_atoms)]
+                             self.linears[3]]
         self.advantage_hidden = nn.Sequential(*self.advantage_layers[:3])
         self.advantage_out = self.advantage_layers[3]
         self.advantage_bias = torch.nn.Parameter(torch.zeros(n_atoms))
