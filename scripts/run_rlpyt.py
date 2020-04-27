@@ -53,6 +53,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['optim']['eps'] = 0.00015
     config["sampler"]["eval_max_trajectories"] = 50
     config["sampler"]["eval_n_envs"] = 50
+    config["sampler"]["eval_max_steps"] = 1562500  # int(125e3) / 4 * 50 (not actual max length, that's horizon)
     if args.noisy_nets:
         config['agent']['eps_init'] = 0.
         config['agent']['eps_final'] = 0.
