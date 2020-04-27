@@ -46,6 +46,9 @@ class AsyncRlEvalWandb(AsyncRlEval):
                     logger.record_tabular_misc_stat(k,
                                                     values)
                     self.wandb_info[k + "Average"] = np.average(values)
+                    self.wandb_info[k + "Std"] = np.std(values)
+                    self.wandb_info[k + "Min"] = np.min(values)
+                    self.wandb_info[k + "Max"] = np.max(values)
                     self.wandb_info[k + "Median"] = np.median(values)
 
         if self._opt_infos:
@@ -76,6 +79,9 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
                     logger.record_tabular_misc_stat(k,
                                                     values)
                     self.wandb_info[k + "Average"] = np.average(values)
+                    self.wandb_info[k + "Std"] = np.std(values)
+                    self.wandb_info[k + "Min"] = np.min(values)
+                    self.wandb_info[k + "Max"] = np.max(values)
                     self.wandb_info[k + "Median"] = np.median(values)
 
         if self._opt_infos:

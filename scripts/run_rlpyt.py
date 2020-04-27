@@ -50,6 +50,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['algo']['eps_steps'] = int(5e4)
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
+    config['optim']['eps'] = 0.00015
     config["sampler"]["eval_max_trajectories"] = 50
     config["sampler"]["eval_n_envs"] = 50
     if args.noisy_nets:
@@ -97,7 +98,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         n_steps=10e4,
         log_interval_steps=1e4,
         affinity=dict(cuda_idx=cuda_idx),
-        seed=42
+        seed=69
     )
     config = dict(game=game)
     name = "dqn_" + game
