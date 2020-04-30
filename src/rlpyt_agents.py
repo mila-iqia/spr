@@ -223,7 +223,10 @@ class VectorizedMCTS:
         self.epsilon = self.args.search_epsilon
 
     def to_device(self, cuda_idx):
-        self.device = torch.device("cuda", index=cuda_idx)
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda", index=cuda_idx)
+        else:
+            self.device = torch.device('cpu')
         self.initialize_on_device(self.device)
 
     def value_score(self, sim_id):

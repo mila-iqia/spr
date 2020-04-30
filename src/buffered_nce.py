@@ -33,6 +33,10 @@ class BufferedNCE(nn.Module):
         self.queue_size = queue_size
         self.temperature = temperature
         self.index = 0
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+        else:
+            self.device = torch.device('cpu')
 
         # initialize empty buffers and insertion pointers
         stdv = 1. / math.sqrt(feature_dim / 3)
@@ -40,7 +44,7 @@ class BufferedNCE(nn.Module):
         for bname in buffer_names:
             empty_buf = torch.rand(self.queue_size, feature_dim,
                                    requires_grad=False).mul_(2 * stdv).add_(-stdv)
-            self.buffers[bname] = empty_buf.cuda()
+            self.buffers[bname] = empty_buf.to(self.device)
             self.indexes[bname] = 0
     
     def update_buffer(self, r_buf, buffer='r1'):
@@ -49,7 +53,7 @@ class BufferedNCE(nn.Module):
         #    wrap around back to index 0 when past the end of buffer
         with torch.no_grad():
             new_size = r_buf.shape[0]
-            out_ids = torch.arange(new_size, dtype=torch.long).cuda()
+            out_ids = torch.arange(new_size, dtype=torch.long, device=self.device)
             out_ids = torch.fmod(out_ids + self.indexes[buffer], self.queue_size)
             # write new values to buffer
             self.buffers[buffer].index_copy_(0, out_ids, r_buf)
