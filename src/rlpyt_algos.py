@@ -240,9 +240,6 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         p = torch.clamp(p, EPS, 1)  # NaN-guard.
         losses = -torch.sum(target_p * torch.log(p), dim=1)  # Cross-entropy.
 
-        if self.prioritized_replay:
-            losses = losses*samples.is_weights
-
         target_p = torch.clamp(target_p, EPS, 1)
         KL_div = torch.sum(target_p *
             (torch.log(target_p) - torch.log(p.detach())), dim=1)
