@@ -265,7 +265,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             imagesize = 84
         else:
             self.transformation = self.eval_transformation = nn.Identity()
-            imagesize = 100
+            imagesize = 84
 
         self.dueling = dueling
         f, c, h, w = image_shape

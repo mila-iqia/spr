@@ -11,9 +11,6 @@ from rlpyt.utils.quick_args import save__init__args
 from rlpyt.samplers.collections import TrajInfo
 
 
-W, H = (100, 100)  # Crop two rows, then downsample by 2x (fast, clean image).
-
-
 EnvInfo = namedtuple("EnvInfo", ["game_score", "traj_done"])
 
 
@@ -75,6 +72,7 @@ class AtariEnv(Env):
                  horizon=27000,
                  stack_actions=0,
                  grayscale=True,
+                 imagesize=84,
                  ):
         save__init__args(locals(), underscore=True)
         # ALE
@@ -92,8 +90,9 @@ class AtariEnv(Env):
         self._action_space = IntBox(low=0, high=len(self._action_set))
         self.channels = 1 if grayscale else 3
         self.grayscale = grayscale
+        self.imagesize = imagesize
         if self.stack_actions: self.channels += 1
-        obs_shape = (num_img_obs, self.channels, H, W)
+        obs_shape = (num_img_obs, self.channels, imagesize, imagesize)
         self._observation_space = IntBox(low=0, high=255, shape=obs_shape,
             dtype="uint8")
         self._max_frame = self.ale.getScreenGrayscale() if self.grayscale \
@@ -165,7 +164,7 @@ class AtariEnv(Env):
         """Max of last two frames; crop two rows; downsample by 2x."""
         self._get_screen(2)
         np.maximum(self._raw_frame_1, self._raw_frame_2, self._max_frame)
-        img = cv2.resize(self._max_frame, (W, H), cv2.INTER_NEAREST)
+        img = cv2.resize(self._max_frame, (self.imagesize, self.imagesize), cv2.INTER_LINEAR)
         if len(img.shape) == 2:
             img = img[np.newaxis]
         else:
