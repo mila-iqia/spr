@@ -40,6 +40,8 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["eval_env"]["game"] = config["env"]["game"]
     config["eval_env"]["stack_actions"] = args.stack_actions
     config["eval_env"]["grayscale"] = args.grayscale
+    config['env']['imagesize'] = args.imagesize
+    config['eval_env']['imagesize'] = args.imagesize
     config["model"]["dueling"] = True
     config["algo"]["min_steps_learn"] = 1600
     config["algo"]["n_step_return"] = 20
@@ -48,12 +50,13 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = 2000
     config['algo']['eps_steps'] = int(5e4)
+    config["algo"]["clip_grad_norm"] = args.max_grad_norm
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
-    config['optim']['eps'] = 0.00015
-    config["sampler"]["eval_max_trajectories"] = 50
-    config["sampler"]["eval_n_envs"] = 50
-    config["sampler"]["eval_max_steps"] = 1562500  # int(125e3) / 4 * 50 (not actual max length, that's horizon)
+    # config['optim']['eps'] = 0.00015
+    config["sampler"]["eval_max_trajectories"] = 20
+    config["sampler"]["eval_n_envs"] = 20
+    config["sampler"]["eval_max_steps"] = 625000  # int(125e3) / 4 * 50 (not actual max length, that's horizon)
     if args.noisy_nets:
         config['agent']['eps_init'] = 0.
         config['agent']['eps_final'] = 0.
@@ -69,7 +72,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         max_decorrelation_steps=0,
         eval_CollectorCls=SerialEvalCollectorFixed,
         eval_n_envs=config["sampler"]["eval_n_envs"],
-        eval_max_steps=int(125e3),
+        eval_max_steps=config['sampler']['eval_max_steps'],
         eval_max_trajectories=config["sampler"]["eval_max_trajectories"],
     )
     args.discount = config["algo"]["discount"]
@@ -231,6 +234,7 @@ if __name__ == "__main__":
     parser.add_argument('--learn-model', action="store_true")
     parser.add_argument('--stack-actions', type=int, default=0)
     parser.add_argument('--grayscale', type=int, default=1)
+    parser.add_argument('--imagesize', type=int, default=84)
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=4)
     parser.add_argument('--replay-ratio', type=int, default=2)
@@ -247,6 +251,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval-augmentation', type=int, default=0, help='Use augmentation on inputs at evaluation time')
     parser.add_argument('--detach-model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
+    parser.add_argument('--max-grad-norm', type=float, default=10., help='Max Grad Norm')
     # MCTS arguments
     parser.add_argument('--num-simulations', type=int, default=10)
     parser.add_argument('--eval-simulations', type=int, default=20)
