@@ -43,9 +43,9 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['env']['imagesize'] = args.imagesize
     config['eval_env']['imagesize'] = args.imagesize
     config["model"]["dueling"] = True
-    config["algo"]["min_steps_learn"] = 1600
+    config["algo"]["min_steps_learn"] = 1000
     config["algo"]["n_step_return"] = 20
-    config["algo"]["batch_size"] = 32
+    config["algo"]["batch_size"] = 64
     config["algo"]["learning_rate"] = 0.0001
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = 2000
