@@ -121,10 +121,6 @@ def run_pizero(args):
                 if done[i]:
                     episode_lengths.append(eplens[i])
                     episode_rewards.append(eprets[i])
-                    wandb.log({'Episode Reward': eprets[i],
-                               "Episode Length": eplens[i],
-                               "Average Reward Per Step": eprets[i]/eplens[i],
-                               'env_steps': env_steps})
                     eprets[i] = 0
                     eplens[i] = 0
 
@@ -209,7 +205,7 @@ def run_pizero(args):
             obs.copy_(torch.from_numpy(next_obs))
             env_steps += args.num_envs
             vectorized_mcts.env_steps = env_steps
-            vectorized_mcts.set_epsilon(env_steps)
+            # vectorized_mcts.set_epsilon(env_steps)
             eval_vectorized_mcts.env_steps = env_steps
 
     except (KeyboardInterrupt, Exception):

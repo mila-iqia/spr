@@ -39,8 +39,8 @@ class VectorizedMCTS:
         self.env_steps = 0
         self.cpu_search = args.cpu_search
         self.search_device = "cpu" if self.cpu_search else self.device
-        self.eps_init = 1.
-        self.eps = 1.
+        self.eps_init = 0.
+        self.eps = 0.
         self.eps_final = 0.01
         self.eps_decay_final_steps = int(2.5e5)
         self.eval = eval

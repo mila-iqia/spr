@@ -850,7 +850,7 @@ class ValueNetwork(nn.Module):
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
-                  init_normalization(hidden_size, norm_type),
+                  init_normalization(hidden_size, norm_type, affine=False),
                   nn.Flatten(-3, -1),
                   nn.Linear(pixels*hidden_size, 256),
                   nn.ReLU(),
@@ -868,7 +868,7 @@ class PolicyNetwork(nn.Module):
         self.hidden_size = hidden_size
         layers = [Conv2dSame(input_channels, hidden_size, 3),
                   nn.ReLU(),
-                  init_normalization(hidden_size, norm_type),
+                  init_normalization(hidden_size, norm_type, affine=False),
                   nn.Flatten(-3, -1),
                   init_small(nn.Linear(pixels * hidden_size, num_actions))]
         self.network = nn.Sequential(*layers)
