@@ -650,15 +650,7 @@ class SmallEncoder(nn.Module):
 
 
 class TransitionModel(nn.Module):
-    def __init__(self,
-                 channels,
-                 num_actions,
-                 args=None,
-                 blocks=16,
-                 hidden_size=256,
-                 pixels=36,
-                 limit=300,
-                 action_dim=1,
+    def __init__(self, channels, num_actions, args=None, blocks=16, hidden_size=256, pixels=36, limit=300, action_dim=1,
                  norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
@@ -694,11 +686,7 @@ class TransitionModel(nn.Module):
 
 
 class ConvFiLM(nn.Module):
-    def __init__(self,
-                 input_dim,
-                 cond_dim,
-                 norm_type="bn",
-                 one_hot=True):
+    def __init__(self, input_dim, cond_dim, norm_type="bn", one_hot=True):
         super().__init__()
         if one_hot:
             self.embedding = nn.Embedding(cond_dim, cond_dim)
@@ -729,16 +717,7 @@ def renormalize(tensor, first_dim=1):
 
 
 class FiLMTransitionModel(nn.Module):
-    def __init__(self,
-                 channels,
-                 num_actions,
-                 args=None,
-                 blocks=16,
-                 hidden_size=256,
-                 pixels=36,
-                 limit=300,
-                 norm_type="bn",
-                 ):
+    def __init__(self, channels, num_actions, args=None, blocks=16, hidden_size=256, pixels=36, limit=300, norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
         self.args = args
@@ -810,10 +789,7 @@ class FiLMResidualBlock(nn.Module):
 
 
 class ResidualBlock(nn.Module):
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 norm_type="bn"):
+    def __init__(self, in_channels, out_channels, norm_type="bn"):
         super().__init__()
         self.block = nn.Sequential(
             Conv2dSame(in_channels, out_channels, 3),
@@ -832,12 +808,7 @@ class ResidualBlock(nn.Module):
 
 
 class Conv2dSame(torch.nn.Module):
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 kernel_size,
-                 bias=True,
-                 padding_layer=nn.ReflectionPad2d):
+    def __init__(self, in_channels, out_channels, kernel_size, bias=True, padding_layer=nn.ReflectionPad2d):
         super().__init__()
         ka = kernel_size // 2
         kb = ka - 1 if kernel_size % 2 == 0 else ka
@@ -851,14 +822,7 @@ class Conv2dSame(torch.nn.Module):
 
 
 class QNetwork(nn.Module):
-    def __init__(self,
-                 input_channels,
-                 num_actions,
-                 hidden_size=128,
-                 pixels=36,
-                 limit=300,
-                 norm_type="bn",
-                 ):
+    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36, limit=300, norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
@@ -881,12 +845,7 @@ class QNetwork(nn.Module):
 
 
 class ValueNetwork(nn.Module):
-    def __init__(self,
-                 input_channels,
-                 hidden_size=128,
-                 pixels=36,
-                 limit=300,
-                 norm_type="bn"):
+    def __init__(self, input_channels, hidden_size=128, pixels=36, limit=300, norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
@@ -904,12 +863,7 @@ class ValueNetwork(nn.Module):
 
 
 class PolicyNetwork(nn.Module):
-    def __init__(self,
-                 input_channels,
-                 num_actions,
-                 hidden_size=128,
-                 pixels=36,
-                 norm_type="bn"):
+    def __init__(self, input_channels, num_actions, hidden_size=128, pixels=36, norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
         layers = [Conv2dSame(input_channels, hidden_size, 3),
@@ -925,11 +879,7 @@ class PolicyNetwork(nn.Module):
 
 
 class RepNet(nn.Module):
-    def __init__(self,
-                 framestack=32,
-                 grayscale=False,
-                 actions=True,
-                 norm_type="bn"):
+    def __init__(self, framestack=32, grayscale=False, actions=True, norm_type="bn"):
         super().__init__()
         self.input_channels = framestack * (1 if grayscale else 3)
         self.actions = actions
