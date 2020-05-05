@@ -25,6 +25,10 @@ PrioritizedSamples = namedarraytuple("PrioritizedSamples",
                                   ["samples", "priorities"])
 SamplesToBuffer = namedarraytuple("SamplesToBuffer",
                                   ["observation", "action", "reward", "done", "policy_probs", "value"])
+SamplesFromReplayExt = namedarraytuple("SamplesFromReplayPriExt",
+                                       SamplesFromReplay._fields + ("values", "age"))
+SamplesFromReplayPriExt = namedarraytuple("SamplesFromReplayPriExt",
+                                       SamplesFromReplayPri._fields + ("values", "age"))
 EPS = 1e-6
 
 
@@ -56,17 +60,21 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                 sampled_indices = True
                 if self.rnn_state_interval > 1:
                     T_idxs = T_idxs * self.rnn_state_interval
-
                 batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
-                return self.sanitize_batch(batch)
 
-            except:
+            except Exception as _:
                 print("FAILED TO LOAD BATCH")
                 if sampled_indices:
                     print("B_idxs:", B_idxs, flush=True)
                     print("T_idxs:", T_idxs, flush=True)
                     print("Batch_T:", self.batch_T, flush=True)
                     print("Buffer T:", self.T, flush=True)
+
+            elapsed_iters = self.t + self.T - T_idxs % self.T
+            elapsed_samples = self.B*(elapsed_iters)
+            values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
+            batch = SamplesFromReplayExt(*batch, values=values, age=elapsed_samples)
+            return self.sanitize_batch(batch)
 
     def sanitize_batch(self, batch):
         has_dones, inds = torch.max(batch.done, 0)
@@ -77,7 +85,9 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
             batch.all_reward[ind+1:, i] = 0
             batch.return_[ind+1:, i] = 0
             batch.done_n[ind+1:, i] = True
+            batch.value[ind+1:, i] = 0
         return batch
+
 
 class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequenceReplayFrameBuffer):
     """
@@ -94,15 +104,8 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                     T_idxs = T_idxs * self.rnn_state_interval
 
                 batch = self.extract_batch(T_idxs, B_idxs, self.batch_T)
-                is_weights = (1. / (priorities + 1e-5)) ** self.beta
-                is_weights /= max(is_weights)  # Normalize.
-                is_weights = torchify_buffer(is_weights).float()
 
-                batch = SamplesFromReplayPri(*batch, is_weights=is_weights)
-                batch = self.sanitize_batch(batch)
-                return batch
-
-            except Exception as e:
+            except Exception as _:
                 print("FAILED TO LOAD BATCH")
                 traceback.print_exc()
                 if sampled_indices:
@@ -110,6 +113,20 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                     print("T_idxs:", T_idxs, flush=True)
                     print("Batch_T:", self.batch_T, flush=True)
                     print("Buffer T:", self.T, flush=True)
+
+            is_weights = (1. / (priorities + 1e-5)) ** self.beta
+            is_weights /= max(is_weights)  # Normalize.
+            is_weights = torchify_buffer(is_weights).float()
+
+            elapsed_iters = self.t + self.T - T_idxs % self.T
+            elapsed_samples = self.B*(elapsed_iters)
+            values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
+            batch = SamplesFromReplayPriExt(*batch,
+                                            values=values,
+                                            is_weights=is_weights,
+                                            age=elapsed_samples)
+            batch = self.sanitize_batch(batch)
+            return batch
 
     def sanitize_batch(self, batch):
         has_dones, inds = torch.max(batch.done, 0)
@@ -120,4 +137,5 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             batch.all_reward[ind+1:, i] = 0
             batch.return_[ind+1:, i] = 0
             batch.done_n[ind+1:, i] = True
+            batch.value[ind+1:, i] = 0
         return batch

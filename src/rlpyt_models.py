@@ -358,8 +358,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 param.requires_grad = False
 
     def do_moco_nce(self, pred_latents, observation):
-        pred_latents = torch.stack(pred_latents, 1).flatten(0, 1)
-        pred_latents = self.classifier(pred_latents)[:, 0, :]
+        stacked_latents = torch.stack(pred_latents, 1).flatten(0, 1)
+        stacked_latents = self.classifier(stacked_latents)[:, 0, :]
         if self.stack_actions:
             observation = observation[:, :, :, :-1]
         if self.jumps > 0 or self.augmentation != "none":
@@ -373,12 +373,18 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             update_state_dict(self.nce_target_encoder, self.conv.state_dict(), 0.001)
             update_state_dict(self.target_classifier, self.classifier.state_dict(), 0.001)
 
-        nce_loss, _, nce_accs = self.nce.compute_loss(pred_latents, target_latents, "main")
-        nce_loss = nce_loss.mean(0)
+        nce_loss, _, nce_accs = self.nce.compute_loss(stacked_latents, target_latents, "main")
+        nce_loss = nce_loss.view(observation.shape[1], -1)
+        if self.jumps > 0:
+            nce_model_loss = nce_loss[:, 1:].mean(0)
+            nce_loss = nce_loss[:, 0]
+        else:
+            nce_model_loss = 0
+            nce_loss = nce_loss[:, 0]
         nce_accs = nce_accs.mean().item()
         self.nce.update_buffer(target_latents, "main")
 
-        return nce_loss, nce_accs
+        return nce_loss, nce_model_loss, nce_accs
 
     def do_stdim_nce(self, pred_latents, observation):
         if self.stack_actions:
@@ -397,10 +403,15 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         target_latents = target_latents.permute(0, 2, 1, 3)
         nce_input = torch.stack(pred_latents, 1).flatten(3, 4).permute(3, 1, 0, 2)
         nce_loss, nce_accs = self.nce.forward(nce_input, target_latents)
-        nce_loss = nce_loss.mean(0)
+        if self.jumps > 0:
+            nce_model_loss = nce_loss[1:].mean(0)
+            nce_loss = nce_loss[0]
+        else:
+            nce_model_loss = 0
+            nce_loss = nce_loss[0]
         nce_accs = nce_accs.mean()
 
-        return nce_loss, nce_accs
+        return nce_loss, nce_model_loss, nce_accs
 
     def transform(self, images, augment=False):
         images = images.float()/255. if images.dtype == torch.uint8 else images
@@ -484,9 +495,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  target=self.detach_model))
 
             if self.nce and self.nce_type == "stdim":
-                nce_loss, nce_accs = self.do_stdim_nce(pred_latents, observation)
+                nce_loss, nce_model_loss, nce_accs = self.do_stdim_nce(pred_latents, observation)
             elif self.nce and self.nce_type == "moco":
-                nce_loss, nce_accs = self.do_moco_nce(pred_latents, observation)
+                nce_loss, nce_model_loss, nce_accs = self.do_moco_nce(pred_latents, observation)
             else:
                 nce_loss = 0
                 nce_accs = 0
@@ -495,7 +506,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             # print("Forward took {}".format(end - start))
             return pred_ps,\
                    [F.log_softmax(ps, -1) for ps in pred_reward],\
-                   nce_loss, nce_accs
+                   nce_loss, nce_model_loss, nce_accs
 
         else:
             # img = observation.type(torch.float)  # Expect torch.uint8 inputs

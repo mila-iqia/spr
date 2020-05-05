@@ -14,6 +14,11 @@ from rlpyt.utils.collections import namedarraytuple, AttrDict
 from rlpyt.utils.synchronize import drain_queue
 from rlpyt.samplers.collectors import (DecorrelatingStartCollector,
     BaseEvalCollector)
+from rlpyt.agents.base import AgentInputs
+from rlpyt.samplers.collections import (Samples, AgentSamples, AgentSamplesBsv,
+    EnvSamples)
+
+
 
 
 import multiprocessing as mp
