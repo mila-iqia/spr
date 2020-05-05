@@ -228,14 +228,13 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         for _ in range(self.updates_per_optimize):
             samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
             loss, td_abs_errors, model_rl_loss, reward_loss,\
-            nce_loss, nce_accs,\
-            model_nce_loss, model_nce_accs = self.loss(samples_from_replay)
+            nce_loss, model_nce_loss, nce_accs, amortization_loss = self.loss(samples_from_replay)
 
-            total_loss = loss + \
-                         self.model_rl_weight*model_rl_loss + \
-                         self.nce_weight*nce_loss + \
-                         self.model_nce_weight*model_nce_loss + \
-                         self.reward_weight*reward_loss
+            total_loss = loss + self.model_rl_weight*model_rl_loss \
+                              + self.nce_weight*nce_loss \
+                              + self.model_nce_weight*model_nce_loss \
+                              + self.reward_weight*reward_loss \
+                              + self.amortization_loss_weight*amortization_loss
             self.optimizer.zero_grad()
             total_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -335,17 +334,15 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         reward_loss = -torch.sum(reward_target * pred_rew, (0, 2))
         model_rl_loss = torch.zeros_like(reward_loss).cpu()
 
-        import ipdb;
-        ipdb.set_trace()
         if self.amortization_loss_weight > 0:
             pred_values = from_categorical(torch.stack(pred_ps, 0), limit=10, logits=False)
             pred_values = F.log_softmax(pred_values, -1)
             value_targets = F.softmax(samples.values[:self.jumps+1], -1)
             value_loss = torch.sum(pred_values*value_targets.to(self.agent.device), (0, 2))
-            amortization_age = self.samples.age.float()
-            amortization_weights = 1. + torch.sqrt(amortization_age*self.amortization_age_constant)
-            value_loss = value_loss/amortization_weights
-
+            if self.amortization_age_constant > 0:
+                amortization_age = self.samples.age.float()
+                amortization_weights = 1. + amortization_age*self.amortization_age_constant
+                value_loss = value_loss/amortization_weights
         else:
             value_loss = torch.zeros_like(reward_loss)
 
@@ -373,5 +370,5 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                reward_loss.mean(), \
                nce_loss.mean(), \
                model_nce_loss.mean(), \
+               nce_acc, \
                value_loss.mean(), \
-               nce_acc
