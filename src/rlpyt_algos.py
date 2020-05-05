@@ -21,7 +21,7 @@ ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
                                       "RewardLoss",
                                       "modelGradNorm",
                                       "NCELoss",
-                                      "modelNCELoss",
+                                      "ModelNCELoss",
                                       "AmortizationLoss",
                                       "NCEAcc"])
 
@@ -233,9 +233,9 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             nce_loss, model_nce_loss, nce_accs, amortization_loss = self.loss(samples_from_replay)
 
             total_loss = loss + self.model_rl_weight*model_rl_loss \
-                              + self.nce_weight*nce_loss \
+                              + self.nce_loss_weight*nce_loss \
                               + self.model_nce_weight*model_nce_loss \
-                              + self.reward_weight*reward_loss \
+                              + self.reward_loss_weight*reward_loss \
                               + self.amortization_loss_weight*amortization_loss
             self.optimizer.zero_grad()
             total_loss.backward()
@@ -308,14 +308,14 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             (torch.log(target_p) - torch.log(p.detach())), dim=1)
         KL_div = torch.clamp(KL_div, EPS, 1 / EPS)  # Avoid <0 from NaN-guard.
 
-        if not self.mid_batch_reset:
-            valid = valid_from_done(samples.done[index])
-            loss = valid_mean(losses, valid)
-            KL_div *= valid
-        else:
-            loss = torch.mean(losses)
+        # if not self.mid_batch_reset:
+        #     valid = valid_from_done(samples.done[index])
+        #     loss = valid_mean(losses, valid)
+        #     KL_div *= valid
+        # else:
+        #     loss = torch.mean(losses)
 
-        return loss, KL_div
+        return losses, KL_div
 
     def loss(self, samples):
         """
@@ -372,7 +372,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             rl_loss = rl_loss * weights
             model_rl_loss = model_rl_loss * weights
 
-        return rl_loss, KL, \
+        return rl_loss.mean(), KL, \
                model_rl_loss.mean(),\
                reward_loss.mean(), \
                nce_loss.mean(), \
