@@ -364,6 +364,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             model_nce_loss = model_nce_loss * weights
             reward_loss = reward_loss * weights
             value_loss = value_loss * weights
+            rl_loss = rl_loss * weights
+            model_rl_loss = model_rl_loss * weights
 
         return rl_loss, KL, \
                model_rl_loss.mean(),\
