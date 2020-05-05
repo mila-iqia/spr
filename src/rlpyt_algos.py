@@ -21,6 +21,8 @@ ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
                                       "RewardLoss",
                                       "modelGradNorm",
                                       "NCELoss",
+                                      "modelNCELoss",
+                                      "AmortizationLoss",
                                       "NCEAcc"])
 
 EPS = 1e-6  # (NaN-guard)
@@ -251,6 +253,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             opt_info.RewardLoss.append(reward_loss.item())
             opt_info.modelGradNorm.append(torch.tensor(model_grad_norm).item())
             opt_info.NCELoss.append(nce_loss.item())
+            opt_info.ModelNCELoss.append(model_nce_loss.item())
+            opt_info.AmortizationLoss.append(amortization_loss.item())
             opt_info.NCEAcc.append(nce_accs)
             opt_info.tdAbsErr.extend(td_abs_errors[::8].numpy())  # Downsample.
             self.update_counter += 1
