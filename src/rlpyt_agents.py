@@ -112,24 +112,11 @@ class DQNSearchAgent(PizeroAgent):
     def step(self, observation, prev_action, prev_reward):
         """Compute the discrete distribution for the Q-value for each
         action for each state/observation (no grad)."""
-        # if AMP:
-        #     with autocast():
         action, p, value, initial_value = self.search.run(observation.to(self.search.device))
-        # else:
-        #     action, p, value, initial_value = self.search.run(observation.to(self.search.device))
         p = p.cpu()
-
         action = action.cpu()
 
-        # prev_action = self.distribution.to_onehot(prev_action)
-        # model_inputs = buffer_to((observation, prev_action, prev_reward),
-        #                          device=self.device)
-        # base_p = self.model(*model_inputs).cpu()
-        # base_value = from_categorical(base_p, limit=10, logits=False)
-        # base_action = self.distribution.sample(base_p)
-        # print(action == base_action)
-
-        agent_info = AgentInfo(p=p)  # Only change from DQN: q -> p.
+        agent_info = AgentInfo(p=p)
         action, agent_info = buffer_to((action, agent_info), device="cpu")
         return AgentStep(action=action, agent_info=agent_info)
 

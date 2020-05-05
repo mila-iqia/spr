@@ -48,6 +48,12 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = 2000
     config['algo']['eps_steps'] = int(5e4)
+    config["algo"]["model_rl_weight"] = args.model_rl_weight
+    config["algo"]["reward_loss_weight"] = args.reward_loss_weight
+    config["algo"]["model_nce_weight"] = args.model_nce_weight
+    config["algo"]["nce_loss_weight"] = args.nce_loss_weight
+    config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
+    config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
     config["sampler"]["eval_max_trajectories"] = 50
     config["sampler"]["eval_n_envs"] = 50
     if args.noisy_nets:
@@ -144,6 +150,12 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
     config["algo"]["n_step_return"] = 5
     config["algo"]["batch_size"] = 128
     config["algo"]["learning_rate"] = 6.25e-5
+    config["algo"]["model_rl_weight"] = args.model_rl_weight
+    config["algo"]["reward_loss_weight"] = args.reward_loss_weight
+    config["algo"]["model_nce_weight"] = args.model_nce_weight
+    config["algo"]["nce_loss_weight"] = args.nce_loss_weight
+    config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
+    config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
     config['algo']['replay_ratio'] = args.replay_ratio
     # config["sampler"]["max_decorrelation_steps"] = 0
     # config["algo"]["min_steps_learn"] = 2e4
@@ -241,6 +253,13 @@ if __name__ == "__main__":
     parser.add_argument('--augmentation', type=str, default='none', choices=["none", "rrc", "affine", "crop"], help='Style of augmentation')
     parser.add_argument('--target-augmentation', type=int, default=0, help='Use augmentation on inputs to target networks')
     parser.add_argument('--eval-augmentation', type=int, default=0, help='Use augmentation on inputs at evaluation time')
+    parser.add_argument('--reward-loss-weight', type=int, default=1.)
+    parser.add_argument('--model-rl-weight', type=int, default=1.)
+    parser.add_argument('--model-nce-weight', type=int, default=1.)
+    parser.add_argument('--amortization-loss-weight', type=int, default=0.)
+    parser.add_argument('--amortization-decay-constant', type=int, default=0.)
+    parser.add_argument('--model-nce-weight', type=int, default=1.)
+    parser.add_argument('--nce-loss-weight', type=int, default=1.)
     parser.add_argument('--detach-model', type=int, default=1)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     # MCTS arguments

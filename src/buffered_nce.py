@@ -72,7 +72,7 @@ class BufferedNCE(nn.Module):
         accuracy = (raw_scores.argmax(1) == 0).float()
         # compute simple NCE loss
         log_scores = F.log_softmax(raw_scores, dim=1)
-        loss_nce = -log_scores[:, 0].mean()
+        loss_nce = -log_scores[:, 0]
         return loss_nce, log_scores, accuracy
 
 
