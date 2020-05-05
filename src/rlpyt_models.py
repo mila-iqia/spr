@@ -390,7 +390,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         nce_loss, _, nce_accs = self.nce.compute_loss(stacked_latents, target_latents, "main")
         nce_loss = nce_loss.view(observation.shape[1], -1)
         if self.jumps > 0:
-            nce_model_loss = nce_loss[:, 1:].mean(0)
+            nce_model_loss = nce_loss[:, 1:].mean(1)
             nce_loss = nce_loss[:, 0]
         else:
             nce_model_loss = 0

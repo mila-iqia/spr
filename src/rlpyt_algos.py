@@ -367,7 +367,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             model_nce_loss = model_nce_loss * weights
             reward_loss = reward_loss * weights
             value_loss = value_loss * weights
-            
+
             # RL losses are no longer scaled in the c51 function
             rl_loss = rl_loss * weights
             model_rl_loss = model_rl_loss * weights
