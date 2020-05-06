@@ -513,8 +513,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             elif self.nce and self.nce_type == "moco":
                 nce_loss, nce_model_loss, nce_accs = self.do_moco_nce(pred_latents, observation)
             else:
-                nce_loss = 0
-                nce_accs = 0
+                nce_loss, nce_model_loss, nce_accs = torch.tensor(0.), torch.tensor(0.), torch.tensor(0.)
 
             # end = time.time()
             # print("Forward took {}".format(end - start))
