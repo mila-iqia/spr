@@ -230,10 +230,15 @@ class LocalNCE:
 
 
 class BlockNCE:
-    def __init__(self, classifier, temperature=0.1, use_self_targets=False):
+    def __init__(self,
+                 classifier,
+                 temperature=0.1,
+                 use_self_targets=False,
+                 normalize=True):
         self.classifier = classifier
         self.inv_temp = 1/temperature
         self.use_self_targets = use_self_targets
+        self.normalize = normalize
 
     def calculate_accuracy(self, preds):
         labels = torch.arange(preds.shape[-2], dtype=torch.long, device=preds.device)
@@ -264,8 +269,9 @@ class BlockNCE:
         f_x1 = f_x1s.flatten(1, 2)
         f_x2 = f_x2s.flatten(1, 2)
         f_x1 = self.classifier(f_x1)
-        f_x1 = f_x1/(torch.norm(f_x1, dim=-1, keepdim=True) + 1.e-3)
-        f_x2 = f_x2/(torch.norm(f_x2, dim=-1, keepdim=True) + 1.e-3)
+        if self.normalize:
+            f_x1 = f_x1/(torch.norm(f_x1, dim=-1, keepdim=True) + 1.e-3)
+            f_x2 = f_x2/(torch.norm(f_x2, dim=-1, keepdim=True) + 1.e-3)
         f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
         n_batch = f_x1.size(1)
         neg_batch = f_x2.size(-1)

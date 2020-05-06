@@ -50,12 +50,6 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = 2000
     config['algo']['eps_steps'] = int(5e4)
-    config["algo"]["model_rl_weight"] = args.model_rl_weight
-    config["algo"]["reward_loss_weight"] = args.reward_loss_weight
-    config["algo"]["model_nce_weight"] = args.model_nce_weight
-    config["algo"]["nce_loss_weight"] = args.nce_loss_weight
-    config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
-    config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
     config["algo"]["clip_grad_norm"] = args.max_grad_norm
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
@@ -96,6 +90,13 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["target_augmentation"] = args.target_augmentation
         config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
+        config["model"]["classifier"] = args.classifier
+        config["algo"]["model_rl_weight"] = args.model_rl_weight
+        config["algo"]["reward_loss_weight"] = args.reward_loss_weight
+        config["algo"]["model_nce_weight"] = args.model_nce_weight
+        config["algo"]["nce_loss_weight"] = args.nce_loss_weight
+        config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
+        config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
@@ -157,12 +158,6 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
     config["algo"]["n_step_return"] = 5
     config["algo"]["batch_size"] = 128
     config["algo"]["learning_rate"] = 6.25e-5
-    config["algo"]["model_rl_weight"] = args.model_rl_weight
-    config["algo"]["reward_loss_weight"] = args.reward_loss_weight
-    config["algo"]["model_nce_weight"] = args.model_nce_weight
-    config["algo"]["nce_loss_weight"] = args.nce_loss_weight
-    config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
-    config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
     config['algo']['replay_ratio'] = args.replay_ratio
     # config["sampler"]["max_decorrelation_steps"] = 0
     # config["algo"]["min_steps_learn"] = 2e4
@@ -194,6 +189,13 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False, detach_model=1, arg
         config["model"]["target_augmentation"] = args.target_augmentation
         config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
+        config["model"]["classifier"] = args.classifier
+        config["algo"]["model_rl_weight"] = args.model_rl_weight
+        config["algo"]["reward_loss_weight"] = args.reward_loss_weight
+        config["algo"]["model_nce_weight"] = args.model_nce_weight
+        config["algo"]["nce_loss_weight"] = args.nce_loss_weight
+        config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
+        config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     else:
@@ -257,7 +259,8 @@ if __name__ == "__main__":
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
     parser.add_argument('--noisy-nets', type=int, default=0)
-    parser.add_argument('--nce-type', type=str, default='stdim', choices=["stdim", "moco"], help='Style of NCE')
+    parser.add_argument('--nce-type', type=str, default='stdim', choices=["stdim", "moco", "curl"], help='Style of NCE')
+    parser.add_argument('--classifier', type=str, default='mlp', choices=["mlp", "bilinear"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default='none', choices=["none", "rrc", "affine", "crop"], help='Style of augmentation')
     parser.add_argument('--target-augmentation', type=int, default=0, help='Use augmentation on inputs to target networks')
     parser.add_argument('--eval-augmentation', type=int, default=0, help='Use augmentation on inputs at evaluation time')

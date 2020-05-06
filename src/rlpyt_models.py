@@ -241,6 +241,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             encoder="repnet",
             noisy_nets=0,
             aug_prob=0.8,
+            classifier="mlp",
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -304,9 +305,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         else:
             if dueling:
                 self.head = DQNDistributionalDuelingHeadModel(self.hidden_size, output_size,
+                                                              hidden_size=128,
                                                               pixels=self.pixels, noisy=self.noisy)
             else:
                 self.head = DQNDistributionalHeadModel(self.hidden_size, output_size,
+                                                       hidden_size=128,
                                                        pixels=self.pixels, noisy=self.noisy)
 
         if film:
@@ -321,7 +324,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                              blocks=dynamics_blocks,
                                              norm_type=norm_type)
 
-        assert self.nce_type in ["stdim", "moco"]
+        assert self.nce_type in ["stdim", "moco", "curl"]
         if self.nce and self.nce_type == "stdim":
             if self.stack_actions:
                 input_size = c - 1
@@ -332,48 +335,86 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             else:
                 self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
                                                        norm_type=norm_type)
-            self.classifier = nn.Sequential(nn.Linear(self.hidden_size, self.hidden_size),
-                                            nn.ReLU(),
-                                            nn.Linear(self.hidden_size, self.hidden_size),
-                                            nn.ReLU())
+            if classifier == "mlp":
+                self.classifier = nn.Sequential(nn.Linear(self.hidden_size,
+                                                          self.hidden_size),
+                                                nn.ReLU(),
+                                                nn.Linear(self.hidden_size,
+                                                          self.hidden_size))
+            else:
+                self.classifier = nn.Linear(self.hidden_size, self.hidden_size)
+
             self.nce = BlockNCE(self.classifier,
-                                use_self_targets=False)
+                                use_self_targets=False,
+                                normalize=False,
+                                temperature=0.1,
+                                )
+
+        if self.nce and self.nce_type == "curl":
+            if classifier == "mlp":
+                self.classifier = MLPHead(self.hidden_size,
+                                          output_size=self.hidden_size*self.pixels,
+                                          hidden_size=-1,
+                                          pixels=self.pixels,
+                                          noisy=0,
+                                          )
+                self.target_classifier = MLPHead(self.hidden_size,
+                                                output_size=self.hidden_size*self.pixels,
+                                                hidden_size=-1,
+                                                pixels=self.pixels,
+                                                noisy=0,
+                                                )
+            else:
+                self.classifier = nn.Sequential(nn.Flatten(-3, -1),
+                                                nn.Linear(self.hidden_size*self.pixels,
+                                                          self.hidden_size*self.pixels))
+                self.target_classifer = nn.Identity()
+            self.nce_target_encoder = copy.deepcopy(self.conv)
+            for param in self.nce_target_encoder.parameters():
+                param.requires_grad = False
+            self.nce_target_classifier = nn.Flatten(-3, -1)
+            self.nce = BlockNCE(nn.Identity(),
+                                use_self_targets=False,
+                                temperature=1.,
+                                normalize=False)
+
         elif self.nce and self.nce_type == "moco":
             self.nce_target_encoder = copy.deepcopy(self.conv)
             self.nce = BufferedNCE(self.hidden_size, 2**14, buffer_names=["main"])
-            self.classifier = \
-                PizeroDistributionalHeadModel(self.hidden_size, 1,
-                                              pixels=self.pixels,
-                                              norm_type=norm_type,
-                                              n_atoms=self.hidden_size,
-                                              noisy=self.noisy)
-            self.target_classifier =\
-                PizeroDistributionalHeadModel(self.hidden_size, 1,
-                                              pixels=self.pixels,
-                                              norm_type=norm_type,
-                                              n_atoms=self.hidden_size,
-                                              noisy=self.noisy)
+
+            if classifier == "mlp":
+                self.classifier = MLPHead(self.hidden_size,
+                                          256,
+                                          -1,
+                                          self.pixels,
+                                          noisy=0,
+                                          )
+                self.target_classifier = MLPHead(self.hidden_size,
+                                                256,
+                                                -1,
+                                                self.pixels,
+                                                noisy=0,
+                                                )
+            else:
+                self.classifier = nn.Sequential(nn.Flatten(-3, -1),
+                                                nn.Linear(self.hidden_size*self.pixels,
+                                                          self.hidden_size*self.pixels))
+                self.target_classifer = nn.Identity()
+
             for param in self.target_classifier.parameters():
                 param.requires_grad = False
             for param in self.nce_target_encoder.parameters():
                 param.requires_grad = False
+        self.classifier_type = classifier
 
         if self.detach_model:
-            if dueling:
-                self.target_head = PizeroDistributionalDuelingHeadModel(self.hidden_size, output_size,
-                                                                        pixels=self.pixels,
-                                                                        norm_type=norm_type)
-            else:
-                self.target_head = PizeroDistributionalHeadModel(self.hidden_size, output_size,
-                                                                 pixels=self.pixels,
-                                                                 norm_type=norm_type)
-
+            self.target_head = copy.deepcopy(self.head)
             for param in self.target_head.parameters():
                 param.requires_grad = False
 
     def do_moco_nce(self, pred_latents, observation):
         stacked_latents = torch.stack(pred_latents, 1).flatten(0, 1)
-        stacked_latents = self.classifier(stacked_latents)[:, 0, :]
+        stacked_latents = self.classifier(stacked_latents)
         if self.stack_actions:
             observation = observation[:, :, :, :-1]
         if self.jumps > 0 or self.augmentation != "none":
@@ -383,9 +424,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         target_images = self.transform(target_images, True)
         with torch.no_grad():
             target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
-            target_latents = self.target_classifier(target_latents)[:, 0, :]
+            target_latents = self.target_classifier(target_latents)
             update_state_dict(self.nce_target_encoder, self.conv.state_dict(), 0.001)
-            update_state_dict(self.target_classifier, self.classifier.state_dict(), 0.001)
+            if self.classifier_type != "bilinear":
+                update_state_dict(self.target_classifier, self.classifier.state_dict(), 0.001)
 
         nce_loss, _, nce_accs = self.nce.compute_loss(stacked_latents, target_latents, "main")
         nce_loss = nce_loss.view(observation.shape[1], -1)
@@ -400,6 +442,41 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         return nce_loss, nce_model_loss, nce_accs
 
+    def do_curl_nce(self, pred_latents, observation):
+        stacked_latents = torch.stack(pred_latents, 1).flatten(0, 1)
+        stacked_latents = self.classifier(stacked_latents)
+        if self.stack_actions:
+            observation = observation[:, :, :, :-1]
+        if self.jumps > 0 or self.augmentation != "none":
+            target_images = observation[0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
+        else:
+            target_images = observation[1:2].transpose(0, 1).flatten(2, 3)
+        target_images = self.transform(target_images, True)
+        with torch.no_grad():
+            target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
+            target_latents = self.target_classifier(target_latents)
+            update_state_dict(self.nce_target_encoder,
+                              self.conv.state_dict(), 0.001)
+            if self.classifier_type != "bilinear":
+                update_state_dict(self.target_classifier,
+                                  self.classifier.state_dict(), 0.001)
+
+        target_latents = target_latents.view(observation.shape[1], -1, 1, target_latents.shape[-1])
+        target_latents = target_latents.transpose(0, 2)
+        stacked_latents = stacked_latents.view(observation.shape[1], -1, 1, stacked_latents.shape[-1])
+        stacked_latents = stacked_latents.transpose(0, 2)
+
+        nce_loss, nce_accs = self.nce.forward(stacked_latents, target_latents)
+        if self.jumps > 0:
+            nce_model_loss = nce_loss[1:].mean(0)
+            nce_loss = nce_loss[0]
+        else:
+            nce_model_loss = 0
+            nce_loss = nce_loss[0]
+        nce_accs = nce_accs.mean()
+
+        return nce_loss, nce_model_loss, nce_accs
+    
     def do_stdim_nce(self, pred_latents, observation):
         if self.stack_actions:
             observation = observation[:, :, :, :-1]
@@ -512,6 +589,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 nce_loss, nce_model_loss, nce_accs = self.do_stdim_nce(pred_latents, observation)
             elif self.nce and self.nce_type == "moco":
                 nce_loss, nce_model_loss, nce_accs = self.do_moco_nce(pred_latents, observation)
+            elif self.nce and self.nce_type == "curl":
+                nce_loss, nce_model_loss, nce_accs = self.do_curl_nce(pred_latents, observation)
             else:
                 nce_loss = 0
                 nce_accs = 0
@@ -573,11 +652,42 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         return next_state, reward_logits, policy_logits, value_logits
 
 
+class MLPHead(torch.nn.Module):
+    def __init__(self,
+                 input_channels,
+                 output_size,
+                 hidden_size=-1,
+                 pixels=30,
+                 noisy=0):
+        super().__init__()
+        if noisy:
+            linear = NoisyLinear
+        else:
+            linear = nn.Linear
+        if hidden_size <= 0:
+            hidden_size = input_channels*pixels
+        self.linears = [linear(input_channels*pixels, hidden_size),
+                        linear(hidden_size, output_size)]
+        layers = [nn.Flatten(-3, -1),
+                  self.linears[0],
+                  nn.ReLU(),
+                  self.linears[1]]
+        self.network = nn.Sequential(*layers)
+        self._output_size = output_size
+
+    def forward(self, input):
+        return self.network(input)
+
+    def reset_noise(self):
+        for module in self.linears:
+            module.reset_noise()
+
+
 class DQNDistributionalHeadModel(torch.nn.Module):
     def __init__(self,
                  input_channels,
                  output_size,
-                 hidden_size=128,
+                 hidden_size=256,
                  pixels=30,
                  n_atoms=51,
                  noisy=0):
@@ -586,8 +696,8 @@ class DQNDistributionalHeadModel(torch.nn.Module):
             linear = NoisyLinear
         else:
             linear = nn.Linear
-        self.linears = [linear(input_channels*pixels, 256),
-                        linear(256, output_size * n_atoms)]
+        self.linears = [linear(input_channels*pixels, hidden_size),
+                        linear(hidden_size, output_size * n_atoms)]
         layers = [nn.Flatten(-3, -1),
                   self.linears[0],
                   nn.ReLU(),
@@ -612,14 +722,15 @@ class DQNDistributionalDuelingHeadModel(torch.nn.Module):
                  output_size,
                  pixels=30,
                  n_atoms=51,
+                 hidden_size=256,
                  grad_scale=2 ** (-1 / 2),
                  noisy=0):
         super().__init__()
         linear = NoisyLinear if noisy else nn.Linear
-        self.linears = [linear(pixels * input_channels, 256),
-                        linear(256, output_size * n_atoms, bias=False),
-                        linear(pixels * input_channels, 256),
-                        linear(256, n_atoms)
+        self.linears = [linear(pixels * input_channels, hidden_size),
+                        linear(hidden_size, output_size * n_atoms, bias=False),
+                        linear(pixels * input_channels, hidden_size),
+                        linear(hidden_size, n_atoms)
                         ]
         self.advantage_layers = [nn.Flatten(-3, -1),
                                  self.linears[0],
@@ -903,3 +1014,4 @@ class Conv2dSame(nn.Module):
         x_pad = nn.ZeroPad2d((Pr//2, Pr - Pr//2, Pc//2, Pc - Pc//2))(x_in)
         x_out = self.layer(x_pad)
         return x_out
+
