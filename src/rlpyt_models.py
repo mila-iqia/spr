@@ -359,16 +359,16 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                           noisy=0,
                                           )
                 self.target_classifier = MLPHead(self.hidden_size,
-                                                output_size=self.hidden_size*self.pixels,
-                                                hidden_size=-1,
-                                                pixels=self.pixels,
-                                                noisy=0,
-                                                )
+                                                 output_size=self.hidden_size*self.pixels,
+                                                 hidden_size=-1,
+                                                 pixels=self.pixels,
+                                                 noisy=0,
+                                                 )
             else:
                 self.classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                 nn.Linear(self.hidden_size*self.pixels,
                                                           self.hidden_size*self.pixels))
-                self.target_classifer = nn.Identity()
+                self.target_classifier = nn.Identity()
             self.nce_target_encoder = copy.deepcopy(self.conv)
             for param in self.nce_target_encoder.parameters():
                 param.requires_grad = False
@@ -399,7 +399,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 self.classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                 nn.Linear(self.hidden_size*self.pixels,
                                                           self.hidden_size*self.pixels))
-                self.target_classifer = nn.Identity()
+                self.target_classifier = nn.Identity()
 
             for param in self.target_classifier.parameters():
                 param.requires_grad = False
