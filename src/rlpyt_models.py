@@ -380,7 +380,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         elif self.nce and self.nce_type == "moco":
             self.nce_target_encoder = copy.deepcopy(self.conv)
-            self.nce = BufferedNCE(self.hidden_size, 2**14, buffer_names=["main"])
 
             if classifier == "mlp":
                 self.classifier = MLPHead(self.hidden_size,
@@ -395,11 +394,15 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  self.pixels,
                                                  noisy=0,
                                                  )
+                buffer_size = 256
             else:
                 self.classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                 nn.Linear(self.hidden_size*self.pixels,
                                                           self.hidden_size*self.pixels))
                 self.target_classifier = nn.Flatten(-3, -1)
+                buffer_size = self.hidden_size*self.pixels
+
+            self.nce = BufferedNCE(buffer_size, 2**14, buffer_names=["main"])
 
             for param in self.target_classifier.parameters():
                 param.requires_grad = False
