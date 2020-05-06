@@ -368,7 +368,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 self.classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                 nn.Linear(self.hidden_size*self.pixels,
                                                           self.hidden_size*self.pixels))
-                self.target_classifier = nn.Identity()
+                self.target_classifier = nn.Flatten(-3, -1)
             self.nce_target_encoder = copy.deepcopy(self.conv)
             for param in self.nce_target_encoder.parameters():
                 param.requires_grad = False
@@ -390,16 +390,16 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                           noisy=0,
                                           )
                 self.target_classifier = MLPHead(self.hidden_size,
-                                                256,
-                                                -1,
-                                                self.pixels,
-                                                noisy=0,
-                                                )
+                                                 256,
+                                                 -1,
+                                                 self.pixels,
+                                                 noisy=0,
+                                                 )
             else:
                 self.classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                 nn.Linear(self.hidden_size*self.pixels,
                                                           self.hidden_size*self.pixels))
-                self.target_classifier = nn.Identity()
+                self.target_classifier = nn.Flatten(-3, -1)
 
             for param in self.target_classifier.parameters():
                 param.requires_grad = False
@@ -418,7 +418,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         if self.stack_actions:
             observation = observation[:, :, :, :-1]
         if self.jumps > 0 or self.augmentation != "none":
-            target_images = observation[0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
+            target_images = observation[ 0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
         else:
             target_images = observation[1:2].transpose(0, 1).flatten(2, 3)
         target_images = self.transform(target_images, True)
@@ -435,8 +435,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             nce_model_loss = nce_loss[:, 1:].mean(1)
             nce_loss = nce_loss[:, 0]
         else:
-            nce_model_loss = torch.tensor(0.)
             nce_loss = nce_loss[:, 0]
+            nce_model_loss = torch.zeros_like(nce_loss)
         nce_accs = nce_accs.mean().item()
         self.nce.update_buffer(target_latents, "main")
 
@@ -471,8 +471,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             nce_model_loss = nce_loss[1:].mean(0)
             nce_loss = nce_loss[0]
         else:
-            nce_model_loss = 0
             nce_loss = nce_loss[0]
+            nce_model_loss = torch.zeros_like(nce_loss)
         nce_accs = nce_accs.mean()
 
         return nce_loss, nce_model_loss, nce_accs
@@ -498,8 +498,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             nce_model_loss = nce_loss[1:].mean(0)
             nce_loss = nce_loss[0]
         else:
-            nce_model_loss = torch.tensor(0.)
             nce_loss = nce_loss[0]
+            nce_model_loss = torch.zeros_like(nce_loss)
         nce_accs = nce_accs.mean()
 
         return nce_loss, nce_model_loss, nce_accs
