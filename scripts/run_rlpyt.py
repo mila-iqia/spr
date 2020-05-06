@@ -287,7 +287,7 @@ if __name__ == "__main__":
     parser.add_argument('--visit-temp', type=float, default=0.5, help='Visit counts softmax temperature for sampling actions')
 
     args = parser.parse_args()
-    wandb.init(project='rlpyt', entity='abs-world-models', config=args)
+    wandb.init(project='rlpyt', entity='abs-world-models', config=args, notes='NCE / classifier fixes')
     wandb.config.update(vars(args))
     if args.debug:
         debug_build_and_train(game=args.game,
