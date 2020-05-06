@@ -435,7 +435,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             nce_model_loss = nce_loss[:, 1:].mean(1)
             nce_loss = nce_loss[:, 0]
         else:
-            nce_model_loss = 0
+            nce_model_loss = torch.tensor(0.)
             nce_loss = nce_loss[:, 0]
         nce_accs = nce_accs.mean().item()
         self.nce.update_buffer(target_latents, "main")
@@ -498,7 +498,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             nce_model_loss = nce_loss[1:].mean(0)
             nce_loss = nce_loss[0]
         else:
-            nce_model_loss = 0
+            nce_model_loss = torch.tensor(0.)
             nce_loss = nce_loss[0]
         nce_accs = nce_accs.mean()
 
@@ -592,8 +592,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             elif self.nce and self.nce_type == "curl":
                 nce_loss, nce_model_loss, nce_accs = self.do_curl_nce(pred_latents, observation)
             else:
-                nce_loss = 0
-                nce_accs = 0
+                nce_loss, nce_model_loss, nce_accs = torch.tensor(0.), torch.tensor(0.), torch.tensor(0.)
 
             # end = time.time()
             # print("Forward took {}".format(end - start))
