@@ -169,13 +169,9 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config['env']['imagesize'] = args.imagesize
     config['eval_env']['imagesize'] = args.imagesize
     config["model"]["dueling"] = bool(args.dueling)
-    config["algo"]["min_steps_learn"] = 1600
-    config["algo"]["n_step_return"] = 20
     config["algo"]["batch_size"] = args.batch_size
-    config["algo"]["learning_rate"] = 0.0001
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = 2000
-    config['algo']['eps_steps'] = int(5e4)
     config["algo"]["clip_grad_norm"] = args.max_grad_norm
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
@@ -200,6 +196,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     )
     args.discount = config["algo"]["discount"]
     if model:
+        config["model"]["imagesize"] = args.imagesize
         config["model"]["jumps"] = args.jumps
         config["model"]["detach_model"] = detach_model
         config["model"]["dynamics_blocks"] = args.dynamics_blocks
