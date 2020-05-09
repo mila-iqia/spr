@@ -310,7 +310,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                               pixels=self.pixels,
                                                               noisy=self.noisy)
             else:
-                self.head = DQNDistributionalHeadModel(self.hidden_size, output_size,
+                self.head = DQNDistributionalHeadModel(self.hidden_size,
+                                                       output_size,
                                                        hidden_size=256,
                                                        pixels=self.pixels,
                                                        noisy=self.noisy)
