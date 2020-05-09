@@ -330,6 +330,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
 
         Returns loss and KL-divergence-errors for use in prioritization.
         """
+        if self.model.noisy:
+            self.model.head.reset_noise()
         pred_ps, pred_rew, nce_loss, model_nce_loss, nce_acc\
             = self.agent(samples.all_observation.to(self.agent.device),
                          samples.all_action.to(self.agent.device),
@@ -371,8 +373,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         value_loss = value_loss.cpu()
         if self.prioritized_replay:
             weights = samples.is_weights
-            nce_loss = nce_loss * weights
-            model_nce_loss = model_nce_loss * weights
+            # nce_loss = nce_loss * weights
+            # model_nce_loss = model_nce_loss * weights
             reward_loss = reward_loss * weights
             value_loss = value_loss * weights
 
