@@ -23,6 +23,7 @@ from kornia.augmentation import RandomAffine,\
 from rlpyt.utils.logging import logger
 import copy
 import wandb
+import time
 
 
 class AsyncRlEvalWandb(AsyncRlEval):
@@ -248,7 +249,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         super().__init__()
 
         self.noisy = noisy_nets
-
         self.augmentation = augmentation.lower()
         self.aug_prob = aug_prob
         assert self.augmentation in ["affine", "crop", "rrc", "none"]
@@ -304,25 +304,33 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                           noisy=self.noisy)
         else:
             if dueling:
-                self.head = DQNDistributionalDuelingHeadModel(self.hidden_size, output_size,
-                                                              hidden_size=128,
-                                                              pixels=self.pixels, noisy=self.noisy)
+                self.head = DQNDistributionalDuelingHeadModel(self.hidden_size,
+                                                              output_size,
+                                                              hidden_size=256,
+                                                              pixels=self.pixels,
+                                                              noisy=self.noisy)
             else:
                 self.head = DQNDistributionalHeadModel(self.hidden_size, output_size,
-                                                       hidden_size=128,
-                                                       pixels=self.pixels, noisy=self.noisy)
+                                                       hidden_size=256,
+                                                       pixels=self.pixels,
+                                                       noisy=self.noisy)
 
         if film:
             dynamics_model = FiLMTransitionModel
         else:
             dynamics_model = TransitionModel
 
-        self.dynamics_model = dynamics_model(channels=self.hidden_size,
-                                             num_actions=output_size,
-                                             pixels=self.pixels,
-                                             limit=1,
-                                             blocks=dynamics_blocks,
-                                             norm_type=norm_type)
+        if self.jumps > 0 or not self.detach_model:
+            self.dynamics_model = dynamics_model(channels=self.hidden_size,
+                                                 num_actions=output_size,
+                                                 pixels=self.pixels,
+                                                 hidden_size=self.hidden_size,
+                                                 limit=1,
+                                                 blocks=dynamics_blocks,
+                                                 norm_type=norm_type,
+                                                 renormalize=encoder=="repnet")
+        else:
+            self.dynamics_model = nn.Identity()
 
         assert self.nce_type in ["stdim", "moco", "curl"]
         if self.nce and self.nce_type == "stdim":
@@ -550,16 +558,13 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
     def forward(self, observation, prev_action, prev_reward, jumps=False):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
-        # start = time.time()
-        if self.noisy:
-            self.head.reset_noise()
-
         if jumps:
             pred_ps = []
             pred_reward = []
             pred_latents = []
             input_obs = observation[0].flatten(1, 2)
             input_obs = self.transform(input_obs, True)
+
             latent = self.stem_forward(input_obs,
                                        prev_action[0],
                                        prev_reward[0])
@@ -568,25 +573,22 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                              prev_reward[0]),)
             pred_latents.append(latent)
 
-            if self.detach_model and self.jumps > 0:
-                # copy_start = time.time()
-                self.target_head.load_state_dict(self.head.state_dict())
-                # copy_end = time.time()
-                # print("Copying took {}".format(copy_end - copy_start))
-                latent = latent.detach()
+            if self.jumps > 0 or not self.detach_model:
+                if self.detach_model:
+                    self.target_head.load_state_dict(self.head.state_dict())
+                    latent = latent.detach()
+                pred_rew = self.dynamics_model.reward_predictor(latent)
+                pred_reward.append(F.log_softmax(pred_rew, -1))
 
-            pred_rew = self.dynamics_model.reward_predictor(latent)
-            pred_reward.append(pred_rew)
-
-            for j in range(1, self.jumps + 1):
-                latent, pred_rew, _, _ = self.step(latent, prev_action[j])
-                latent = ScaleGradient.apply(latent, 0.5)
-                pred_latents.append(latent)
-                pred_reward.append(pred_rew)
-                pred_ps.append(self.head_forward(latent,
-                                                 prev_action[j],
-                                                 prev_reward[j],
-                                                 target=self.detach_model))
+                for j in range(1, self.jumps + 1):
+                    latent, pred_rew, _, _ = self.step(latent, prev_action[j])
+                    latent = ScaleGradient.apply(latent, 0.5)
+                    pred_latents.append(latent)
+                    pred_reward.append(pred_rew)
+                    pred_ps.append(self.head_forward(latent,
+                                                     prev_action[j],
+                                                     prev_reward[j],
+                                                     target=self.detach_model))
 
             if self.nce and self.nce_type == "stdim":
                 nce_loss, nce_model_loss, nce_accs = self.do_stdim_nce(pred_latents, observation)
@@ -597,10 +599,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             else:
                 nce_loss, nce_model_loss, nce_accs = torch.tensor(0.), torch.tensor(0.), torch.tensor(0.)
 
-            # end = time.time()
-            # print("Forward took {}".format(end - start))
             return pred_ps,\
-                   [F.log_softmax(ps, -1) for ps in pred_reward],\
+                   pred_reward,\
                    nce_loss, nce_model_loss, nce_accs
 
         else:
@@ -618,25 +618,25 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
             # Restore leading dimensions: [T,B], [B], or [], as input.
             p = restore_leading_dims(p, lead_dim, T, B)
+
             return p
 
     def initial_inference(self, obs, actions=None, logits=False):
-        if self.noisy:
-            self.head.reset_noise()
         if len(obs.shape) == 5:
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, self.eval_augmentation)
         hidden_state = self.conv(obs)
         policy_logits = None
         value_logits = self.head(hidden_state)
-        reward_logits = self.dynamics_model.reward_predictor(hidden_state)
+
+        # reward_logits = self.dynamics_model.reward_predictor(hidden_state)
 
         if logits:
-            return NetworkOutput(hidden_state, reward_logits, policy_logits, value_logits)
+            return hidden_state, None, policy_logits, value_logits
 
         value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
-        reward = from_categorical(reward_logits, logits=True, limit=1)
-        return NetworkOutput(hidden_state, reward, policy_logits, value)
+        # reward = from_categorical(reward_logits, logits=True, limit=1)
+        return hidden_state, None, policy_logits, value
 
     def inference(self, state, action):
         next_state, reward_logits, \
@@ -647,7 +647,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         return NetworkOutput(next_state, reward, policy_logits, value)
 
     def step(self, state, action):
-
         next_state, reward_logits = self.dynamics_model(state, action)
         policy_logits = None
         value_logits = self.head(next_state)
@@ -784,8 +783,8 @@ class PizeroDistributionalHeadModel(torch.nn.Module):
         else:
             linear = nn.Linear
         self.hidden_size = hidden_size
-        self.linears = [linear(pixels*hidden_size, 512),
-                        linear(512, output_size * n_atoms)]
+        self.linears = [linear(pixels*hidden_size, 256),
+                        linear(256, output_size * n_atoms)]
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   init_normalization(hidden_size, norm_type),
@@ -820,8 +819,8 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         linear = NoisyLinear if noisy else nn.Linear
-        self.linears = [linear(pixels*hidden_size, 512),
-                        linear(512, n_atoms),
+        self.linears = [linear(pixels*hidden_size, 256),
+                        linear(256, n_atoms),
                         linear(pixels * hidden_size,
                                output_size * n_atoms, bias=False)
                         ]

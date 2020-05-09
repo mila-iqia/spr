@@ -80,7 +80,8 @@ class DQNSearchAgent(PizeroAgent):
         self.search = VectorizedQMCTS(self.search_args,
                                       env_spaces.action.n,
                                       self.model,
-                                      eval=self.eval)
+                                      eval=self.eval,
+                                      distribution=self.distribution)
 
     def to_device(self, cuda_idx=None):
         """Moves the model to the specified cuda device, if not ``None``.  If
@@ -122,7 +123,7 @@ class DQNSearchAgent(PizeroAgent):
 
 
 class VectorizedMCTS:
-    def __init__(self, args, n_actions, network, eval=False):
+    def __init__(self, args, n_actions, network, eval=False, distribution=None):
         self.num_actions = n_actions
         self.network = network
         self.args = args
@@ -142,6 +143,7 @@ class VectorizedMCTS:
         self.vl_c = args.virtual_loss_c
         self.env_steps = 0
         self.eval = eval
+        self.distribution = distribution
         if self.eval:
             self.root_exploration_fraction = 0.
         self.initialize_on_device("cpu") # Need to have a CPU setup to generate examples.
