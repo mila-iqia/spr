@@ -305,11 +305,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         else:
             if dueling:
                 self.head = DQNDistributionalDuelingHeadModel(self.hidden_size, output_size,
-                                                              hidden_size=128,
+                                                              hidden_size=256,
                                                               pixels=self.pixels, noisy=self.noisy)
             else:
                 self.head = DQNDistributionalHeadModel(self.hidden_size, output_size,
-                                                       hidden_size=128,
+                                                       hidden_size=256,
                                                        pixels=self.pixels, noisy=self.noisy)
 
         if film:
@@ -551,9 +551,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
         # start = time.time()
-        if self.noisy:
-            self.head.reset_noise()
-
         if jumps:
             pred_ps = []
             pred_reward = []
@@ -621,8 +618,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             return p
 
     def initial_inference(self, obs, actions=None, logits=False):
-        if self.noisy:
-            self.head.reset_noise()
         if len(obs.shape) == 5:
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, self.eval_augmentation)
