@@ -13,6 +13,7 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
     ["observation", "action", "reward", "done"])
 ModelSamplesToBuffer = namedarraytuple("SamplesToBuffer",
     ["observation", "action", "reward", "done", "value"])
+import time
 
 OptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr"])
 ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
@@ -75,6 +76,8 @@ class PizeroCategoricalDQN(CategoricalDQN):
 
         Returns loss and KL-divergence-errors for use in prioritization.
         """
+        if self.model.noisy:
+            self.model.head.reset_noise()
         delta_z = (self.V_max - self.V_min) / (self.agent.n_atoms - 1)
         z = torch.linspace(self.V_min, self.V_max, self.agent.n_atoms)
         # Make 2-D tensor of contracted z_domain for each data point,
@@ -231,7 +234,6 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
             loss, td_abs_errors, model_rl_loss, reward_loss,\
             nce_loss, model_nce_loss, nce_accs, amortization_loss = self.loss(samples_from_replay)
-
             total_loss = loss + self.model_rl_weight*model_rl_loss \
                               + self.nce_loss_weight*nce_loss \
                               + self.model_nce_weight*model_nce_loss \
@@ -241,8 +243,11 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             total_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.model.stem_parameters(), self.clip_grad_norm)
-            model_grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.dynamics_model.parameters(), self.clip_grad_norm)
+            if len(list(self.model.dynamics_model.parameters())) > 0:
+                model_grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.dynamics_model.parameters(), self.clip_grad_norm)
+            else:
+                model_grad_norm = 0
             self.optimizer.step()
 
             if self.prioritized_replay:
@@ -332,11 +337,14 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                          jumps=True)  # [B,A,P]
 
         rl_loss, KL = self.rl_loss(pred_ps[0], samples, 0)
-        pred_rew = torch.stack(pred_rew, 0)
-        with torch.no_grad():
-            reward_target = to_categorical(samples.all_reward[:self.jumps+1].flatten().to(self.agent.device), limit=1).view(*pred_rew.shape)
-        reward_loss = -torch.sum(reward_target * pred_rew, (0, 2))
-        model_rl_loss = torch.zeros_like(reward_loss).cpu()
+        if len(pred_rew) > 0:
+            pred_rew = torch.stack(pred_rew, 0)
+            with torch.no_grad():
+                reward_target = to_categorical(samples.all_reward[:self.jumps+1].flatten().to(self.agent.device), limit=1).view(*pred_rew.shape)
+            reward_loss = -torch.sum(reward_target * pred_rew, (0, 2)).cpu()
+        else:
+            reward_loss = torch.zeros(samples.all_observation.shape[1],)
+        model_rl_loss = torch.zeros_like(reward_loss)
 
         if self.amortization_loss_weight > 0:
             pred_values = from_categorical(torch.stack(pred_ps, 0), limit=10, logits=False)

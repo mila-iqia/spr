@@ -74,7 +74,9 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
             elapsed_samples = self.B*(elapsed_iters)
             values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
             batch = SamplesFromReplayExt(*batch, values=values, age=elapsed_samples)
-            return self.sanitize_batch(batch)
+            if self.batch_T > 1:
+                batch = self.sanitize_batch(batch)
+            return batch
 
     def sanitize_batch(self, batch):
         has_dones, inds = torch.max(batch.done, 0)
@@ -125,7 +127,8 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
                                             values=values,
                                             is_weights=is_weights,
                                             age=elapsed_samples)
-            batch = self.sanitize_batch(batch)
+            if self.batch_T > 1:
+                batch = self.sanitize_batch(batch)
             return batch
 
     def sanitize_batch(self, batch):

@@ -664,11 +664,13 @@ class TransitionModel(nn.Module):
                  pixels=36,
                  limit=300,
                  action_dim=6,
-                 norm_type="bn"):
+                 norm_type="bn",
+                 renormalize=True):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_actions = num_actions
         self.args = args
+        self.renormalize = renormalize
         layers = [Conv2dSame(channels+num_actions, hidden_size, 3),
                   nn.ReLU(),
                   init_normalization(hidden_size, norm_type)]
@@ -698,7 +700,8 @@ class TransitionModel(nn.Module):
         action_onehot[batch_range, action, :, :] = 1
         stacked_image = torch.cat([x, action_onehot], 1)
         next_state = self.network(stacked_image)
-        next_state = renormalize(next_state, 1)
+        if self.renormalize:
+            next_state = renormalize(next_state, 1)
         next_reward = self.reward_predictor(next_state)
         return next_state, next_reward
 
@@ -748,9 +751,11 @@ class FiLMTransitionModel(nn.Module):
                  pixels=36,
                  limit=300,
                  norm_type="bn",
+                 renormalize=True,
                  ):
         super().__init__()
         self.hidden_size = hidden_size
+        self.renormalize = renormalize
         self.args = args
         layers = nn.ModuleList()
         layers.append(Conv2dSame(channels, hidden_size, 3))
@@ -777,7 +782,8 @@ class FiLMTransitionModel(nn.Module):
         for resblock in self.network[3:-2]:
             x = resblock(x, action)
         next_state = self.network[-1](x)
-        next_state = renormalize(next_state, 1)
+        if self.renormalize:
+            next_state = renormalize(next_state, 1)
         next_reward = self.reward_predictor(next_state)
         return next_state, next_reward
 
