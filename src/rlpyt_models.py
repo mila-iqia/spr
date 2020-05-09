@@ -243,6 +243,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             noisy_nets=0,
             aug_prob=0.8,
             classifier="mlp",
+            imagesize=84
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -266,7 +267,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             imagesize = 84
         else:
             self.transformation = self.eval_transformation = nn.Identity()
-            imagesize = 84
+            imagesize = imagesize
 
         self.dueling = dueling
         f, c, h, w = image_shape
