@@ -1,11 +1,11 @@
 description: AWM
 
 target:
-  cluster: sc3
-  vc: resrchprojvc5
+  cluster: eu1
+  vc: msrlabs
 
 environment:
-  image: philly/jobs/custom/pytorch:pytorch1.4-py37-cuda10.1
+  image: philly/jobs/custom/pytorch:pytorch1.3.1-py36-cuda10.0
   registry: phillyregistry.azurecr.io
   setup:
     - export PATH=$$PATH:~/.local/bin
@@ -32,15 +32,15 @@ storage:
 search:
   job_template:
     name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
-    sku: G2
+    sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --nce-type moco --nce 1 --classifier {classifier}
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --nce-type moco --nce 1 --classifier {classifier} --dueling 0 --seed 100
   type: grid
-  max_trials: 16
+  max_trials: 100
   params:
     - name: game
       spec: discrete
-      values: ['ms_pacman', 'alien']
+      values: ['ms_pacman', 'alien', 'asterix', 'hero', 'qbert', 'amidar', 'seaquest', 'gopher']
     - name: arguments
       spec: discrete
       values: ['', '--augmentation crop']
@@ -55,7 +55,7 @@ search:
       values: [256]
     - name: mgn
       spec: discrete
-      values: [10., 100.]
+      values: [100.]
     - name: classifier
       spec: discrete
-      values: ['mlp', 'bilinear']
+      values: ['mlp']
