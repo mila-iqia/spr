@@ -663,7 +663,6 @@ class TransitionModel(nn.Module):
                  hidden_size=256,
                  pixels=36,
                  limit=300,
-                 action_dim=6,
                  norm_type="bn",
                  renormalize=True):
         super().__init__()
@@ -681,10 +680,8 @@ class TransitionModel(nn.Module):
         layers.extend([Conv2dSame(hidden_size, channels, 3),
                       nn.ReLU()])
 
-        self.action_embedding = nn.Embedding(num_actions, pixels*action_dim)
-
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = ValueNetwork(channels,
+        self.reward_predictor = RewardNetwork(channels,
                                              pixels=pixels,
                                              limit=limit,
                                              norm_type=norm_type)
@@ -692,11 +689,7 @@ class TransitionModel(nn.Module):
 
     def forward(self, x, action):
         batch_range = torch.arange(action.shape[0], device=action.device)
-        action_onehot = torch.zeros(action.shape[0],
-                                    self.num_actions,
-                                    x.shape[-2],
-                                    x.shape[-1],
-                                    device=action.device)
+        action_onehot = torch.zeros(action.shape[0], self.num_actions, x.shape[-2], x.shape[-1], device=action.device)
         action_onehot[batch_range, action, :, :] = 1
         stacked_image = torch.cat([x, action_onehot], 1)
         next_state = self.network(stacked_image)
@@ -921,6 +914,29 @@ class ValueNetwork(nn.Module):
         return self.network(x)
 
 
+class RewardNetwork(nn.Module):
+    def __init__(self,
+                 input_channels,
+                 hidden_size=128,
+                 pixels=36,
+                 limit=300,
+                 norm_type="bn"):
+        super().__init__()
+        self.hidden_size = hidden_size
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+                  nn.ReLU(),
+                  init_normalization(hidden_size, norm_type),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*hidden_size, 256),
+                  nn.ReLU(),
+                  nn.Linear(256, limit*2 + 1)]
+        self.network = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x):
+        return self.network(x)
+
+
 class PolicyNetwork(nn.Module):
     def __init__(self,
                  input_channels,
@@ -930,7 +946,7 @@ class PolicyNetwork(nn.Module):
                  norm_type="bn"):
         super().__init__()
         self.hidden_size = hidden_size
-        layers = [Conv2dSame(input_channels, hidden_size, 3),
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
                   nn.ReLU(),
                   init_normalization(hidden_size, norm_type),
                   nn.Flatten(-3, -1),
