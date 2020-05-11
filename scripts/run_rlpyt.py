@@ -82,6 +82,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     )
     args.discount = config["algo"]["discount"]
     if model:
+        config["model"]["imagesize"] = args.imagesize
         config["model"]["jumps"] = args.jumps
         config["model"]["detach_model"] = detach_model
         config["model"]["dynamics_blocks"] = args.dynamics_blocks
@@ -91,6 +92,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["nce_type"] = args.nce_type
         config["model"]["encoder"] = args.encoder
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["time_contrastive"] = args.time_contrastive
         config["model"]["aug_prob"] = args.aug_prob
         config["model"]["target_augmentation"] = args.target_augmentation
         config["model"]["eval_augmentation"] = args.eval_augmentation
