@@ -206,6 +206,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["nce_type"] = args.nce_type
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["time_contrastive"] = args.time_contrastive
         config["model"]["aug_prob"] = args.aug_prob
         config["model"]["target_augmentation"] = args.target_augmentation
         config["model"]["eval_augmentation"] = args.eval_augmentation
@@ -299,6 +300,7 @@ if __name__ == "__main__":
     parser.add_argument('--model-nce-weight', type=float, default=1.)
     parser.add_argument('--nce-loss-weight', type=float, default=1.)
     parser.add_argument('--detach-model', type=int, default=1)
+    parser.add_argument('--time-contrastive', type=str, default='none', choices=['none', 'yes', 'with_augment'])
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     parser.add_argument('--max-grad-norm', type=float, default=10., help='Max Grad Norm')
     # MCTS arguments
