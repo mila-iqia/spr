@@ -34,16 +34,16 @@ search:
     name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --nce-type moco --nce 1 --classifier {classifier} --dueling 0 --seed 100
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --nce-type moco --nce 1 --classifier {classifier} --dueling {dueling} --seed {seed} --imagesize 100
   type: grid
-  max_trials: 100
+  max_trials: 200
   params:
     - name: game
       spec: discrete
-      values: ['ms_pacman', 'alien', 'asterix', 'hero', 'qbert', 'amidar', 'seaquest', 'gopher']
+      values: ['alien', 'amidar', 'assault', 'asterix', 'bank_heist', 'battle_zone', 'boxing', 'breakout', 'chopper_command', 'crazy_climber', 'demon_attack', 'freeway', 'frostbite', 'gopher', 'hero', 'jamesbond', 'kangaroo', 'krull', 'kung_fu_master', 'ms_pacman', 'pong', 'private_eye', 'qbert', 'road_runner', 'seaquest', 'up_n_down']
     - name: arguments
       spec: discrete
-      values: ['', '--augmentation crop']
+      values: ['--time-contrastive yes', '--augmentation crop', '--time-contrastive with_augment --augmentation crop']
     - name: jumps
       spec: discrete
       values: [0]
@@ -56,6 +56,12 @@ search:
     - name: mgn
       spec: discrete
       values: [100.]
+    - name: dueling
+      spec: discrete
+      values: [0]
+    - name: seed
+      spec: discrete
+      values: [42, 123]
     - name: classifier
       spec: discrete
       values: ['mlp']

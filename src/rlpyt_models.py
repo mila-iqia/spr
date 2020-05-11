@@ -243,7 +243,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             noisy_nets=0,
             aug_prob=0.8,
             classifier="mlp",
-            imagesize=84
+            imagesize=84,
+            time_contrastive='none'
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -251,6 +252,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.noisy = noisy_nets
         self.augmentation = augmentation.lower()
+        self.time_contrastive = time_contrastive
         self.aug_prob = aug_prob
         assert self.augmentation in ["affine", "crop", "rrc", "none"]
         if self.augmentation == "affine":
@@ -393,18 +395,18 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
             if classifier == "mlp":
                 self.classifier = MLPHead(self.hidden_size,
-                                          256,
+                                          64,
                                           -1,
                                           self.pixels,
                                           noisy=0,
                                           )
                 self.target_classifier = MLPHead(self.hidden_size,
-                                                 256,
+                                                 64,
                                                  -1,
                                                  self.pixels,
                                                  noisy=0,
                                                  )
-                buffer_size = 256
+                buffer_size = 64
             else:
                 self.classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                 nn.Linear(self.hidden_size*self.pixels,
@@ -430,7 +432,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         stacked_latents = self.classifier(stacked_latents)
         if self.stack_actions:
             observation = observation[:, :, :, :-1]
-        if self.jumps > 0 or self.augmentation != "none":
+        if self.time_contrastive in ['yes', 'with_augment']:
+            target_images = observation[1:2].transpose(0, 1).flatten(2, 3)
+        elif self.jumps > 0 or self.augmentation != "none":
             target_images = observation[ 0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
         else:
             target_images = observation[1:2].transpose(0, 1).flatten(2, 3)
