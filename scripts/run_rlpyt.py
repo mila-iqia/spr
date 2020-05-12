@@ -71,7 +71,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         EnvCls=AtariEnv,
         TrajInfoCls=AtariTrajInfo,  # default traj info + GameScore
         env_kwargs=config["env"],
-        eval_env_kwargs=dict(game=game),
+        eval_env_kwargs=config["eval_env"],
         batch_T=1,  # Four time-steps per sampler iteration.
         batch_B=1,
         max_decorrelation_steps=0,
