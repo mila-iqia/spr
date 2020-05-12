@@ -92,7 +92,6 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["momentum_encoder"] = args.momentum_encoder
         config["model"]["local_nce"] = args.local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
-        config["model"]["nce_type"] = args.nce_type
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
         config["model"]["time_contrastive"] = args.time_contrastive
@@ -208,7 +207,6 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["film"] = args.film
         config["model"]["nce"] = args.nce
         config["model"]["encoder"] = args.encoder
-        config["model"]["nce_type"] = args.nce_type
         config["model"]["norm_type"] = args.norm_type
         config["model"]["momentum_encoder"] = args.momentum_encoder
         config["model"]["local_nce"] = args.local_nce
@@ -330,6 +328,20 @@ if __name__ == "__main__":
     parser.add_argument('--visit-temp', type=float, default=0.5, help='Visit counts softmax temperature for sampling actions')
 
     args = parser.parse_args()
+
+    if args.nce_type == "stdim":
+        args.local_nce = 1
+        args.momentum_encoder = 0
+        args.buffered_nce = 0
+    elif args.nce_type == "moco":
+        args.local_nce = 0
+        args.momentum_encoder = 1
+        args.buffered_nce = 1
+    elif args.nce_type == "curl":
+        args.local_nce = 0
+        args.momentum_encoder = 1
+        args.buffered_nce = 0
+
     wandb.init(project='rlpyt', entity='abs-world-models', config=args, notes='NCE / classifier fixes')
     wandb.config.update(vars(args))
     if args.debug:

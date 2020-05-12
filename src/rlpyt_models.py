@@ -232,7 +232,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             jumps=0,
             detach_model=True,
             nce=False,
-            nce_type="stdim",
             augmentation="none",
             target_augmentation=0,
             eval_augmentation=0,
@@ -347,23 +346,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.dynamics_model = nn.Identity()
 
         if self.use_nce:
-            assert self.nce_type in ["stdim", "moco", "curl", "custom"]
-            if self.nce_type == "stdim":
-                self.local_nce = True
-                self.momentum_encoder = False
-                self.buffered_nce = False
-            elif self.nce_type == "moco":
-                self.local_nce = False
-                self.momentum_encoder = True
-                self.buffered_nce = True
-            elif self.nce_type == "curl":
-                self.local_nce = False
-                self.momentum_encoder = True
-                self.buffered_nce = False
-            else:
-                self.local_nce = local_nce
-                self.momentum_encoder = momentum_encoder
-                self.buffered_nce = buffered_nce
+            self.local_nce = local_nce
+            self.momentum_encoder = momentum_encoder
+            self.buffered_nce = buffered_nce
 
             if self.local_nce:
                 if classifier == "mlp":
