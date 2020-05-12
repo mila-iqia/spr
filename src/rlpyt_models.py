@@ -12,14 +12,15 @@ from rlpyt.samplers.serial.collectors import SerialEvalCollector
 from rlpyt.utils.buffer import buffer_from_example, torchify_buffer, numpify_buffer
 from rlpyt.utils.tensor import infer_leading_dims, restore_leading_dims
 from src.model_trainer import ValueNetwork, TransitionModel, \
-    NetworkOutput, from_categorical, ScaleGradient, BlockNCE, init, \
+    NetworkOutput, from_categorical, ScaleGradient, init, \
     ResidualBlock, renormalize, FiLMTransitionModel, init_normalization
-from src.buffered_nce import BufferedNCE
+from src.buffered_nce import BufferedNCE, LocBufferedNCE, BlockNCE
 import numpy as np
 from kornia.augmentation import RandomAffine,\
     RandomCrop,\
     CenterCrop, \
     RandomResizedCrop
+from kornia.filters import GaussianBlur2d
 from rlpyt.utils.logging import logger
 import copy
 import wandb
@@ -244,32 +245,41 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             aug_prob=0.8,
             classifier="mlp",
             imagesize=84,
-            time_contrastive='none'
+            time_contrastive=0,
+            local_nce=False,
+            buffered_nce=False,
+            momentum_encoder=False,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
         super().__init__()
 
         self.noisy = noisy_nets
-        self.augmentation = augmentation.lower()
         self.time_contrastive = time_contrastive
         self.aug_prob = aug_prob
-        assert self.augmentation in ["affine", "crop", "rrc", "none"]
-        if self.augmentation == "affine":
-            self.transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
-            self.eval_transformation = nn.Identity()
-            imagesize = 100
-        elif self.augmentation == "crop":
-            self.transformation = RandomCrop((84, 84))
-            self.eval_transformation = CenterCrop((84, 84))
-            imagesize = 84
-        elif self.augmentation == "rrc":
-            self.transformation = RandomResizedCrop((100, 100), (0.8, 1))
-            self.eval_transformation = nn.Identity()
-            imagesize = 84
-        else:
-            self.transformation = self.eval_transformation = nn.Identity()
-            imagesize = imagesize
+        self.classifier_type = classifier
+
+        self.transforms = []
+        self.eval_transforms = []
+        for augmentation in augmentation:
+            assert augmentation in ["affine", "crop", "rrc", "blur", "none"]
+            if augmentation == "affine":
+                transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
+                eval_transformation = nn.Identity()
+            elif augmentation == "crop":
+                transformation = RandomCrop((84, 84))
+                eval_transformation = CenterCrop((84, 84))
+                imagesize = 84
+            elif augmentation == "rrc":
+                transformation = RandomResizedCrop((100, 100), (0.8, 1))
+                eval_transformation = nn.Identity()
+            elif augmentation == "blur":
+                transformation = GaussianBlur2d((5, 5), (1.5, 1.5))
+                eval_transformation = nn.Identity()
+            else:
+                transformation = eval_transformation = nn.Identity()
+            self.transforms.append(transformation)
+            self.eval_transforms.append(eval_transformation)
 
         self.dueling = dueling
         f, c, h, w = image_shape
@@ -336,17 +346,25 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         else:
             self.dynamics_model = nn.Identity()
 
-        assert self.nce_type in ["stdim", "moco", "curl"]
-        if self.nce and self.nce_type == "stdim":
-            if self.stack_actions:
-                input_size = c - 1
-            else:
-                input_size = c
-            if encoder == "curl":
-                self.nce_target_encoder = CurlEncoder(input_size, norm_type=norm_type)
-            else:
-                self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
-                                                       norm_type=norm_type)
+        assert self.nce_type in ["stdim", "moco", "curl", "custom"]
+        if self.nce_type == "stdim":
+            self.local_nce = True
+            self.momentum_encoder = False
+            self.buffered_nce = False
+        elif self.nce_type == "moco":
+            self.local_nce = False
+            self.momentum_encoder = True
+            self.buffered_nce = True
+        elif self.nce_type == "curl":
+            self.local_nce = False
+            self.momentum_encoder = True
+            self.buffered_nce = False
+        else:
+            self.local_nce = local_nce
+            self.momentum_encoder = momentum_encoder
+            self.buffered_nce = buffered_nce
+
+        if self.local_nce:
             if classifier == "mlp":
                 self.classifier = nn.Sequential(nn.Linear(self.hidden_size,
                                                           self.hidden_size),
@@ -356,97 +374,95 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             else:
                 self.classifier = nn.Linear(self.hidden_size, self.hidden_size)
 
-            self.nce = BlockNCE(self.classifier,
-                                use_self_targets=False,
-                                normalize=False,
-                                temperature=0.1,
-                                )
+            buffer_size = self.hidden_size
 
-        if self.nce and self.nce_type == "curl":
+        else:
             if classifier == "mlp":
                 self.classifier = MLPHead(self.hidden_size,
-                                          output_size=self.hidden_size*self.pixels,
+                                          output_size=self.hidden_size,
                                           hidden_size=-1,
                                           pixels=self.pixels,
                                           noisy=0,
                                           )
-                self.target_classifier = MLPHead(self.hidden_size,
-                                                 output_size=self.hidden_size*self.pixels,
-                                                 hidden_size=-1,
-                                                 pixels=self.pixels,
-                                                 noisy=0,
-                                                 )
+                buffer_size = self.hidden_size
             else:
                 self.classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                 nn.Linear(self.hidden_size*self.pixels,
                                                           self.hidden_size*self.pixels))
-                self.target_classifier = nn.Flatten(-3, -1)
-            self.nce_target_encoder = copy.deepcopy(self.conv)
-            for param in self.nce_target_encoder.parameters():
-                param.requires_grad = False
-            self.nce_target_classifier = nn.Flatten(-3, -1)
-            self.nce = BlockNCE(nn.Identity(),
-                                use_self_targets=False,
-                                temperature=1.,
-                                normalize=False)
-
-        elif self.nce and self.nce_type == "moco":
-            self.nce_target_encoder = copy.deepcopy(self.conv)
-
-            if classifier == "mlp":
-                self.classifier = MLPHead(self.hidden_size,
-                                          64,
-                                          -1,
-                                          self.pixels,
-                                          noisy=0,
-                                          )
-                self.target_classifier = MLPHead(self.hidden_size,
-                                                 64,
-                                                 -1,
-                                                 self.pixels,
-                                                 noisy=0,
-                                                 )
-                buffer_size = 64
-            else:
-                self.classifier = nn.Sequential(nn.Flatten(-3, -1),
-                                                nn.Linear(self.hidden_size*self.pixels,
-                                                          self.hidden_size*self.pixels))
-                self.target_classifier = nn.Flatten(-3, -1)
                 buffer_size = self.hidden_size*self.pixels
 
-            self.nce = BufferedNCE(buffer_size, 2**14, buffer_names=["main"])
 
+        if classifier == "mlp":
+            self.target_classifier = copy.deepcopy(self.classifier)
+        else:
+            self.target_classifier = nn.Identity() if self.local_nce else nn.Flatten(-3, -1)
+
+        if self.momentum_encoder:
+            self.nce_target_encoder = copy.deepcopy(self.conv)
             for param in self.target_classifier.parameters():
                 param.requires_grad = False
             for param in self.nce_target_encoder.parameters():
                 param.requires_grad = False
-        self.classifier_type = classifier
+        else:
+            if self.stack_actions:
+                input_size = c - 1
+            else:
+                input_size = c
+            if encoder == "curl":
+                self.nce_target_encoder = CurlEncoder(input_size, norm_type=norm_type)
+            else:
+                self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
+                                                       norm_type=norm_type)
+        if self.buffered_nce:
+            if self.local_nce:
+                self.nce = LocBufferedNCE(buffer_size, 2**12, buffer_names=["main"], n_locs=self.pixels)
+            else:
+                self.nce = BufferedNCE(buffer_size, 2**12, buffer_names=["main"])
+        else:
+            self.nce = BlockNCE(normalize=False)
 
         if self.detach_model:
             self.target_head = copy.deepcopy(self.head)
             for param in self.target_head.parameters():
                 param.requires_grad = False
 
-    def do_moco_nce(self, pred_latents, observation):
+    def do_nce(self, pred_latents, observation):
         stacked_latents = torch.stack(pred_latents, 1).flatten(0, 1)
+        if self.local_nce:
+            stacked_latents = stacked_latents.flatten(-2, -1).permute(2, 0, 1)
         stacked_latents = self.classifier(stacked_latents)
-        if self.stack_actions:
-            observation = observation[:, :, :, :-1]
-        if self.time_contrastive in ['yes', 'with_augment']:
-            target_images = observation[1:2].transpose(0, 1).flatten(2, 3)
-        elif self.jumps > 0 or self.augmentation != "none":
-            target_images = observation[ 0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
-        else:
-            target_images = observation[1:2].transpose(0, 1).flatten(2, 3)
+        target_images = observation[self.time_contrastive:self.jumps + self.time_contrastive+1].transpose(0, 1).flatten(2, 3)
         target_images = self.transform(target_images, True)
-        with torch.no_grad():
-            target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
-            target_latents = self.target_classifier(target_latents)
-            update_state_dict(self.nce_target_encoder, self.conv.state_dict(), 0.001)
-            if self.classifier_type != "bilinear":
-                update_state_dict(self.target_classifier, self.classifier.state_dict(), 0.001)
 
-        nce_loss, _, nce_accs = self.nce.compute_loss(stacked_latents, target_latents, "main")
+        if self.momentum_encoder:
+            with torch.no_grad():
+                target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
+                if self.local_nce:
+                    target_latents = target_latents.flatten(-2, -1).permute(2, 0, 1)
+                target_latents = self.target_classifier(target_latents)
+                update_state_dict(self.nce_target_encoder, self.conv.state_dict(), 0.001)
+                if self.classifier_type != "bilinear":
+                    update_state_dict(self.target_classifier, self.classifier.state_dict(), 0.001)
+        else:
+            target_images = target_images[..., -1, :, :]
+            if len(target_images.shape) == 4:
+                target_images = target_images.unsqueeze(2)
+            target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
+            if self.local_nce:
+                target_latents = target_latents.view(observation.shape[1], -1,
+                                                     *target_latents.shape[1:])
+                target_latents = target_latents.flatten(3, 4).permute(3, 1, 0, 2).flatten(1, 2)
+            target_latents = self.target_classifier(target_latents)
+
+        if not self.buffered_nce:
+            # Need (locs, times, batch_size, rkhs) for the non-buffered nce
+            # to mask out negatives from the same trajectory if desired.
+            target_latents = target_latents.view(-1, observation.shape[1],
+                                                 self.jumps+1, target_latents.shape[-1]).transpose(1, 2)
+            stacked_latents = stacked_latents.view(-1, observation.shape[1],
+                                                   self.jumps+1, stacked_latents.shape[-1]).transpose(1, 2)
+        nce_loss, nce_accs = self.nce.forward(stacked_latents, target_latents)
+
         nce_loss = nce_loss.view(observation.shape[1], -1)
         if self.jumps > 0:
             nce_model_loss = nce_loss[:, 1:].mean(1)
@@ -455,84 +471,34 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             nce_loss = nce_loss[:, 0]
             nce_model_loss = torch.zeros_like(nce_loss)
         nce_accs = nce_accs.mean().item()
-        self.nce.update_buffer(target_latents, "main")
 
         return nce_loss, nce_model_loss, nce_accs
 
-    def do_curl_nce(self, pred_latents, observation):
-        stacked_latents = torch.stack(pred_latents, 1).flatten(0, 1)
-        stacked_latents = self.classifier(stacked_latents)
-        if self.stack_actions:
-            observation = observation[:, :, :, :-1]
-        if self.jumps > 0 or self.augmentation != "none":
-            target_images = observation[0:self.jumps + 1].transpose(0, 1).flatten(2, 3)
-        else:
-            target_images = observation[1:2].transpose(0, 1).flatten(2, 3)
-        target_images = self.transform(target_images, True)
-        with torch.no_grad():
-            target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
-            target_latents = self.target_classifier(target_latents)
-            update_state_dict(self.nce_target_encoder,
-                              self.conv.state_dict(), 0.001)
-            if self.classifier_type != "bilinear":
-                update_state_dict(self.target_classifier,
-                                  self.classifier.state_dict(), 0.001)
+    def apply_transforms(self, transforms, image):
+        for transform in transforms:
+            image = transform(image)
 
-        target_latents = target_latents.view(observation.shape[1], -1, 1, target_latents.shape[-1])
-        target_latents = target_latents.transpose(0, 2)
-        stacked_latents = stacked_latents.view(observation.shape[1], -1, 1, stacked_latents.shape[-1])
-        stacked_latents = stacked_latents.transpose(0, 2)
-
-        nce_loss, nce_accs = self.nce.forward(stacked_latents, target_latents)
-        if self.jumps > 0:
-            nce_model_loss = nce_loss[1:].mean(0)
-            nce_loss = nce_loss[0]
-        else:
-            nce_loss = nce_loss[0]
-            nce_model_loss = torch.zeros_like(nce_loss)
-        nce_accs = nce_accs.mean()
-
-        return nce_loss, nce_model_loss, nce_accs
-    
-    def do_stdim_nce(self, pred_latents, observation):
-        if self.stack_actions:
-            observation = observation[:, :, :, :-1]
-        if self.jumps > 0:
-            target_images = observation[0:self.jumps + 1, :, -1].transpose(0, 1)
-        else:
-            target_images = observation[1, :, -1].transpose(0, 1)
-        target_images = self.transform(target_images, True)
-        if len(target_images.shape) == 4:
-            target_images = target_images.unsqueeze(2)
-        target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
-        target_latents = target_latents.view(observation.shape[1], -1,
-                                             *target_latents.shape[1:])
-        target_latents = target_latents.flatten(3, 4).permute(3, 0, 1, 2)
-        target_latents = target_latents.permute(0, 2, 1, 3)
-        nce_input = torch.stack(pred_latents, 1).flatten(3, 4).permute(3, 1, 0, 2)
-        nce_loss, nce_accs = self.nce.forward(nce_input, target_latents)
-        if self.jumps > 0:
-            nce_model_loss = nce_loss[1:].mean(0)
-            nce_loss = nce_loss[0]
-        else:
-            nce_loss = nce_loss[0]
-            nce_model_loss = torch.zeros_like(nce_loss)
-        nce_accs = nce_accs.mean()
-
-        return nce_loss, nce_model_loss, nce_accs
+        return image
 
     def transform(self, images, augment=False):
         images = images.float()/255. if images.dtype == torch.uint8 else images
         flat_images = images.reshape(-1, *images.shape[-3:])
         if augment:
-            processed_images = self.transformation(flat_images)
-            if self.augmentation != "crop":
-                mask = torch.rand((processed_images.shape[0], 1, 1, 1),
-                                   device=processed_images.device)
-                mask = (mask < self.aug_prob).float()
-                processed_images = mask*processed_images + (1 - mask)*flat_images
+            processed_images = self.apply_transforms(self.transforms,
+                                                     flat_images)
+
+            # Could be some change of shape -- need to apply the eval
+            # transforms to make sure shapes are the same before we
+            # roll to leave some images unaugmented.
+            base_images = self.apply_transforms(self.eval_transforms,
+                                                flat_images)
+            mask = torch.rand((processed_images.shape[0], 1, 1, 1),
+                               device=processed_images.device)
+            mask = (mask < self.aug_prob).float()
+            processed_images = mask*processed_images + (1 - mask)*base_images
         else:
-            processed_images = self.eval_transformation(flat_images)
+            processed_images = self.apply_transforms(self.eval_transforms,
+                                                     flat_images)
         processed_images = processed_images.view(*images.shape[:-3],
                                                  *processed_images.shape[1:])
         return processed_images
@@ -596,14 +562,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                      prev_reward[j],
                                                      target=self.detach_model))
 
-            if self.nce and self.nce_type == "stdim":
-                nce_loss, nce_model_loss, nce_accs = self.do_stdim_nce(pred_latents, observation)
-            elif self.nce and self.nce_type == "moco":
-                nce_loss, nce_model_loss, nce_accs = self.do_moco_nce(pred_latents, observation)
-            elif self.nce and self.nce_type == "curl":
-                nce_loss, nce_model_loss, nce_accs = self.do_curl_nce(pred_latents, observation)
+            if self.nce:
+                nce_loss, nce_model_loss, nce_accs = self.do_nce(pred_latents, observation)
             else:
-                nce_loss, nce_model_loss, nce_accs = torch.tensor(0.), torch.tensor(0.), torch.tensor(0.)
+                nce_loss = nce_model_loss = nce_accs = torch.tensor(0.)
 
             return pred_ps,\
                    pred_reward,\

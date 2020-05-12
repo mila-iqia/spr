@@ -25,10 +25,71 @@ def random_locs_1d(x, k_hot=1):
     return rand_locs
 
 
+class LocBufferedNCE(nn.Module):
+    """Fixed-size queue with momentum encoder"""
+
+    def __init__(self, feature_dim, queue_size, temperature=0.07,
+                 buffer_names=('main',), n_locs=16):
+        super().__init__()
+        self.queue_size = queue_size
+        self.temperature = temperature
+        self.index = 0
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+        else:
+            self.device = torch.device('cpu')
+
+        # initialize empty buffers and insertion pointers
+        stdv = 1. / math.sqrt(feature_dim / 3)
+        self.buffers, self.indexes = {}, {}
+        for bname in buffer_names:
+            empty_buf = torch.rand(n_locs, self.queue_size, feature_dim,
+                                   requires_grad=False).mul_(2 * stdv).add_(-stdv)
+            self.buffers[bname] = empty_buf.to(self.device)
+            self.indexes[bname] = 0
+
+    def update_buffer(self, r_buf, buffer='main'):
+        # update memory
+        # -- write new values starting from index self.indexes[buffer], and
+        #    wrap around back to index 0 when past the end of buffer
+        with torch.no_grad():
+            new_size = r_buf.shape[1]
+            out_ids = torch.arange(new_size, dtype=torch.long, device=self.device)
+            out_ids = torch.fmod(out_ids + self.indexes[buffer], self.queue_size)
+            # write new values to buffer
+            self.buffers[buffer].index_copy_(1, out_ids, r_buf)
+            # update insertion pointer for this buffer
+            self.indexes[buffer] = \
+                (self.indexes[buffer] + new_size) % self.queue_size
+        return
+
+    def forward(self, r_src, r_trg, buffer='main'):
+        '''
+        NCE for source features r_src with positive targets r_trg.
+
+        r_src: (n_locs, bs, n_rkhs)
+        r_trg: (n_locs, bs, n_rkhs)
+        '''
+        # compute scores with positive examples
+        pos_scores = (r_src * r_trg.detach()).sum(dim=-1, keepdim=True)  # (locs, bs)
+        # compute scores with negative examples
+        r_neg = self.buffers[buffer].clone().detach()  # (locs, q_size, features)
+        neg_scores = torch.bmm(r_src, r_neg.transpose(-1, -2))  # (locs, bs, q_size)
+        raw_scores = torch.cat((pos_scores, neg_scores), dim=-1)  # (locs, bs, q_size + 1)
+        raw_scores = torch.div(raw_scores, self.temperature).contiguous()
+        accuracy = (raw_scores.argmax(2) == 0).float()
+        # compute simple NCE loss
+        log_scores = F.log_softmax(raw_scores, dim=-1)
+        loss_nce = -log_scores[:, :, 0].mean(0)  # Average location losses
+
+        self.update_buffer(r_trg, buffer)
+        return loss_nce, accuracy
+
+
 class BufferedNCE(nn.Module):
     """Fixed-size queue with momentum encoder"""
     def __init__(self, feature_dim, queue_size, temperature=0.07,
-                 buffer_names=('r1', 'r5')):
+                 buffer_names=('main',)):
         super(BufferedNCE, self).__init__()
         self.queue_size = queue_size
         self.temperature = temperature
@@ -47,7 +108,7 @@ class BufferedNCE(nn.Module):
             self.buffers[bname] = empty_buf.to(self.device)
             self.indexes[bname] = 0
     
-    def update_buffer(self, r_buf, buffer='r1'):
+    def update_buffer(self, r_buf, buffer='main'):
         # update memory
         # -- write new values starting from index self.indexes[buffer], and
         #    wrap around back to index 0 when past the end of buffer
@@ -62,7 +123,7 @@ class BufferedNCE(nn.Module):
                 (self.indexes[buffer] + new_size) % self.queue_size
         return
 
-    def compute_loss(self, r_src, r_trg, buffer='r1'):
+    def forward(self, r_src, r_trg, buffer='main'):
         '''
         NCE for source features r_src with positive targets r_trg.
         '''
@@ -77,7 +138,8 @@ class BufferedNCE(nn.Module):
         # compute simple NCE loss
         log_scores = F.log_softmax(raw_scores, dim=1)
         loss_nce = -log_scores[:, 0]
-        return loss_nce, log_scores, accuracy
+        self.update_buffer(r_trg, buffer)
+        return loss_nce, accuracy
 
 
 class LossSource2Target(nn.Module):
@@ -244,3 +306,98 @@ class LossSource2Target(nn.Module):
         loss_nce, lgt_reg = self._nce_cost(r_src_1, r_trg_1, r_src_2, r_trg_2,
                                            mask_mat, which_cost)
         return loss_nce, lgt_reg
+
+
+class BlockNCE:
+    def __init__(self,
+                 temperature=0.1,
+                 use_self_targets=False,
+                 normalize=True):
+        self.inv_temp = 1/temperature
+        self.use_self_targets = use_self_targets
+        self.normalize = normalize
+
+    def calculate_accuracy(self, preds):
+        labels = torch.arange(preds.shape[-2], dtype=torch.long, device=preds.device)
+        preds = torch.argmax(-preds, dim=-1)
+        corrects = torch.eq(labels, preds)
+        return corrects
+
+    def forward(self, f_x1s, f_x2s):
+        """
+        Compute InfoNCE cost with source features in f_x1 and target features in
+        f_x2. We assume one source feature vector per location per item in batch
+        and one target feature vector per location per item in batch. There are
+        n_batch items, n_locs locations, and n_rkhs dimensions per vector.
+        -- note: we can predict x1->x2 and x2->x1 in parallel "for free"
+
+        For the positive nce pair (f_x1[i, :, l], f_x2[i, :, l]), which comes from
+        batch item i at spatial location l, we will use the target feature vectors
+        f_x2[j, :, l] as negative samples, for all j != i.
+
+        Input:
+          f_x1 : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs source vectors per item
+          f_x2 : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs target vectors per item.  Negative samples.
+        Output:
+          loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
+        """
+        # reshaping for big matrix multiply
+        # f_x1 = f_x1.permute(2, 0, 1)  # (n_locs, n_batch, n_rkhs)
+        f_x1 = f_x1s.flatten(1, 2)
+        f_x2 = f_x2s.flatten(1, 2)
+        if self.normalize:
+            f_x1 = f_x1/(torch.norm(f_x1, dim=-1, keepdim=True) + 1.e-3)
+            f_x2 = f_x2/(torch.norm(f_x2, dim=-1, keepdim=True) + 1.e-3)
+        f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
+        n_batch = f_x1.size(1)
+        neg_batch = f_x2.size(-1)
+
+        # compute dot(f_glb[i, :, l], f_lcl[j, :, l]) for all i, j, l
+        # -- after matmul: raw_scores[l, i, j] = dot(f_x1[i, :, l], f_x2[j, :, l])
+        raw_scores = torch.matmul(f_x1, f_x2)*self.inv_temp  # (n_locs, n_batch, n_batch)
+
+        # make a mask for picking out the NCE scores for positive pairs
+
+        pos_mask = torch.eye(n_batch, dtype=f_x1.dtype, device=f_x1.device)
+        if n_batch != neg_batch:
+            with torch.no_grad():
+                mask = torch.zeros((n_batch, neg_batch),
+                                   dtype=f_x1.dtype,
+                                   device=f_x1.device)
+                mask[:n_batch, :n_batch] += pos_mask
+                pos_mask = mask
+
+        pos_mask = pos_mask.unsqueeze(dim=0)
+        if not self.use_self_targets:
+            t = f_x1s.shape[1]
+            batch_mask = torch.eye(f_x1s.shape[2],
+                                   dtype=f_x1.dtype,
+                                   device=f_x1.device)
+            batch_mask = batch_mask[None, :, None, :].expand(t, -1, t, -1)
+            batch_mask = batch_mask.flatten(0, 1).flatten(1, 2)
+            if n_batch != neg_batch:
+                with torch.no_grad():
+                    mask = torch.zeros((n_batch, neg_batch),
+                                       dtype=f_x1.dtype,
+                                       device=f_x1.device)
+                    mask[:n_batch, :n_batch] += batch_mask
+                    batch_mask = mask
+            batch_mask = batch_mask.unsqueeze(dim=0)
+            weight_mask = 1 - (batch_mask - pos_mask)
+            raw_scores = raw_scores * weight_mask
+
+        # We get NCE log softmax by normalizing over dim 1 or 2 of raw_scores...
+        # -- normalizing over dim 1 gives scores for predicting x2->x1
+        # -- normalizing over dim 2 gives scores for predicting x1->x2
+
+        lsmax_x1_to_x2 = -F.log_softmax(raw_scores, dim=2)  # (n_locs, n_batch, n_batch)
+        lsmax_x2_to_x1 = -F.log_softmax(raw_scores, dim=1)  # (n_locs, n_batch, n_batch)
+        # use masked sums to select NCE scores for positive pairs
+        loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=2)  # (n_locs, n_batch)
+        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)[:, :n_batch]  # (n_locs, n_batch)
+        # combine forwards/backwards prediction costs (or whatever)
+        loss_nce = 0.5 * (loss_nce_x1_to_x2 + loss_nce_x2_to_x1)
+        loss_nce = loss_nce.view(*f_x1.shape[0:2])
+        corrects = self.calculate_accuracy(lsmax_x1_to_x2)
+        accuracy = torch.mean(corrects.float().view(*f_x1s.shape[:3]), (0, 2)).detach().cpu().numpy()
+        return loss_nce.mean(0).view(f_x1s.shape[1], f_x1s.shape[2]).transpose(0, 1).flatten(), accuracy
