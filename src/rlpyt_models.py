@@ -346,80 +346,79 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         else:
             self.dynamics_model = nn.Identity()
 
-        assert self.nce_type in ["stdim", "moco", "curl", "custom"]
-        if self.nce_type == "stdim":
-            self.local_nce = True
-            self.momentum_encoder = False
-            self.buffered_nce = False
-        elif self.nce_type == "moco":
-            self.local_nce = False
-            self.momentum_encoder = True
-            self.buffered_nce = True
-        elif self.nce_type == "curl":
-            self.local_nce = False
-            self.momentum_encoder = True
-            self.buffered_nce = False
-        else:
-            self.local_nce = local_nce
-            self.momentum_encoder = momentum_encoder
-            self.buffered_nce = buffered_nce
-
-        if self.local_nce:
-            if classifier == "mlp":
-                self.classifier = nn.Sequential(nn.Linear(self.hidden_size,
-                                                          self.hidden_size),
-                                                nn.ReLU(),
-                                                nn.Linear(self.hidden_size,
-                                                          self.hidden_size))
+        if self.use_nce:
+            assert self.nce_type in ["stdim", "moco", "curl", "custom"]
+            if self.nce_type == "stdim":
+                self.local_nce = True
+                self.momentum_encoder = False
+                self.buffered_nce = False
+            elif self.nce_type == "moco":
+                self.local_nce = False
+                self.momentum_encoder = True
+                self.buffered_nce = True
+            elif self.nce_type == "curl":
+                self.local_nce = False
+                self.momentum_encoder = True
+                self.buffered_nce = False
             else:
-                self.classifier = nn.Linear(self.hidden_size, self.hidden_size)
+                self.local_nce = local_nce
+                self.momentum_encoder = momentum_encoder
+                self.buffered_nce = buffered_nce
 
-            buffer_size = self.hidden_size
+            if self.local_nce:
+                if classifier == "mlp":
+                    self.classifier = nn.Sequential(nn.Linear(self.hidden_size,
+                                                              self.hidden_size),
+                                                    nn.ReLU(),
+                                                    nn.Linear(self.hidden_size,
+                                                              self.hidden_size))
+                else:
+                    self.classifier = nn.Linear(self.hidden_size, self.hidden_size)
 
-        else:
-            if classifier == "mlp":
-                self.classifier = MLPHead(self.hidden_size,
-                                          output_size=self.hidden_size,
-                                          hidden_size=-1,
-                                          pixels=self.pixels,
-                                          noisy=0,
-                                          )
                 buffer_size = self.hidden_size
             else:
-                self.classifier = nn.Sequential(nn.Flatten(-3, -1),
-                                                nn.Linear(self.hidden_size*self.pixels,
-                                                          self.hidden_size*self.pixels))
-                buffer_size = self.hidden_size*self.pixels
+                if classifier == "mlp":
+                    self.classifier = MLPHead(self.hidden_size,
+                                              output_size=self.hidden_size,
+                                              hidden_size=-1,
+                                              pixels=self.pixels,
+                                              noisy=0,
+                                              )
+                    buffer_size = self.hidden_size
+                else:
+                    self.classifier = nn.Sequential(nn.Flatten(-3, -1),
+                                                    nn.Linear(self.hidden_size*self.pixels,
+                                                              self.hidden_size*self.pixels))
+                    buffer_size = self.hidden_size*self.pixels
 
+            if classifier == "mlp":
+                self.target_classifier = copy.deepcopy(self.classifier)
+            else:
+                self.target_classifier = nn.Identity() if self.local_nce else nn.Flatten(-3, -1)
 
-        if classifier == "mlp":
-            self.target_classifier = copy.deepcopy(self.classifier)
-        else:
-            self.target_classifier = nn.Identity() if self.local_nce else nn.Flatten(-3, -1)
-
-        if self.momentum_encoder:
-            self.nce_target_encoder = copy.deepcopy(self.conv)
-            for param in self.target_classifier.parameters():
-                param.requires_grad = False
-            for param in self.nce_target_encoder.parameters():
-                param.requires_grad = False
-        else:
-            if self.stack_actions:
-                input_size = c - 1
+            if self.momentum_encoder:
+                self.nce_target_encoder = copy.deepcopy(self.conv)
+                for param in self.target_classifier.parameters():
+                    param.requires_grad = False
+                for param in self.nce_target_encoder.parameters():
+                    param.requires_grad = False
             else:
-                input_size = c
-            if encoder == "curl":
-                self.nce_target_encoder = CurlEncoder(input_size, norm_type=norm_type)
+                if self.stack_actions:
+                    input_size = c - 1
+                else:
+                    input_size = c
+                if encoder == "curl":
+                    self.nce_target_encoder = CurlEncoder(input_size, norm_type=norm_type)
+                else:
+                    self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
+                                                           norm_type=norm_type)
+            if self.buffered_nce:
+                if self.local_nce:
+                    self.nce = LocBufferedNCE(buffer_size, 2**12, buffer_names=["main"], n_locs=self.pixels)
+                else:
+                    self.nce = BufferedNCE(buffer_size, 2**12, buffer_names=["main"])
             else:
-                self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
-                                                       norm_type=norm_type)
-        if self.buffered_nce:
-            if self.local_nce:
-                self.nce = LocBufferedNCE(buffer_size, 2**12, buffer_names=["main"], n_locs=self.pixels)
-            else:
-                self.nce = BufferedNCE(buffer_size, 2**12, buffer_names=["main"])
-        else:
-            self.nce = BlockNCE(normalize=False)
+                self.nce = BlockNCE(normalize=False)
 
         if self.detach_model:
             self.target_head = copy.deepcopy(self.head)
