@@ -261,19 +261,19 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.transforms = []
         self.eval_transforms = []
-        for augmentation in augmentation:
-            assert augmentation in ["affine", "crop", "rrc", "blur", "none"]
-            if augmentation == "affine":
+        for aug in augmentation:
+            assert aug in ["affine", "crop", "rrc", "blur", "none"]
+            if aug == "affine":
                 transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
                 eval_transformation = nn.Identity()
-            elif augmentation == "crop":
+            elif aug == "crop":
                 transformation = RandomCrop((84, 84))
                 eval_transformation = CenterCrop((84, 84))
                 imagesize = 84
-            elif augmentation == "rrc":
+            elif aug == "rrc":
                 transformation = RandomResizedCrop((100, 100), (0.8, 1))
                 eval_transformation = nn.Identity()
-            elif augmentation == "blur":
+            elif aug == "blur":
                 transformation = GaussianBlur2d((5, 5), (1.5, 1.5))
                 eval_transformation = nn.Identity()
             else:
