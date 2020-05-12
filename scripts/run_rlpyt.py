@@ -82,15 +82,20 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     )
     args.discount = config["algo"]["discount"]
     if model:
+        config["model"]["imagesize"] = args.imagesize
         config["model"]["jumps"] = args.jumps
         config["model"]["detach_model"] = detach_model
         config["model"]["dynamics_blocks"] = args.dynamics_blocks
         config["model"]["film"] = args.film
-        config["model"]["norm_type"] = args.norm_type
         config["model"]["nce"] = args.nce
-        config["model"]["nce_type"] = args.nce_type
         config["model"]["encoder"] = args.encoder
+        config["model"]["momentum_encoder"] = args.momentum_encoder
+        config["model"]["local_nce"] = args.local_nce
+        config["model"]["buffered_nce"] = args.buffered_nce
+        config["model"]["nce_type"] = args.nce_type
+        config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["time_contrastive"] = args.time_contrastive
         config["model"]["aug_prob"] = args.aug_prob
         config["model"]["target_augmentation"] = args.target_augmentation
         config["model"]["eval_augmentation"] = args.eval_augmentation
@@ -205,6 +210,9 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["encoder"] = args.encoder
         config["model"]["nce_type"] = args.nce_type
         config["model"]["norm_type"] = args.norm_type
+        config["model"]["momentum_encoder"] = args.momentum_encoder
+        config["model"]["local_nce"] = args.local_nce
+        config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["augmentation"] = args.augmentation
         config["model"]["time_contrastive"] = args.time_contrastive
         config["model"]["aug_prob"] = args.aug_prob
@@ -287,10 +295,15 @@ if __name__ == "__main__":
     parser.add_argument('--aug-prob', type=float, default=0.9, help='Probability to apply augmentation')
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
+    parser.add_argument('--buffered-nce', type=int, default=0)
+    parser.add_argument('--momentum-encoder', type=int, default=0)
+    parser.add_argument('--local-nce', type=int, default=0)
     parser.add_argument('--noisy-nets', type=int, default=0)
-    parser.add_argument('--nce-type', type=str, default='stdim', choices=["stdim", "moco", "curl"], help='Style of NCE')
+    parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
     parser.add_argument('--classifier', type=str, default='mlp', choices=["mlp", "bilinear"], help='Style of NCE classifier')
-    parser.add_argument('--augmentation', type=str, default='none', choices=["none", "rrc", "affine", "crop"], help='Style of augmentation')
+    parser.add_argument('--augmentation', type=str, default='none', nargs="+",
+                        choices=["none", "rrc", "affine", "crop", "blur"],
+                        help='Style of augmentation')
     parser.add_argument('--target-augmentation', type=int, default=0, help='Use augmentation on inputs to target networks')
     parser.add_argument('--eval-augmentation', type=int, default=0, help='Use augmentation on inputs at evaluation time')
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
@@ -300,7 +313,7 @@ if __name__ == "__main__":
     parser.add_argument('--model-nce-weight', type=float, default=1.)
     parser.add_argument('--nce-loss-weight', type=float, default=1.)
     parser.add_argument('--detach-model', type=int, default=1)
-    parser.add_argument('--time-contrastive', type=str, default='none', choices=['none', 'yes', 'with_augment'])
+    parser.add_argument('--time-contrastive', type=int, default=0)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     parser.add_argument('--max-grad-norm', type=float, default=10., help='Max Grad Norm')
     # MCTS arguments
