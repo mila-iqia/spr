@@ -301,7 +301,7 @@ if __name__ == "__main__":
     parser.add_argument('--noisy-nets', type=int, default=0)
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
     parser.add_argument('--classifier', type=str, default='mlp', choices=["mlp", "bilinear"], help='Style of NCE classifier')
-    parser.add_argument('--augmentation', type=str, default='none', nargs="+",
+    parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
                         choices=["none", "rrc", "affine", "crop", "blur"],
                         help='Style of augmentation')
     parser.add_argument('--target-augmentation', type=int, default=0, help='Use augmentation on inputs to target networks')
