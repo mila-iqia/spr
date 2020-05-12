@@ -298,7 +298,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.jumps = jumps
         self.detach_model = detach_model
         self.use_nce = nce
-        self.nce_type = nce_type
         self.target_augmentation = target_augmentation
         self.eval_augmentation = eval_augmentation
         self.stack_actions = stack_actions
