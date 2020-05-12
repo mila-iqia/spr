@@ -298,7 +298,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.hidden_size = 256
         self.jumps = jumps
         self.detach_model = detach_model
-        self.nce = nce
+        self.use_nce = nce
         self.nce_type = nce_type
         self.target_augmentation = target_augmentation
         self.eval_augmentation = eval_augmentation
@@ -562,7 +562,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                      prev_reward[j],
                                                      target=self.detach_model))
 
-            if self.nce:
+            if self.use_nce:
                 nce_loss, nce_model_loss, nce_accs = self.do_nce(pred_latents, observation)
             else:
                 nce_loss = nce_model_loss = nce_accs = torch.tensor(0.)
