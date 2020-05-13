@@ -1,7 +1,7 @@
 description: AWM
 
 target:
-  cluster: eu2
+  cluster: eu1
   vc: msrlabs
 
 environment:
@@ -34,28 +34,28 @@ search:
     name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --nce-type moco --nce 1 --classifier {classifier} --dueling {dueling} --seed {seed} --time-contrastive {tc} --imagesize 100 --momentum-encoder 1 --buffered-nce {buffer} --local-nce {localnce}
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --nce 1 --classifier {classifier} --dueling {dueling} --seed {seed} --imagesize 100 --momentum-encoder 1 --buffered-nce {buffer} --local-nce {localnce}
   type: grid
   max_trials: 200
   params:
     - name: game
       spec: discrete
-      values: ['breakout', 'bank_heist', 'seaquest', 'pong']
+      values: ['alien', 'asterix', 'battle_zone', 'hero', 'ms_pacman', 'qbert', 'road_runner']
     - name: arguments
       spec: discrete
-      values: ['--time-contrastive 1', '--augmentation crop', '--time-contrastive 1 --augmentation crop']
+      values: ['--augmentation crop']
     - name: jumps
       spec: discrete
       values: [0]
     - name: noisy
       spec: discrete
-      values: [1]
+      values: [0, 1]
     - name: replay-ratio
       spec: discrete
-      values: [256]
+      values: [64]
     - name: mgn
       spec: discrete
-      values: [100.]
+      values: [100., 10.]
     - name: dueling
       spec: discrete
       values: [0]
@@ -64,10 +64,10 @@ search:
       values: [42, 123]
     - name: localnce
       spec: discrete
-      values: [0, 1]
+      values: [0]
     - name: buffer
       spec: discrete
-      values: [0, 1]
+      values: [0]
     - name: classifier
       spec: discrete
-      values: ['mlp']
+      values: ['bilinear']
