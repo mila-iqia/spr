@@ -457,30 +457,27 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         return nce_loss, nce_model_loss, nce_accs
 
-    def apply_transforms(self, transforms, image):
-        for transform in transforms:
-            image = transform(image)
-
+    def apply_transforms(self, transforms, eval_transforms, image):
+        if eval_transforms is None:
+            for transform in transforms:
+                image = transform(image)
+        else:
+            for transform, eval_transform in zip(transforms, eval_transforms):
+                image = maybe_transform(image, transform,
+                                        eval_transform, p=self.aug_prob)
         return image
 
+    @torch.no_grad()
     def transform(self, images, augment=False):
         images = images.float()/255. if images.dtype == torch.uint8 else images
         flat_images = images.reshape(-1, *images.shape[-3:])
         if augment:
             processed_images = self.apply_transforms(self.transforms,
+                                                     self.eval_transforms,
                                                      flat_images)
-
-            # Could be some change of shape -- need to apply the eval
-            # transforms to make sure shapes are the same before we
-            # roll to leave some images unaugmented.
-            base_images = self.apply_transforms(self.eval_transforms,
-                                                flat_images)
-            mask = torch.rand((processed_images.shape[0], 1, 1, 1),
-                               device=processed_images.device)
-            mask = (mask < self.aug_prob).float()
-            processed_images = mask*processed_images + (1 - mask)*base_images
         else:
             processed_images = self.apply_transforms(self.eval_transforms,
+                                                     None,
                                                      flat_images)
         processed_images = processed_images.view(*images.shape[:-3],
                                                  *processed_images.shape[1:])
@@ -510,10 +507,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         p = restore_leading_dims(p, lead_dim, T, B)
         return p
 
-    def forward(self, observation, prev_action, prev_reward, jumps=False):
+    def forward(self, observation, prev_action, prev_reward, train=False):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
-        if jumps:
+        if train:
             pred_ps = []
             pred_reward = []
             pred_latents = []
@@ -555,10 +552,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                    nce_loss, nce_model_loss, nce_accs
 
         else:
-            # img = observation.type(torch.float)  # Expect torch.uint8 inputs
-            # img = img.mul_(1. / 255)  # From [0-255] to [0-1], in place.
             observation = observation.flatten(-4, -3)
-            img = self.transform(observation, self.target_augmentation)
+            stacked_observation = observation.unsqueeze(1).repeat(1, max(1, self.target_augmentation), 1, 1, 1)
+            stacked_observation = stacked_observation.view(-1, *observation.shape[1:])
+
+            img = self.transform(stacked_observation, self.target_augmentation)
 
             # Infer (presence of) leading dimensions: [T,B], [B], or [].
             lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
@@ -566,6 +564,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
             p = self.head(conv_out)
             p = F.softmax(p, dim=-1)
+
+            p = p.view(observation.shape[0],
+                       max(1, self.target_augmentation),
+                       *p.shape[1:]).mean(1)
 
             # Restore leading dimensions: [T,B], [B], or [], as input.
             p = restore_leading_dims(p, lead_dim, T, B)
@@ -967,3 +969,12 @@ class Conv2dSame(nn.Module):
         x_out = self.layer(x_pad)
         return x_out
 
+
+def maybe_transform(image, transform, alt_transform, p=0.8):
+    base_images = alt_transform(image)
+    processed_images = transform(image)
+    mask = torch.rand((processed_images.shape[0], 1, 1, 1),
+                      device=processed_images.device)
+    mask = (mask < p).float()
+    processed_images = mask * processed_images + (1 - mask) * base_images
+    return processed_images

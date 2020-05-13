@@ -167,10 +167,10 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config['env']['game'] = game
     config["env"]["stack_actions"] = args.stack_actions
     config["env"]["grayscale"] = args.grayscale
+    config['env']['imagesize'] = args.imagesize
     config["eval_env"]["game"] = config["env"]["game"]
     config["eval_env"]["stack_actions"] = args.stack_actions
     config["eval_env"]["grayscale"] = args.grayscale
-    config['env']['imagesize'] = args.imagesize
     config['eval_env']['imagesize'] = args.imagesize
     config["model"]["dueling"] = bool(args.dueling)
     config["algo"]["batch_size"] = args.batch_size
