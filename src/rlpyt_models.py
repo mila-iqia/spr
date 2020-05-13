@@ -657,6 +657,8 @@ class DQNDistributionalHeadModel(torch.nn.Module):
                   nn.ReLU(),
                   self.linears[1]]
         self.network = nn.Sequential(*layers)
+        if not noisy:
+            self.network.apply(weights_init)
         self._output_size = output_size
         self._n_atoms = n_atoms
 
@@ -813,21 +815,27 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
             module.reset_noise()
 
 
+def weights_init(m):
+    if isinstance(m, Conv2dSame):
+        torch.nn.init.kaiming_uniform_(m.layer.weight, nonlinearity='linear')
+        torch.nn.init.zeros_(m.layer.bias)
+    elif isinstance(m, (nn.Conv2d, nn.Linear)):
+        torch.nn.init.kaiming_uniform_(m.weight, nonlinearity='linear')
+        torch.nn.init.zeros_(m.bias)
+
+
 class CurlEncoder(nn.Module):
     def __init__(self,
                  input_channels,
                  norm_type="bn"):
         super().__init__()
         self.input_channels = input_channels
-        init_ = lambda m: init(m,
-                               nn.init.orthogonal_,
-                               lambda x: nn.init.constant_(x, 0),
-                               nn.init.calculate_gain('relu'))
         self.main = nn.Sequential(
             Conv2dSame(self.input_channels, 32, 5, stride=5),  # 20x20
             nn.ReLU(),
             Conv2dSame(32, 64, 5, stride=5),  #4x4
             nn.ReLU())
+        self.main.apply(weights_init)
         self.train()
 
     def forward(self, inputs):
