@@ -21,6 +21,7 @@ from kornia.augmentation import RandomAffine,\
     CenterCrop, \
     RandomResizedCrop
 from kornia.filters import GaussianBlur2d
+from kornia.geometry.transform import Resize
 from rlpyt.utils.logging import logger
 import copy
 import wandb
@@ -267,7 +268,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 eval_transformation = nn.Identity()
             elif aug == "crop":
                 transformation = RandomCrop((84, 84))
-                eval_transformation = CenterCrop((84, 84))
+                eval_transformation = Resize((84, 84))
                 imagesize = 84
             elif aug == "rrc":
                 transformation = RandomResizedCrop((100, 100), (0.8, 1))

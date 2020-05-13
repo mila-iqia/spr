@@ -47,7 +47,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["eval_env"]["stack_actions"] = args.stack_actions
     config["eval_env"]["grayscale"] = args.grayscale
     config['env']['imagesize'] = args.imagesize
-    config['eval_env']['imagesize'] = args.imagesize
+    config['eval_env']['imagesize'] = args.eval_imagesize
     config["model"]["dueling"] = bool(args.dueling)
     config["algo"]["min_steps_learn"] = 1000
     config["algo"]["n_step_return"] = 20
@@ -129,6 +129,9 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     with logger_context(log_dir, run_ID, name, config, snapshot_mode="last"):
         runner.train()
 
+    # See if this actually makes runs release Beluga nodes after they're done training.
+    quit()
+
 
 def build_and_train(game="ms_pacman", run_ID=0, model=False,
                     detach_model=1, args=None, control=False):
@@ -171,7 +174,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config["eval_env"]["game"] = config["env"]["game"]
     config["eval_env"]["stack_actions"] = args.stack_actions
     config["eval_env"]["grayscale"] = args.grayscale
-    config['eval_env']['imagesize'] = args.imagesize
+    config['eval_env']['imagesize'] = args.eval_imagesize
     config["model"]["dueling"] = bool(args.dueling)
     config["algo"]["batch_size"] = args.batch_size
     config['algo']['replay_ratio'] = args.replay_ratio
@@ -245,6 +248,8 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     with logger_context(log_dir, run_ID, name, config):
         runner.train()
 
+    quit()
+
 
 def convert_affinity(affinity, cpus):
     affinity.all_cpus = cpus[:len(affinity.all_cpus)]
@@ -281,7 +286,8 @@ if __name__ == "__main__":
     parser.add_argument('--stack-actions', type=int, default=0)
     parser.add_argument('--seed', type=int, default=69)
     parser.add_argument('--grayscale', type=int, default=1)
-    parser.add_argument('--imagesize', type=int, default=84)
+    parser.add_argument('--imagesize', type=int, default=100)
+    parser.add_argument('--eval-imagesize', type=int, default=100)
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=0)
     parser.add_argument('--dueling', type=int, default=1)
@@ -290,7 +296,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
     parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize"], help='Normalization')
-    parser.add_argument('--aug-prob', type=float, default=0.9, help='Probability to apply augmentation')
+    parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
     parser.add_argument('--buffered-nce', type=int, default=0)
