@@ -313,13 +313,6 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             (torch.log(target_p) - torch.log(p.detach())), dim=1)
         KL_div = torch.clamp(KL_div, EPS, 1 / EPS)  # Avoid <0 from NaN-guard.
 
-        # if not self.mid_batch_reset:
-        #     valid = valid_from_done(samples.done[index])
-        #     loss = valid_mean(losses, valid)
-        #     KL_div *= valid
-        # else:
-        #     loss = torch.mean(losses)
-
         return losses, KL_div
 
     def loss(self, samples):
@@ -332,11 +325,12 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         """
         if self.model.noisy:
             self.model.head.reset_noise()
+        # start = time.time()
         pred_ps, pred_rew, nce_loss, model_nce_loss, nce_acc\
             = self.agent(samples.all_observation.to(self.agent.device),
                          samples.all_action.to(self.agent.device),
                          samples.all_reward.to(self.agent.device),
-                         jumps=True)  # [B,A,P]
+                         train=True)  # [B,A,P]
 
         rl_loss, KL = self.rl_loss(pred_ps[0], samples, 0)
         if len(pred_rew) > 0:
@@ -373,8 +367,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         value_loss = value_loss.cpu()
         if self.prioritized_replay:
             weights = samples.is_weights
-            # nce_loss = nce_loss * weights
-            # model_nce_loss = model_nce_loss * weights
+            nce_loss = nce_loss * weights
+            model_nce_loss = model_nce_loss * weights
             reward_loss = reward_loss * weights
             value_loss = value_loss * weights
 
@@ -382,6 +376,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             rl_loss = rl_loss * weights
             model_rl_loss = model_rl_loss * weights
 
+        # end = time.time()
+        # print("Loss took {}".format(end - start))
         return rl_loss.mean(), KL, \
                model_rl_loss.mean(),\
                reward_loss.mean(), \

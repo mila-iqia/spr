@@ -58,12 +58,12 @@ class DQNSearchAgent(PizeroAgent):
         self.search_args = search_args
         self.eval = eval
 
-    def __call__(self, observation, prev_action, prev_reward, jumps=False):
+    def __call__(self, observation, prev_action, prev_reward, train=False):
         """Returns Q-values for states/observations (with grad)."""
-        if jumps:
+        if train:
             model_inputs = buffer_to((observation, prev_action, prev_reward),
                 device=self.device)
-            return self.model(*model_inputs, jumps=jumps)
+            return self.model(*model_inputs, train=train)
         else:
             prev_action = self.distribution.to_onehot(prev_action)
             model_inputs = buffer_to((observation, prev_action, prev_reward),
@@ -589,9 +589,10 @@ class VectorizedQMCTS(VectorizedMCTS):
         return torch.argmax(pb_c + value_score[:, :depth], dim=-1)
 
     def select_action(self):
-        epsilon = self.epsilon
-        e_action = (torch.rand_like(self.q[:, 0, 0], device=self.device) < epsilon).long()
-        random_actions = torch.randint(self.num_actions, size=(self.n_runs,), device=self.device)
-        max_actions = self.q[:, 0].argmax(dim=-1)
-        actions = e_action * random_actions + (1-e_action) * max_actions
-        return actions
+        """Input can be shaped [T,B,Q] or [B,Q], and vector epsilon of length
+        B will apply across the Batch dimension (same epsilon for all T)."""
+        arg_select = torch.argmax(self.q[:, 0], dim=-1)
+        mask = torch.rand(arg_select.shape, device=self.q.device) < self.distribution._epsilon
+        arg_rand = torch.randint(low=0, high=self.q[:, 0].shape[-1], size=(mask.sum(),), device=self.q.device)
+        arg_select[mask] = arg_rand
+        return arg_select
