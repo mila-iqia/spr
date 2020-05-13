@@ -268,7 +268,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 eval_transformation = nn.Identity()
             elif aug == "crop":
                 transformation = RandomCrop((84, 84))
-                eval_transformation = Resize((84, 84))
+                # Crashes if aug-prob not 1: use CenterCrop((84, 84)) or Resize((84, 84)) in that case.
+                eval_transformation = nn.Identity()
                 imagesize = 84
             elif aug == "rrc":
                 transformation = RandomResizedCrop((100, 100), (0.8, 1))
@@ -341,7 +342,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  limit=1,
                                                  blocks=dynamics_blocks,
                                                  norm_type=norm_type,
-                                                 renormalize=encoder=="repnet")
+                                                 renormalize=True)
         else:
             self.dynamics_model = nn.Identity()
 
@@ -980,10 +981,13 @@ class Conv2dSame(nn.Module):
 
 
 def maybe_transform(image, transform, alt_transform, p=0.8):
-    base_images = alt_transform(image)
     processed_images = transform(image)
-    mask = torch.rand((processed_images.shape[0], 1, 1, 1),
-                      device=processed_images.device)
-    mask = (mask < p).float()
-    processed_images = mask * processed_images + (1 - mask) * base_images
-    return processed_images
+    if p >= 1:
+        return processed_images
+    else:
+        base_images = alt_transform(image)
+        mask = torch.rand((processed_images.shape[0], 1, 1, 1),
+                          device=processed_images.device)
+        mask = (mask < p).float()
+        processed_images = mask * processed_images + (1 - mask) * base_images
+        return processed_images
