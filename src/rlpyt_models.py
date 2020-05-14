@@ -269,7 +269,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             elif aug == "crop":
                 transformation = RandomCrop((84, 84))
                 # Crashes if aug-prob not 1: use CenterCrop((84, 84)) or Resize((84, 84)) in that case.
-                eval_transformation = nn.Identity()
+                eval_transformation = CenterCrop((84, 84))
                 imagesize = 84
             elif aug == "rrc":
                 transformation = RandomResizedCrop((100, 100), (0.8, 1))
@@ -376,7 +376,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                     nn.Linear(self.hidden_size*self.pixels,
                                                               self.hidden_size*self.pixels))
                     buffer_size = self.hidden_size*self.pixels
-
+            self.classifier.apply(weights_init)
             if classifier == "mlp":
                 self.target_classifier = copy.deepcopy(self.classifier)
             else:
