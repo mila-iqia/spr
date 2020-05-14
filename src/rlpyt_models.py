@@ -342,7 +342,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  limit=1,
                                                  blocks=dynamics_blocks,
                                                  norm_type=norm_type,
-                                                 renormalize=True)
+                                                 renormalize=encoder=="repnet")
         else:
             self.dynamics_model = nn.Identity()
 
@@ -538,7 +538,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     latent, pred_rew, _, _ = self.step(latent, prev_action[j])
                     latent = ScaleGradient.apply(latent, 0.5)
                     pred_latents.append(latent)
-                    pred_reward.append(pred_rew)
+                    pred_reward.append(F.log_softmax(pred_rew, -1))
                     pred_ps.append(self.head_forward(latent,
                                                      prev_action[j],
                                                      prev_reward[j],
