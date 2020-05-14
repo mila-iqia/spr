@@ -682,9 +682,10 @@ class TransitionModel(nn.Module):
 
         self.network = nn.Sequential(*layers)
         self.reward_predictor = RewardNetwork(channels,
-                                             pixels=pixels,
-                                             limit=limit,
-                                             norm_type=norm_type)
+                                              hidden_channels=1,
+                                              pixels=pixels,
+                                              limit=limit,
+                                              norm_type=norm_type)
         self.train()
 
     def forward(self, x, action):
@@ -894,17 +895,17 @@ class QNetwork(nn.Module):
 class ValueNetwork(nn.Module):
     def __init__(self,
                  input_channels,
-                 hidden_size=128,
+                 hidden_channels=1,
                  pixels=36,
                  limit=300,
                  norm_type="bn"):
         super().__init__()
-        self.hidden_size = hidden_size
-        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+        self.hidden_channels = hidden_channels
+        layers = [nn.Conv2d(input_channels, hidden_channels, kernel_size=1, stride=1),
                   nn.ReLU(),
-                  init_normalization(hidden_size, norm_type),
+                  init_normalization(hidden_channels, norm_type),
                   nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, 256),
+                  nn.Linear(pixels*hidden_channels, 256),
                   nn.ReLU(),
                   nn.Linear(256, limit*2 + 1)]
         self.network = nn.Sequential(*layers)
@@ -917,17 +918,17 @@ class ValueNetwork(nn.Module):
 class RewardNetwork(nn.Module):
     def __init__(self,
                  input_channels,
-                 hidden_size=128,
+                 hidden_channels=128,
                  pixels=36,
                  limit=300,
                  norm_type="bn"):
         super().__init__()
-        self.hidden_size = hidden_size
-        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+        self.hidden_channels = hidden_channels
+        layers = [nn.Conv2d(input_channels, hidden_channels, kernel_size=1, stride=1),
                   nn.ReLU(),
-                  init_normalization(hidden_size, norm_type),
+                  init_normalization(hidden_channels, norm_type),
                   nn.Flatten(-3, -1),
-                  nn.Linear(pixels*hidden_size, 256),
+                  nn.Linear(pixels*hidden_channels, 256),
                   nn.ReLU(),
                   nn.Linear(256, limit*2 + 1)]
         self.network = nn.Sequential(*layers)
@@ -941,16 +942,16 @@ class PolicyNetwork(nn.Module):
     def __init__(self,
                  input_channels,
                  num_actions,
-                 hidden_size=128,
+                 hidden_channels=2,
                  pixels=36,
                  norm_type="bn"):
         super().__init__()
-        self.hidden_size = hidden_size
-        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+        self.hidden_channels = hidden_channels
+        layers = [nn.Conv2d(input_channels, hidden_channels, kernel_size=1, stride=1),
                   nn.ReLU(),
-                  init_normalization(hidden_size, norm_type),
+                  init_normalization(hidden_channels, norm_type),
                   nn.Flatten(-3, -1),
-                  nn.Linear(pixels * hidden_size, num_actions)]
+                  nn.Linear(pixels * hidden_channels, num_actions)]
         self.network = nn.Sequential(*layers)
         self.train()
 
