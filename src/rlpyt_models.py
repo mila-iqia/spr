@@ -186,9 +186,9 @@ class PizeroCatDqnModel(torch.nn.Module):
         # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
         # self.reward_network = ValueNetwork(conv_out_size)
         if dueling:
-            self.head = PizeroDistributionalDuelingHeadModel(256, output_size, pixels=36)
+            self.head = PizeroDistributionalDuelingHeadModel(256, output_size, hidden_size=1, pixels=36)
         else:
-            self.head = PizeroDistributionalHeadModel(256, output_size, pixels=36)
+            self.head = PizeroDistributionalHeadModel(256, output_size, hidden_size=1, pixels=36)
 
     def forward(self, observation, prev_action, prev_reward):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
