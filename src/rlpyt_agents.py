@@ -426,7 +426,7 @@ class VectorizedQMCTS(VectorizedMCTS):
         self.q[:, 0] = initial_value.to(self.device)
         self.min_q = torch.min(self.q[:, 0], dim=-1)[0]
         self.max_q = torch.max(self.q[:, 0], dim=-1)[0]
-        if self.args.q_dirichlet:
+        if self.args.q_dirichlet and not self.eval:
             self.add_exploration_noise()
 
         for sim_id in range(1, self.n_sims+1):
@@ -497,8 +497,8 @@ class VectorizedQMCTS(VectorizedMCTS):
         action = self.select_action()
         # print(torch.mean((initial_value.argmax(-1) == self.q[:, 0].argmax(-1)).float()))
         value = self.q[self.batch_range, 0, action]
-        if self.args.q_dirichlet:
-            self.remove_exploration_noise(initial_value.to(self.device))
+        if self.args.q_dirichlet and not self.eval:
+            self.remove_exploration_noise(initial_value.to(self.q.device))
 
         # end = time.time()
         # print("Searched {} environments with {} sims, took {}".format(obs.shape[0], self.n_sims, end-start))
