@@ -346,7 +346,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             pred_values = from_categorical(torch.stack(pred_ps, 0), limit=10, logits=False)
             pred_values = F.log_softmax(pred_values, -1)
             value_targets = F.softmax(samples.values[:self.jumps+1], -1)
-            value_loss = torch.sum(pred_values*value_targets.to(self.agent.device), (0, 2))
+            value_loss = -torch.sum(pred_values*value_targets.to(self.agent.device), (0, 2))
             if self.amortization_decay_constant > 0:
                 amortization_age = samples.age.float()
                 amortization_weights = 1. + amortization_age*self.amortization_decay_constant
