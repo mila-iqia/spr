@@ -101,23 +101,21 @@ class DQNSearchAgent(PizeroAgent):
         pre-training eval."""
         super().eval_mode(itr)
         self.search.set_eval()
-        self.search.epsilon = self.distribution.epsilon
 
     def sample_mode(self, itr):
         """Extend method to set epsilon for sampling (including annealing)."""
         super().sample_mode(itr)
         self.search.set_train()
-        self.search.epsilon = self.distribution.epsilon
 
     @torch.no_grad()
     def step(self, observation, prev_action, prev_reward):
         """Compute the discrete distribution for the Q-value for each
         action for each state/observation (no grad)."""
-        action, p, value, initial_value = self.search.run(observation.to(self.search.device))
-        p = p.cpu()
+        action, policy_probs, value, initial_value = self.search.run(observation.to(self.search.device))
+        p, v = policy_probs.cpu(), value.cpu()
         action = action.cpu()
 
-        agent_info = AgentInfo(p=p)
+        agent_info = AgentInfo(policy_probs=p, value=v)
         action, agent_info = buffer_to((action, agent_info), device="cpu")
         return AgentStep(action=action, agent_info=agent_info)
 

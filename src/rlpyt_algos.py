@@ -12,7 +12,7 @@ from src.model_trainer import from_categorical, to_categorical
 SamplesToBuffer = namedarraytuple("SamplesToBuffer",
     ["observation", "action", "reward", "done"])
 ModelSamplesToBuffer = namedarraytuple("SamplesToBuffer",
-    ["observation", "action", "reward", "done", "value"])
+    ["observation", "action", "reward", "done", "policy", "value"])
 import time
 
 OptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr"])
