@@ -90,6 +90,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["film"] = args.film
         config["model"]["nce"] = args.nce
         config["model"]["encoder"] = args.encoder
+        config["model"]["padding"] = args.padding
         config["model"]["momentum_encoder"] = args.momentum_encoder
         config["model"]["local_nce"] = args.local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
@@ -297,6 +298,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
     parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize"], help='Normalization')
+    parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)

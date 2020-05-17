@@ -249,6 +249,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             local_nce=False,
             buffered_nce=False,
             momentum_encoder=False,
+            padding='same',
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -290,8 +291,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.pixels = int(np.floor(imagesize/16.))**2
             self.hidden_size = 256
         if encoder == "curl":
-            self.conv = CurlEncoder(f*c, norm_type=norm_type)
-            self.pixels = int(np.ceil(imagesize/25.))**2
+            self.conv = CurlEncoder(f*c, norm_type=norm_type, padding=padding)
+            if padding == 'same':
+                self.pixels = int(np.ceil(imagesize/25.))**2
+            elif padding == 'valid':
+                self.pixels = int(np.floor(imagesize/25.))**2
             self.hidden_size = 64
         if encoder == "midsize":
             self.conv = SmallEncoder(256, f*c, norm_type=norm_type)
@@ -829,14 +833,21 @@ def weights_init(m):
 class CurlEncoder(nn.Module):
     def __init__(self,
                  input_channels,
-                 norm_type="bn"):
+                 norm_type="bn", padding='same'):
         super().__init__()
         self.input_channels = input_channels
-        self.main = nn.Sequential(
-            Conv2dSame(self.input_channels, 32, 5, stride=5),  # 20x20
-            nn.ReLU(),
-            Conv2dSame(32, 64, 5, stride=5),  #4x4
-            nn.ReLU())
+        if padding == 'same':
+            self.main = nn.Sequential(
+                Conv2dSame(self.input_channels, 32, 5, stride=5),  # 20x20
+                nn.ReLU(),
+                Conv2dSame(32, 64, 5, stride=5),  #4x4
+                nn.ReLU())
+        elif padding == 'valid':
+            self.main = nn.Sequential(
+                nn.Conv2d(self.input_channels, 32, 5, stride=5, padding=0),  # 20x20
+                nn.ReLU(),
+                nn.Conv2d(32, 64, 5, stride=5, padding=0),  #4x4
+                nn.ReLU())
         self.main.apply(weights_init)
         self.train()
 
