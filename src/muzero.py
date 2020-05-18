@@ -3,6 +3,9 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from rlpyt.agents.dqn.atari.mixin import AtariMixin
+from rlpyt.agents.dqn.dqn_agent import DqnAgent
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from rlpyt.agents.dqn.atari.atari_dqn_agent import AtariDqnAgent
 from rlpyt.algos.base import RlAlgorithm
@@ -30,7 +33,13 @@ ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
                                       "modelGradNorm"])
 
 
-class MuZeroAgent(DQNSearchAgent):
+class MuZeroAgent(AtariMixin, DqnAgent):
+    def __init__(self, search_args=None, eval=False, **kwargs):
+        """Standard init"""
+        super().__init__(**kwargs)
+        self.search_args = search_args
+        self.eval = eval
+
     def initialize(self,
                    env_spaces,
                    share_memory=False,
@@ -52,9 +61,51 @@ class MuZeroAgent(DQNSearchAgent):
         p = p.cpu()
         action = action.cpu()
 
-        agent_info = AgentInfo(p=p)
+        agent_info = AgentInfo(policy_probs=p, value=value)
         action, agent_info = buffer_to((action, agent_info), device="cpu")
         return AgentStep(action=action, agent_info=agent_info)
+
+    def to_device(self, cuda_idx=None):
+        """Moves the model to the specified cuda device, if not ``None``.  If
+        sharing memory, instantiates a new model to preserve the shared (CPU)
+        model.  Agents with additional model components (beyond
+        ``self.model``) for action-selection or for use during training should
+        extend this method to move those to the device, as well.
+
+        Typically called in the runner during startup.
+        """
+        super().to_device(cuda_idx)
+        self.search.to_device(cuda_idx)
+        self.search.network = self.model
+
+    def eval_mode(self, itr):
+        """Extend method to set epsilon for evaluation, using 1 for
+        pre-training eval."""
+        super().eval_mode(itr)
+        self.search.set_eval()
+
+    def sample_mode(self, itr):
+        """Extend method to set epsilon for sampling (including annealing)."""
+        super().sample_mode(itr)
+        self.search.set_train()
+
+    def data_parallel(self):
+        """Wraps the model with PyTorch's DistributedDataParallel.  The
+        intention is for rlpyt to create a separate Python process to drive
+        each GPU (or CPU-group for CPU-only, MPI-like configuration). Agents
+        with additional model components (beyond ``self.model``) which will
+        have gradients computed through them should extend this method to wrap
+        those, as well.
+
+        Typically called in the runner during startup.
+        """
+        self.model = DDP(self.model,
+                         device_ids=[self.device.index],
+                         output_device=self.device.index,
+                         broadcast_buffers=False,
+                         find_unused_parameters=True)
+        logger.log("Initialized DistributedDataParallel agent model on "
+                   f"device {self.device}.")
 
 
 class MuZeroModel(torch.nn.Module):
@@ -77,6 +128,7 @@ class MuZeroModel(torch.nn.Module):
         super().__init__()
         f, c, h, w = image_shape
         self.conv = RepNet(f*c, norm_type=norm_type)
+        self.hidden_size = 256
         self.jumps = jumps
         self.stack_actions = stack_actions
         self.value_head = ValueNetwork(input_channels=256, hidden_channels=1)
@@ -115,7 +167,7 @@ class MuZeroModel(torch.nn.Module):
     def step(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)
         policy_logits = self.policy_head(next_state)
-        value_logits = self.value_model(next_state)
+        value_logits = self.value_head(next_state)
 
         return next_state, reward_logits, policy_logits, value_logits
 
@@ -145,7 +197,6 @@ class MuZeroAlgo(RlAlgorithm):
                  updates_per_sync=1,  # For async mode only.
                  use_target_network=True,
                  **kwargs):
-        super().__init__(**kwargs)
         self.jumps = jumps
         self.updates_per_sync = updates_per_sync
         self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy

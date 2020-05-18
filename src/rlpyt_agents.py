@@ -137,8 +137,6 @@ class VectorizedMCTS:
         self.warmup_sims = 1
         self.max_n_sims = max(self.train_n_sims, self.eval_n_sims)
         self.id_null = self.max_n_sims + 1
-        self.virtual_threads = args.virtual_threads
-        self.vl_c = args.virtual_loss_c
         self.env_steps = 0
         self.eval = eval
         self.distribution = distribution
@@ -167,11 +165,10 @@ class VectorizedMCTS:
         self.visit_count = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
         self.virtual_loss = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
         self.reward = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
-        if self.network.pixels == 36:
-            self.pixels_shape = (self.network.hidden_size, 6, 6)
-            self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
-                                             self.network.hidden_size, 6, 6),
-                                            device=self.device)
+        self.pixels_shape = (self.network.hidden_size, 6, 6)
+        self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
+                                         self.network.hidden_size, 6, 6),
+                                        device=self.device)
         self.min_q, self.max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \
                                  torch.zeros((self.n_runs,), device=device).fill_(MINIMUM_FLOAT_VALUE)
         self.init_min_q, self.init_max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \
@@ -246,7 +243,7 @@ class VectorizedMCTS:
 
         hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
-        self.prior[:, 0] = F.softmax(policy_logits, dim=-1).to(self.search_device)
+        self.prior[:, 0] = F.softmax(policy_logits, dim=-1).to(self.device)
         self.add_exploration_noise()
 
         for sim_id in range(1, self.n_sims+1):
@@ -263,7 +260,7 @@ class VectorizedMCTS:
 
                 # Select the children corresponding to the current actions
                 current_actions = actions.gather(1, self.id_current.clamp_max(sim_id-1))
-                id_next = current_children.squeeze().gather(-1, current_actions)
+                id_next = current_children.squeeze(1).gather(-1, current_actions)
                 self.search_actions[:, depth] = current_actions.squeeze()
 
                 # Create a mask for live runs that will be true on the
@@ -289,14 +286,14 @@ class VectorizedMCTS:
                     break
 
             input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1,
-                                                                                                   self.pixels_shape).to(self.device)).squeeze()
+                                                                                                   *self.pixels_shape).to(self.device)).squeeze(1)
             hidden_state, reward, policy_logits, value = self.network.inference(
                 input_state, self.actions_final.to(self.device))
 
             # The new node is stored at entry sim_id
             self.hidden_state[:, sim_id, :] = hidden_state
-            self.reward[self.batch_range, sim_id, self.actions_final.squeeze()] = reward.to(self.search_device)
-            self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1).to(self.search_device)
+            self.reward[self.batch_range, sim_id, self.actions_final.squeeze()] = reward.to(self.device)
+            self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1).to(self.device)
 
             # Store the pointers from parent to new node and back.
             self.id_children[self.batch_range, self.id_final.squeeze(), self.actions_final.squeeze()] = sim_id
@@ -304,7 +301,7 @@ class VectorizedMCTS:
 
             # The backup starts from the new node
             self.id_final.fill_(sim_id)
-            self.backup(self.id_final, sim_id, value.to(self.search_device))
+            self.backup(self.id_final, sim_id, value.to(self.device))
 
         # Get action, policy and value from the root after the search has finished
         action, policy = self.select_action()
@@ -315,7 +312,7 @@ class VectorizedMCTS:
         return action, policy, value, initial_value
 
     def add_exploration_noise(self):
-        concentrations = torch.tensor([self.root_dirichlet_alpha] * self.num_actions, device=self.search_device)
+        concentrations = torch.tensor([self.root_dirichlet_alpha] * self.num_actions, device=self.device)
         noise = torch.distributions.dirichlet.Dirichlet(concentrations).sample((self.n_runs,))
         frac = self.root_exploration_fraction
         self.prior[:, 0, :] = (self.prior[:, 0, :] * (1-frac)) + (noise * frac)
