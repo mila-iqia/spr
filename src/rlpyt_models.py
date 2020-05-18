@@ -27,6 +27,20 @@ import copy
 import wandb
 import time
 
+atari_human_scores = dict(
+    alien=7127.7, amidar=1719.5, assault=742.0, asterix=8503.3, bank_heist=753.1, battle_zone=37187.5, boxing=12.1,
+    breakout=30.5, chopper_command=7387.8, crazy_climber=35829.4, demon_attack=1971.0, freeway=29.6, frostbite=4334.7,
+    gopher=2412.5, hero=30826.4, jamesbond=302.8, kangaroo=3035.0, kung_fu_master=22736.3, ms_pacman=6951.6, pong=14.6,
+    private_eye=69571.3, qbert=13455.0, road_runner=7845.0, seaquest=42054.7, up_n_down=11693.2
+)
+
+atari_random_scores = dict(
+    alien=227.8, amidar=5.8, assault=222.4, asterix=210.0, bank_heist=14.2, battle_zone=2360.0, boxing=0.1,
+    breakout=1.7, chopper_command=811.0, crazy_climber=10780.5, demon_attack=152.1, freeway=0.0, frostbite=65.2,
+    gopher=257.6, hero=1027.0, jamesbond=29.0, kangaroo=52.0, kung_fu_master=1598.0, ms_pacman=307.3, pong=-20.7,
+    private_eye=24.9, qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
+)
+
 
 class AsyncRlEvalWandb(AsyncRlEval):
     def log_diagnostics(self, itr, sampler_itr, throttle_time):
@@ -53,6 +67,11 @@ class AsyncRlEvalWandb(AsyncRlEval):
                     self.wandb_info[k + "Min"] = np.min(values)
                     self.wandb_info[k + "Max"] = np.max(values)
                     self.wandb_info[k + "Median"] = np.median(values)
+                    if k == 'GameScore':
+                        game = self.sampler.env_kwargs['game']
+                        random_score, human_score = atari_random_scores[game], atari_human_scores[game]
+                        normalized_score = (np.average(values) - random_score) / (human_score - random_score)
+                        self.wandb_info[k + "Normalized"] = normalized_score
 
         if self._opt_infos:
             for k, v in self._opt_infos.items():
@@ -86,6 +105,11 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
                     self.wandb_info[k + "Min"] = np.min(values)
                     self.wandb_info[k + "Max"] = np.max(values)
                     self.wandb_info[k + "Median"] = np.median(values)
+                    if k == 'GameScore':
+                        game = self.sampler.env_kwargs['game']
+                        random_score, human_score = atari_random_scores[game], atari_human_scores[game]
+                        normalized_score = (np.average(values) - random_score) / (human_score - random_score)
+                        self.wandb_info[k + "Normalized"] = normalized_score
 
         if self._opt_infos:
             for k, v in self._opt_infos.items():
@@ -186,9 +210,9 @@ class PizeroCatDqnModel(torch.nn.Module):
         # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
         # self.reward_network = ValueNetwork(conv_out_size)
         if dueling:
-            self.head = PizeroDistributionalDuelingHeadModel(256, output_size, pixels=36)
+            self.head = PizeroDistributionalDuelingHeadModel(256, output_size, hidden_size=1, pixels=36)
         else:
-            self.head = PizeroDistributionalHeadModel(256, output_size, pixels=36)
+            self.head = PizeroDistributionalHeadModel(256, output_size, hidden_size=1, pixels=36)
 
     def forward(self, observation, prev_action, prev_reward):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
@@ -249,6 +273,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             local_nce=False,
             buffered_nce=False,
             momentum_encoder=False,
+            padding='same',
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -269,7 +294,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             elif aug == "crop":
                 transformation = RandomCrop((84, 84))
                 # Crashes if aug-prob not 1: use CenterCrop((84, 84)) or Resize((84, 84)) in that case.
-                eval_transformation = nn.Identity()
+                eval_transformation = CenterCrop((84, 84))
                 imagesize = 84
             elif aug == "rrc":
                 transformation = RandomResizedCrop((100, 100), (0.8, 1))
@@ -290,8 +315,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.pixels = int(np.floor(imagesize/16.))**2
             self.hidden_size = 256
         if encoder == "curl":
-            self.conv = CurlEncoder(f*c, norm_type=norm_type)
-            self.pixels = int(np.ceil(imagesize/25.))**2
+            self.conv = CurlEncoder(f*c, norm_type=norm_type, padding=padding)
+            if padding == 'same':
+                self.pixels = int(np.ceil(imagesize/25.))**2
+            elif padding == 'valid':
+                self.pixels = int(np.floor(imagesize/25.))**2
             self.hidden_size = 64
         if encoder == "midsize":
             self.conv = SmallEncoder(256, f*c, norm_type=norm_type)
@@ -376,7 +404,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                     nn.Linear(self.hidden_size*self.pixels,
                                                               self.hidden_size*self.pixels))
                     buffer_size = self.hidden_size*self.pixels
-
+            self.classifier.apply(weights_init)
             if classifier == "mlp":
                 self.target_classifier = copy.deepcopy(self.classifier)
             else:
@@ -839,14 +867,21 @@ def weights_init(m):
 class CurlEncoder(nn.Module):
     def __init__(self,
                  input_channels,
-                 norm_type="bn"):
+                 norm_type="bn", padding='same'):
         super().__init__()
         self.input_channels = input_channels
-        self.main = nn.Sequential(
-            Conv2dSame(self.input_channels, 32, 5, stride=5),  # 20x20
-            nn.ReLU(),
-            Conv2dSame(32, 64, 5, stride=5),  #4x4
-            nn.ReLU())
+        if padding == 'same':
+            self.main = nn.Sequential(
+                Conv2dSame(self.input_channels, 32, 5, stride=5),  # 20x20
+                nn.ReLU(),
+                Conv2dSame(32, 64, 5, stride=5),  #4x4
+                nn.ReLU())
+        elif padding == 'valid':
+            self.main = nn.Sequential(
+                nn.Conv2d(self.input_channels, 32, 5, stride=5, padding=0),  # 20x20
+                nn.ReLU(),
+                nn.Conv2d(32, 64, 5, stride=5, padding=0),  #4x4
+                nn.ReLU())
         self.main.apply(weights_init)
         self.train()
 

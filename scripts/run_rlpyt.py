@@ -14,6 +14,7 @@ from rlpyt.experiments.configs.atari.dqn.atari_dqn import configs
 from rlpyt.samplers.async_.collectors import DbGpuResetCollector, DbGpuWaitResetCollector
 from rlpyt.samplers.async_.gpu_sampler import AsyncGpuSampler
 from rlpyt.samplers.parallel.gpu.sampler import GpuSampler
+from rlpyt.samplers.serial.collectors import SerialEvalCollector
 from rlpyt.samplers.serial.sampler import SerialSampler
 from rlpyt.samplers.parallel.gpu.collectors import GpuWaitResetCollector, GpuResetCollector
 from rlpyt.envs.atari.atari_env import AtariTrajInfo
@@ -59,9 +60,10 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["algo"]["clip_grad_norm"] = args.max_grad_norm
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
-    config["sampler"]["eval_max_trajectories"] = 20
-    config["sampler"]["eval_n_envs"] = 20
-    config["sampler"]["eval_max_steps"] = 625000  # int(125e3) / 4 * 50 (not actual max length, that's horizon)
+    config['optim']['eps'] = 0.00015
+    config["sampler"]["eval_max_trajectories"] = 100
+    config["sampler"]["eval_n_envs"] = 1
+    config["sampler"]["eval_max_steps"] = 2000000
     if args.noisy_nets:
         config['agent']['eps_init'] = 0.
         config['agent']['eps_final'] = 0.
@@ -75,7 +77,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         batch_T=1,  # Four time-steps per sampler iteration.
         batch_B=args.batch_b,
         max_decorrelation_steps=0,
-        eval_CollectorCls=SerialEvalCollectorFixed,
+        eval_CollectorCls=SerialEvalCollector,
         eval_n_envs=config["sampler"]["eval_n_envs"],
         eval_max_steps=config['sampler']['eval_max_steps'],
         eval_max_trajectories=config["sampler"]["eval_max_trajectories"],
@@ -89,6 +91,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["film"] = args.film
         config["model"]["nce"] = args.nce
         config["model"]["encoder"] = args.encoder
+        config["model"]["padding"] = args.padding
         config["model"]["momentum_encoder"] = args.momentum_encoder
         config["model"]["local_nce"] = args.local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
@@ -298,6 +301,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
     parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize"], help='Normalization')
+    parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
