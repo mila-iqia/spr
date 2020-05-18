@@ -497,13 +497,21 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
         return conv_out
 
-    def head_forward(self, conv_out, prev_action, prev_reward, target=False):
+    def head_forward(self,
+                     conv_out,
+                     prev_action,
+                     prev_reward,
+                     target=False,
+                     logits=False):
         lead_dim, T, B, img_shape = infer_leading_dims(conv_out, 3)
         if target:
             p = self.target_head(conv_out)
         else:
             p = self.head(conv_out)
-        p = F.softmax(p, dim=-1)
+        if logits:
+            p = F.log_softmax(p, dim=-1)
+        else:
+            p = F.softmax(p, dim=-1)
 
         # Restore leading dimensions: [T,B], [B], or [], as input.
         p = restore_leading_dims(p, lead_dim, T, B)
@@ -513,7 +521,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
         if train:
-            pred_ps = []
+            log_pred_ps = []
             pred_reward = []
             pred_latents = []
             input_obs = observation[0].flatten(1, 2)
@@ -522,9 +530,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             latent = self.stem_forward(input_obs,
                                        prev_action[0],
                                        prev_reward[0])
-            pred_ps.append(self.head_forward(latent,
-                                             prev_action[0],
-                                             prev_reward[0]),)
+            log_pred_ps.append(self.head_forward(latent,
+                                                 prev_action[0],
+                                                 prev_reward[0],
+                                                 logits=True))
             pred_latents.append(latent)
 
             if self.jumps > 0 or not self.detach_model:
@@ -539,17 +548,18 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     latent = ScaleGradient.apply(latent, 0.5)
                     pred_latents.append(latent)
                     pred_reward.append(F.log_softmax(pred_rew, -1))
-                    pred_ps.append(self.head_forward(latent,
-                                                     prev_action[j],
-                                                     prev_reward[j],
-                                                     target=self.detach_model))
+                    log_pred_ps.append(self.head_forward(latent,
+                                                         prev_action[j],
+                                                         prev_reward[j],
+                                                         target=self.detach_model,
+                                                         logits=True))
 
             if self.use_nce:
                 nce_loss, nce_model_loss, nce_accs = self.do_nce(pred_latents, observation)
             else:
                 nce_loss = nce_model_loss = nce_accs = torch.tensor(0.)
 
-            return pred_ps,\
+            return log_pred_ps,\
                    pred_reward,\
                    nce_loss, nce_model_loss, nce_accs
 
