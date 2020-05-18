@@ -147,6 +147,7 @@ class VectorizedMCTS:
         if self.eval:
             self.root_exploration_fraction = 0.
         self.initialize_on_device("cpu") # Need to have a CPU setup to generate examples.
+        self.first_call = True
 
     def set_eval(self):
         self.n_sims = self.eval_n_sims
@@ -502,10 +503,11 @@ class VectorizedQMCTS(VectorizedMCTS):
 
         # end = time.time()
         # print("Searched {} environments with {} sims, took {}".format(obs.shape[0], self.n_sims, end-start))
-        if len(action.size()) == 0:
-            action = action.unsqueeze(-1)
-        elif len(action.size()) > 1:
+
+        # Stupid, stupid hack because rlpyt does _not_ handle batch_b=1 well.
+        if self.first_call:
             action = action.squeeze()
+            self.first_call = False
         return action, self.q[:, 0].squeeze(), \
                value.squeeze(), initial_value
 

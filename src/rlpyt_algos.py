@@ -268,7 +268,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         self.update_itr_hyperparams(itr)
         return opt_info
 
-    def rl_loss(self, pred_ps, samples, index):
+    def rl_loss(self, log_pred_ps, samples, index):
         delta_z = (self.V_max - self.V_min) / (self.agent.n_atoms - 1)
         z = torch.linspace(self.V_min, self.V_max, self.agent.n_atoms)
         # Make 2-D tensor of contracted z_domain for each data point,
@@ -304,16 +304,57 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             target_p_unproj = target_p_unproj.unsqueeze(1)  # [B,1,P']
             target_p = (target_p_unproj * projection_coeffs).sum(-1)  # [B,P]
         p = select_at_indexes(samples.all_action[index + 1].squeeze(-1),
-                              pred_ps.cpu())  # [B,P]
-        p = torch.clamp(p, EPS, 1)  # NaN-guard.
-        losses = -torch.sum(target_p * torch.log(p), dim=1)  # Cross-entropy.
+                              log_pred_ps.cpu())  # [B,P]
+        # p = torch.clamp(p, EPS, 1)  # NaN-guard.
+        losses = -torch.sum(target_p * p, dim=1)  # Cross-entropy.
 
         target_p = torch.clamp(target_p, EPS, 1)
         KL_div = torch.sum(target_p *
-            (torch.log(target_p) - torch.log(p.detach())), dim=1)
+            (torch.log(target_p) - p.detach()), dim=1)
         KL_div = torch.clamp(KL_div, EPS, 1 / EPS)  # Avoid <0 from NaN-guard.
 
         return losses, KL_div
+
+    def kaixhin_loss(self, log_ps, samples, index):
+        # Calculate current state probabilities (online network noise already sampled)
+        log_ps_a = log_ps[range(self.batch_size),
+                          samples.all_action[index + 1].squeeze(-1)]  # log p(s_t, a_t; θonline)
+
+        next_states = samples.all_observation[index + self.n_step_return]
+        with torch.no_grad():
+            # Calculate nth next state probabilities
+            pns = self.online_net(next_states, None, None)  # Probabilities p(s_t+n, ·; θonline)
+            dns = self.support.expand_as(pns) * pns  # Distribution d_t+n = (z, p(s_t+n, ·; θonline))
+            argmax_indices_ns = dns.sum(2).argmax(
+                1)  # Perform argmax action selection using online network: argmax_a[(z, p(s_t+n, a; θonline))]
+            self.target_net.reset_noise()  # Sample new target net noise
+            pns = self.target_net(next_states, None, None)  # Probabilities p(s_t+n, ·; θtarget)
+            pns_a = pns[range(
+                self.batch_size), argmax_indices_ns]  # Double-Q probabilities p(s_t+n, argmax_a[(z, p(s_t+n, a; θonline))]; θtarget)
+
+            # Compute Tz (Bellman operator T applied to z)
+            Tz = samples.return_[index].unsqueeze(1) + (1 - samples.done_n[index].float()) * (self.discount ** self.n_step_return) * self.support.unsqueeze(
+                0)  # Tz = R^n + (γ^n)z (accounting for terminal states)
+            Tz = Tz.clamp(min=self.Vmin, max=self.Vmax)  # Clamp between supported values
+            # Compute L2 projection of Tz onto fixed support z
+            b = (Tz - self.Vmin) / self.delta_z  # b = (Tz - Vmin) / Δz
+            l, u = b.floor().to(torch.int64), b.ceil().to(torch.int64)
+            # Fix disappearing probability mass when l = b = u (b is int)
+            l[(u > 0) * (l == u)] -= 1
+            u[(l < (self.atoms - 1)) * (l == u)] += 1
+
+            # Distribute probability of Tz
+            m = torch.zeros(self.batch_size, self.atoms, device=next_states.device)
+            offset = torch.linspace(0, ((self.batch_size - 1) * self.atoms), self.batch_size).unsqueeze(1).expand(
+                self.batch_size, self.atoms).to(next_states.device)
+            m.view(-1).index_add_(0, (l + offset).view(-1),
+                                  (pns_a * (u.float() - b)).view(-1))  # m_l = m_l + p(s_t+n, a*)(u - b)
+            m.view(-1).index_add_(0, (u + offset).view(-1),
+                                  (pns_a * (b - l.float())).view(-1))  # m_u = m_u + p(s_t+n, a*)(b - l)
+
+        loss = -torch.sum(m * log_ps_a, 1)  # Cross-entropy loss (minimises DKL(m||p(s_t, a_t)))
+
+        return loss, loss
 
     def loss(self, samples):
         """
@@ -326,13 +367,13 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         if self.model.noisy:
             self.model.head.reset_noise()
         # start = time.time()
-        pred_ps, pred_rew, nce_loss, model_nce_loss, nce_acc\
+        log_pred_ps, pred_rew, nce_loss, model_nce_loss, nce_acc\
             = self.agent(samples.all_observation.to(self.agent.device),
                          samples.all_action.to(self.agent.device),
                          samples.all_reward.to(self.agent.device),
                          train=True)  # [B,A,P]
 
-        rl_loss, KL = self.rl_loss(pred_ps[0], samples, 0)
+        rl_loss, KL = self.rl_loss(log_pred_ps[0], samples, 0)
         if len(pred_rew) > 0:
             pred_rew = torch.stack(pred_rew, 0)
             with torch.no_grad():
@@ -343,12 +384,12 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         model_rl_loss = torch.zeros_like(reward_loss)
 
         if self.amortization_loss_weight > 0:
-            pred_values = from_categorical(torch.stack(pred_ps, 0), limit=10, logits=False)
+            pred_values = from_categorical(torch.stack(log_pred_ps, 0), limit=10, logits=True)
             pred_values = F.log_softmax(pred_values, -1)
             value_targets = F.softmax(samples.values[:self.jumps+1], -1)
             value_loss = -torch.sum(pred_values*value_targets.to(self.agent.device), (0, 2))
             if self.amortization_decay_constant > 0:
-                amortization_age = samples.age.float()
+                amortization_age = torch.tensor(samples.age).to(value_loss.device).float()
                 amortization_weights = 1. + amortization_age*self.amortization_decay_constant
                 value_loss = value_loss/amortization_weights
         else:
@@ -356,7 +397,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
 
         for i in range(1, self.jumps+1):
             if self.model_rl_weight > 0:
-                jump_rl_loss, model_KL = self.rl_loss(pred_ps[i],
+                jump_rl_loss, model_KL = self.rl_loss(log_pred_ps[i],
                                                samples,
                                                i)
                 model_rl_loss = model_rl_loss + jump_rl_loss

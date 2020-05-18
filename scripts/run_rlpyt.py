@@ -73,7 +73,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         env_kwargs=config["env"],
         eval_env_kwargs=config["eval_env"],
         batch_T=1,  # Four time-steps per sampler iteration.
-        batch_B=1,
+        batch_B=args.batch_b,
         max_decorrelation_steps=0,
         eval_CollectorCls=SerialEvalCollectorFixed,
         eval_n_envs=config["sampler"]["eval_n_envs"],
@@ -118,7 +118,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         algo=algo,
         agent=agent,
         sampler=sampler,
-        n_steps=10e4,
+        n_steps=args.n_steps,
         log_interval_steps=1e4,
         affinity=dict(cuda_idx=cuda_idx),
         seed=args.seed
@@ -287,6 +287,8 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=69)
     parser.add_argument('--grayscale', type=int, default=1)
     parser.add_argument('--imagesize', type=int, default=100)
+    parser.add_argument('--n-steps', type=int, default=100000)
+    parser.add_argument('--batch-b', type=int, default=1)
     parser.add_argument('--eval-imagesize', type=int, default=100)
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=0)
@@ -304,7 +306,7 @@ if __name__ == "__main__":
     parser.add_argument('--local-nce', type=int, default=0)
     parser.add_argument('--noisy-nets', type=int, default=0)
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
-    parser.add_argument('--classifier', type=str, default='mlp', choices=["mlp", "bilinear"], help='Style of NCE classifier')
+    parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
                         choices=["none", "rrc", "affine", "crop", "blur"],
                         help='Style of augmentation')
