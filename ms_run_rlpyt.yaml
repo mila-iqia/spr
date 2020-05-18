@@ -1,7 +1,7 @@
 description: AWM
 
 target:
-  cluster: eu1
+  cluster: eu2
   vc: msrlabs
 
 environment:
@@ -34,34 +34,34 @@ search:
     name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --nce 1 --classifier {classifier} --dueling {dueling} --seed {seed} --imagesize 100 --momentum-encoder 1 --buffered-nce {buffer} --local-nce {localnce}
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} --nce 1 --momentum-encoder 1 --local-nce {localnce} --classifier {classifier} --buffered-nce {buffer} --batch-size 32
   type: grid
   max_trials: 200
   params:
     - name: game
       spec: discrete
-      values: ['alien', 'asterix', 'battle_zone', 'hero', 'ms_pacman', 'qbert', 'road_runner']
+      values: ['alien','amidar', 'assault', 'asterix', 'bank_heist', 'battle_zone', 'boxing', 'breakout', 'chopper_command', 'crazy_climber', 'demon_attack', 'freeway', 'frostbite', 'gopher', 'hero', 'jamesbond', 'kangaroo', 'krull', 'kung_fu_master', 'ms_pacman', 'pong', 'private_eye', 'qbert', 'seaquest', 'road_runner', 'up_n_down']
     - name: arguments
       spec: discrete
-      values: ['--augmentation crop']
+      values: ['--padding valid --imagesize 84 --eval-imagesize 84', '--time-contrastive 1 --nce-loss-weight 0.5 --padding valid --imagesize 84 --eval-imagesize 84']
     - name: jumps
       spec: discrete
       values: [0]
     - name: noisy
       spec: discrete
-      values: [0, 1]
+      values: [1]
     - name: replay-ratio
       spec: discrete
-      values: [64]
+      values: [32]
     - name: mgn
       spec: discrete
-      values: [100., 10.]
+      values: [10.]
     - name: dueling
       spec: discrete
       values: [0]
     - name: seed
       spec: discrete
-      values: [42, 123]
+      values: [100, 123, 420]
     - name: localnce
       spec: discrete
       values: [0]
@@ -71,3 +71,6 @@ search:
     - name: classifier
       spec: discrete
       values: ['bilinear']
+#    - name: ncelw
+#      spec: discrete
+#      values: [0.5]
