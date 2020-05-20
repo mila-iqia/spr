@@ -82,7 +82,6 @@ class LocBufferedNCE(nn.Module):
         log_scores = F.log_softmax(raw_scores, dim=-1)
         loss_nce = -log_scores[:, :, 0].mean(0)  # Average location losses
 
-        self.update_buffer(r_trg, buffer)
         return loss_nce, accuracy
 
 
@@ -138,7 +137,6 @@ class BufferedNCE(nn.Module):
         # compute simple NCE loss
         log_scores = F.log_softmax(raw_scores, dim=1)
         loss_nce = -log_scores[:, 0]
-        self.update_buffer(r_trg, buffer)
         return loss_nce, accuracy
 
 
@@ -272,6 +270,7 @@ class LossSource2Target(nn.Module):
         else:
             assert False, 'Bad input!'
         return x.contiguous()
+
 
     def forward(self, r_src_1, r_trg_1, r_src_2, r_trg_2, which_cost='dot'):
         '''

@@ -42,6 +42,12 @@ atari_random_scores = dict(
 )
 
 
+class dummy_context_mgr:
+    def __enter__(self):
+        return None
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
 class AsyncRlEvalWandb(AsyncRlEval):
     def log_diagnostics(self, itr, sampler_itr, throttle_time):
         cum_steps = sampler_itr * self.sampler.batch_size
@@ -271,8 +277,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             imagesize=84,
             time_contrastive=0,
             local_nce=False,
+            global_nce=False,
+            global_local_nce=False,
             buffered_nce=False,
             momentum_encoder=False,
+            shared_encoder=False,
             padding='same',
     ):
         """Instantiates the neural network according to arguments; network defaults
@@ -376,47 +385,96 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         if self.use_nce:
             self.local_nce = local_nce
+            self.global_nce = global_nce
+            self.global_local_nce = global_local_nce
             self.momentum_encoder = momentum_encoder
             self.buffered_nce = buffered_nce
+            self.shared_encoder = shared_encoder
+            assert self.local_nce or self.global_nce or self.global_local_nce
+            assert not (self.shared_encoder and self.momentum_encoder)
+
+            # in case someone tries something silly like --local-nce 2
+            self.num_nces = int(bool(self.local_nce)) + \
+                            int(bool(self.global_nce)) +\
+                            int(bool(self.global_local_nce))
 
             if self.local_nce:
-                if classifier == "mlp":
-                    self.classifier = nn.Sequential(nn.Linear(self.hidden_size,
-                                                              self.hidden_size),
-                                                    nn.ReLU(),
-                                                    nn.Linear(self.hidden_size,
-                                                              self.hidden_size))
+                if self.classifier_type == "mlp":
+                    self.local_classifier = nn.Sequential(nn.Linear(self.hidden_size,
+                                                                    self.hidden_size),
+                                                          nn.ReLU(),
+                                                          nn.Linear(self.hidden_size,
+                                                                    self.hidden_size))
                 else:
-                    self.classifier = nn.Linear(self.hidden_size, self.hidden_size)
+                    self.local_classifier = nn.Linear(self.hidden_size, self.hidden_size)
 
-                buffer_size = self.hidden_size
+                self.local_target_classifier = self.local_classifier
+                local_buffer_size = self.hidden_size
+                self.local_classifier.apply(weights_init)
             else:
-                if classifier == "mlp":
-                    self.classifier = MLPHead(self.hidden_size,
-                                              output_size=self.hidden_size,
-                                              hidden_size=-1,
-                                              pixels=self.pixels,
-                                              noisy=0,
-                                              )
-                    buffer_size = self.hidden_size
+                self.local_classifier = self.local_target_classifier = nn.Identity()
+            if self.global_nce:
+                if self.classifier_type == "mlp":
+                    self.global_classifier = MLPHead(self.hidden_size,
+                                                     output_size=256,
+                                                     hidden_size=-1,
+                                                     pixels=self.pixels,
+                                                     noisy=0,
+                                                     )
+                    self.global_target_classifier = self.global_classifier
+                    global_buffer_size = 256
+                elif self.classifier_type == "q_l1":
+                    self.global_classifier = nn.Sequential(*self.head.network[:3],
+                                                           nn.Linear(256, 256))
+                    self.global_target_classifier = self.global_classifier
+                    global_buffer_size = 256
                 else:
-                    self.classifier = nn.Sequential(nn.Flatten(-3, -1),
-                                                    nn.Linear(self.hidden_size*self.pixels,
-                                                              self.hidden_size*self.pixels))
-                    buffer_size = self.hidden_size*self.pixels
-            self.classifier.apply(weights_init)
-            if classifier == "mlp":
-                self.target_classifier = copy.deepcopy(self.classifier)
+                    self.global_classifier = nn.Sequential(nn.Flatten(-3, -1),
+                                                           nn.Linear(self.hidden_size*self.pixels,
+                                                                     self.hidden_size*self.pixels))
+                    self.global_target_classifier = nn.Flatten(-3, -1)
+                    global_buffer_size = self.hidden_size*self.pixels
+                self.global_classifier.apply(weights_init)
             else:
-                self.target_classifier = nn.Identity() if self.local_nce else nn.Flatten(-3, -1)
+                self.global_classifier = self.global_target_classifier = nn.Identity()
+            if self.global_local_nce:
+                if self.classifier_type == "mlp":
+                    self.global_local_classifier = MLPHead(self.hidden_size,
+                                                           output_size=self.hidden_size,
+                                                           hidden_size=-1,
+                                                           pixels=self.pixels,
+                                                           noisy=0,
+                                                           )
+                elif self.classifier_type == "q_l1":
+                    self.global_local_classifier = nn.Sequential(*self.head.network[:3],
+                                                                 nn.Linear(256, self.hidden_size))
+                    global_local_buffer_size = self.hidden_size
+                else:
+                    # Bilinear's size is different, since only comparing to one
+                    # patch at a time.
+                    self.global_local_classifier = nn.Sequential(nn.Flatten(-3, -1),
+                                                                 nn.Linear(self.hidden_size*self.pixels,
+                                                                           self.hidden_size))
+
+                self.global_local_target_classifier = self.global_local_classifier
+            else:
+                self.global_local_classifier = self.global_local_target_classifier = nn.Identity()
 
             if self.momentum_encoder:
                 self.nce_target_encoder = copy.deepcopy(self.conv)
-                for param in self.target_classifier.parameters():
+                self.global_target_classifier = copy.deepcopy(self.global_target_classifier)
+                self.local_target_classifier = copy.deepcopy(self.local_target_classifier)
+                self.global_local_target_classifier = copy.deepcopy(self.global_local_target_classifier)
+                for param in list(self.local_target_classifier.parameters()) + \
+                             list(self.global_target_classifier.parameters()) + \
+                             list(self.global_local_target_classifier.parameters()) + \
+                             list(self.nce_target_encoder.parameters()):
                     param.requires_grad = False
-                for param in self.nce_target_encoder.parameters():
-                    param.requires_grad = False
-            else:
+
+            elif not self.shared_encoder:
+                self.global_target_classifier = copy.deepcopy(self.global_target_classifier)
+                self.local_target_classifier = copy.deepcopy(self.local_target_classifier)
+                self.global_local_target_classifier = copy.deepcopy(self.global_local_target_classifier)
                 if self.stack_actions:
                     input_size = c - 1
                 else:
@@ -426,12 +484,24 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 else:
                     self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
                                                            norm_type=norm_type)
+            elif self.shared_encoder:
+                self.nce_target_encoder = self.conv
+
             if self.buffered_nce:
-                if self.local_nce:
-                    self.nce = LocBufferedNCE(buffer_size, 2**12, buffer_names=["main"], n_locs=self.pixels)
-                else:
-                    self.nce = BufferedNCE(buffer_size, 2**12, buffer_names=["main"])
+                if self.local_nce or self.global_local_nce:
+                    self.local_nce = LocBufferedNCE(local_buffer_size, 2**10,
+                                                    buffer_names=["main"],
+                                                    n_locs=self.pixels)
+                if self.global_nce:
+                    self.global_nce = BufferedNCE(global_buffer_size, 2**10,
+                                                  buffer_names=["main"])
+                if self.global_local_nce:
+                    self.global_local_nce = LocBufferedNCE(global_local_buffer_size,
+                                                           2**12,
+                                                           buffer_names=["main"],
+                                                           n_locs=self.pixels)
             else:
+                # This style of NCE can also be used for global-local with expand()
                 self.nce = BlockNCE(normalize=False)
 
         if self.detach_model:
@@ -439,42 +509,114 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             for param in self.target_head.parameters():
                 param.requires_grad = False
 
-    def do_nce(self, pred_latents, observation):
-        stacked_latents = torch.stack(pred_latents, 1).flatten(0, 1)
-        if self.local_nce:
-            stacked_latents = stacked_latents.flatten(-2, -1).permute(2, 0, 1)
-        stacked_latents = self.classifier(stacked_latents)
-        target_images = observation[self.time_contrastive:self.jumps + self.time_contrastive+1].transpose(0, 1).flatten(2, 3)
-        target_images = self.transform(target_images, True)
-
-        if self.momentum_encoder:
-            with torch.no_grad():
-                target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
-                if self.local_nce:
-                    target_latents = target_latents.flatten(-2, -1).permute(2, 0, 1)
-                target_latents = self.target_classifier(target_latents)
-                update_state_dict(self.nce_target_encoder, self.conv.state_dict(), 0.001)
-                if self.classifier_type != "bilinear":
-                    update_state_dict(self.target_classifier, self.classifier.state_dict(), 0.001)
-        else:
-            target_images = target_images[..., -1, :, :]
-            if len(target_images.shape) == 4:
-                target_images = target_images.unsqueeze(2)
-            target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
-            if self.local_nce:
-                target_latents = target_latents.view(observation.shape[1], -1,
-                                                     *target_latents.shape[1:])
-                target_latents = target_latents.flatten(3, 4).permute(3, 1, 0, 2).flatten(1, 2)
-            target_latents = self.target_classifier(target_latents)
-
+    def do_global_nce(self, latents, target_latents, observation):
+        global_latents = self.global_classifier(latents)
+        with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
+            global_targets = self.global_target_classifier(target_latents)
         if not self.buffered_nce:
             # Need (locs, times, batch_size, rkhs) for the non-buffered nce
             # to mask out negatives from the same trajectory if desired.
-            target_latents = target_latents.view(-1, observation.shape[1],
-                                                 self.jumps+1, target_latents.shape[-1]).transpose(1, 2)
-            stacked_latents = stacked_latents.view(-1, observation.shape[1],
-                                                   self.jumps+1, stacked_latents.shape[-1]).transpose(1, 2)
-        nce_loss, nce_accs = self.nce.forward(stacked_latents, target_latents)
+            global_targets = global_targets.view(-1, observation.shape[1],
+                                                 self.jumps+1, global_targets.shape[-1]).transpose(1, 2)
+            global_latents = global_latents.view(-1, observation.shape[1],
+                                                 self.jumps+1, global_latents.shape[-1]).transpose(1, 2)
+            global_nce_loss, global_nce_accs = self.nce.forward(global_latents, global_targets)
+        else:
+            global_nce_loss, global_nce_accs = self.global_nce.forward(global_latents, global_targets)
+            self.global_nce.update_buffer(global_targets)
+
+        return global_nce_loss, global_nce_accs
+
+    def do_local_nce(self, latents, target_latents, observation):
+        local_latents = latents.flatten(-2, -1).permute(2, 0, 1)
+        local_latents = self.local_classifier(local_latents)
+        local_target_latents = target_latents.flatten(-2, -1).permute(2, 0, 1)
+        with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
+            local_targets = self.local_target_classifier(local_target_latents)
+
+        if not self.buffered_nce:
+            if self.local_nce or self.global_local_nce:
+                local_latents = local_latents.view(-1,
+                                                   observation.shape[1],
+                                                   self.jumps+1,
+                                                   local_latents.shape[-1]).transpose(1, 2)
+                local_targets = local_targets.view(-1,
+                                                   observation.shape[1],
+                                                   self.jumps+1,
+                                                   local_targets.shape[-1]).transpose(1, 2)
+                local_nce_loss, local_nce_accs = self.nce.forward(local_latents, local_targets)
+        else:
+            local_nce_loss, local_nce_accs = self.local_nce.forward(local_latents, local_targets)
+
+        return local_nce_loss, local_nce_accs
+
+    def do_global_local_nce(self, latents, target_latents, observation):
+        local_latents = latents.flatten(-2, -1).permute(2, 0, 1)
+        local_target_latents = latents.flatten(-2, -1).permute(2, 0, 1)
+        global_latents = self.global_local_classifier(latents)
+
+        if not self.buffered_nce:
+            with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
+                global_targets = self.global_local_target_classifier(target_latents)
+            global_latents = global_latents.view(-1,
+                                                 observation.shape[1],
+                                                 self.jumps + 1,
+                                                 global_latents.shape[-1]).transpose(1, 2)
+            global_targets = global_targets.view(-1,
+                                                 observation.shape[1],
+                                                 self.jumps + 1,
+                                                 global_targets.shape[-1]).transpose(1, 2)
+            local_latents = local_latents.view(local_latents.shape[0],
+                                               observation.shape[1],
+                                               self.jumps+1,
+                                               local_latents.shape[-1],
+                                               ).transpose(1, 2)
+            local_target_latents = local_target_latents.view(local_latents.shape[0],
+                                                             observation.shape[1],
+                                                             self.jumps+1,
+                                                             local_latents.shape[-1],
+                                                             ).transpose(1, 2)
+
+            global_targets = global_targets.expand(local_latents.shape[0], -1, -1, -1)
+            global_latents = global_latents.expand(local_latents.shape[0], -1, -1, -1)
+            gl_nce_loss_1, gl_nce_accs_1 = self.nce.forward(local_latents, global_targets)
+            gl_nce_loss_2, gl_nce_accs_2 = self.nce.forward(global_latents, local_target_latents)
+            gl_nce_loss = 0.5 * (gl_nce_loss_1 + gl_nce_loss_2)
+            gl_nce_accs = 0.5 * (gl_nce_accs_1 + gl_nce_accs_2)
+        else:
+            global_latents = global_latents.view(-1,
+                                                 observation.shape[1]*(self.jumps + 1),
+                                                 global_latents.shape[-1])
+            global_latents = global_latents.expand(local_latents.shape[0], -1, -1)
+            gl_nce_loss, gl_nce_accs = self.global_local_nce.forward(global_latents, local_target_latents)
+            self.global_local_nce.update_buffer(local_target_latents)
+        return gl_nce_loss, gl_nce_accs
+
+    def do_nce(self, pred_latents, observation):
+        latents = torch.stack(pred_latents, 1).flatten(0, 1)
+        target_images = observation[self.time_contrastive:self.jumps + self.time_contrastive+1].transpose(0, 1).flatten(2, 3)
+        target_images = self.transform(target_images, True)
+
+        if not self.momentum_encoder and not self.shared_encoder:
+            target_images = target_images[..., -1:, :, :]
+        with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
+            target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
+
+        if self.global_local_nce:
+            gl_nce_loss, gl_nce_accs = self.do_global_local_nce(latents, target_latents, observation)
+        else:
+            gl_nce_loss = gl_nce_accs = 0
+        if self.local_nce:
+            local_nce_loss, local_nce_accs = self.do_local_nce(latents, target_latents, observation)
+        else:
+            local_nce_loss = local_nce_accs = 0
+        if self.global_nce:
+            global_nce_loss, global_nce_accs = self.do_global_nce(latents, target_latents, observation)
+        else:
+            global_nce_loss = global_nce_accs = 0
+
+        nce_loss = (global_nce_loss + local_nce_loss + gl_nce_loss)/self.num_nces
+        nce_accs = (global_nce_accs + local_nce_accs + gl_nce_accs)/self.num_nces
 
         nce_loss = nce_loss.view(observation.shape[1], -1)
         if self.jumps > 0:
@@ -484,6 +626,24 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             nce_loss = nce_loss[:, 0]
             nce_model_loss = torch.zeros_like(nce_loss)
         nce_accs = nce_accs.mean().item()
+
+        if self.momentum_encoder:
+            update_state_dict(self.nce_target_encoder,
+                              self.conv.state_dict(), 0.001)
+            if self.classifier_type != "bilinear":
+                # q_l1 is also bilinear for local
+                if self.local_nce and self.classifier_type != "q_l1":
+                    update_state_dict(self.local_target_classifier,
+                                      self.local_classifier.state_dict(),
+                                      0.001)
+                if self.global_nce:
+                    update_state_dict(self.global_target_classifier,
+                                      self.global_classifier.state_dict(),
+                                      0.001)
+                if self.global_local_nce:
+                    update_state_dict(self.global_local_target_classifier,
+                                      self.global_local_classifier.state_dict(),
+                                      0.001)
 
         return nce_loss, nce_model_loss, nce_accs
 
@@ -740,6 +900,7 @@ class DQNDistributionalDuelingHeadModel(torch.nn.Module):
         self.advantage_out = self.advantage_layers[3]
         self.advantage_bias = torch.nn.Parameter(torch.zeros(n_atoms))
         self.value = nn.Sequential(*self.value_layers)
+        self.network = self.advantage_hidden
         self._grad_scale = grad_scale
         self._output_size = output_size
         self._n_atoms = n_atoms
