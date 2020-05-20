@@ -55,14 +55,14 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["algo"]["batch_size"] = args.batch_size
     config["algo"]["learning_rate"] = 0.0001
     config['algo']['replay_ratio'] = args.replay_ratio
-    config['algo']['target_update_interval'] = 2000
+    config['algo']['target_update_interval'] = args.target_update_interval
     config['algo']['eps_steps'] = int(5e4)
     config["algo"]["clip_grad_norm"] = args.max_grad_norm
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
     config['optim']['eps'] = 0.00015
     config["sampler"]["eval_max_trajectories"] = 100
-    config["sampler"]["eval_n_envs"] = 1
+    config["sampler"]["eval_n_envs"] = 100
     config["sampler"]["eval_max_steps"] = 2000000
     if args.noisy_nets:
         config['agent']['eps_init'] = 0.
@@ -93,7 +93,10 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["encoder"] = args.encoder
         config["model"]["padding"] = args.padding
         config["model"]["momentum_encoder"] = args.momentum_encoder
+        config["model"]["shared_encoder"] = args.shared_encoder
         config["model"]["local_nce"] = args.local_nce
+        config["model"]["global_nce"] = args.global_nce
+        config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
@@ -181,7 +184,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config["model"]["dueling"] = bool(args.dueling)
     config["algo"]["batch_size"] = args.batch_size
     config['algo']['replay_ratio'] = args.replay_ratio
-    config['algo']['target_update_interval'] = 2000
+    config['algo']['target_update_interval'] = args.target_update_interval
     config["algo"]["clip_grad_norm"] = args.max_grad_norm
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
@@ -215,7 +218,10 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["encoder"] = args.encoder
         config["model"]["norm_type"] = args.norm_type
         config["model"]["momentum_encoder"] = args.momentum_encoder
+        config["model"]["shared_encoder"] = args.shared_encoder
         config["model"]["local_nce"] = args.local_nce
+        config["model"]["global_nce"] = args.global_nce
+        config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["augmentation"] = args.augmentation
         config["model"]["time_contrastive"] = args.time_contrastive
@@ -291,6 +297,7 @@ if __name__ == "__main__":
     parser.add_argument('--grayscale', type=int, default=1)
     parser.add_argument('--imagesize', type=int, default=100)
     parser.add_argument('--n-steps', type=int, default=100000)
+    parser.add_argument('--target-update-interval', type=int, default=2000)
     parser.add_argument('--batch-b', type=int, default=1)
     parser.add_argument('--eval-imagesize', type=int, default=100)
     parser.add_argument('--beluga', action="store_true")
@@ -307,10 +314,13 @@ if __name__ == "__main__":
     parser.add_argument('--nce', type=int, default=0)
     parser.add_argument('--buffered-nce', type=int, default=0)
     parser.add_argument('--momentum-encoder', type=int, default=0)
+    parser.add_argument('--shared-encoder', type=int, default=0)
     parser.add_argument('--local-nce', type=int, default=0)
+    parser.add_argument('--global-nce', type=int, default=0)
+    parser.add_argument('--global-local-nce', type=int, default=0)
     parser.add_argument('--noisy-nets', type=int, default=0)
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
-    parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear"], help='Style of NCE classifier')
+    parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
                         choices=["none", "rrc", "affine", "crop", "blur"],
                         help='Style of augmentation')
