@@ -293,8 +293,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                                           samples.all_reward[index + self.n_step_return])  # [B,A,P']
             if self.double_dqn:
                 next_ps = self.agent(samples.all_observation[index + self.n_step_return],
-                                          samples.all_action[index + self.n_step_return],
-                                          samples.all_reward[index + self.n_step_return])  # [B,A,P']
+                                     samples.all_action[index + self.n_step_return],
+                                     samples.all_reward[index + self.n_step_return])  # [B,A,P']
                 next_qs = torch.tensordot(next_ps, z, dims=1)  # [B,A]
                 next_a = torch.argmax(next_qs, dim=-1)  # [B]
             else:
@@ -308,12 +308,12 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         # p = torch.clamp(p, EPS, 1)  # NaN-guard.
         losses = -torch.sum(target_p * p, dim=1)  # Cross-entropy.
 
-        # target_p = torch.clamp(target_p, EPS, 1)
-        # KL_div = torch.sum(target_p *
-        #     (torch.log(target_p) - p.detach()), dim=1)
-        # KL_div = torch.clamp(KL_div, EPS, 1 / EPS)  # Avoid <0 from NaN-guard.
+        target_p = torch.clamp(target_p, EPS, 1)
+        KL_div = torch.sum(target_p *
+            (torch.log(target_p) - p.detach()), dim=1)
+        KL_div = torch.clamp(KL_div, EPS, 1 / EPS)  # Avoid <0 from NaN-guard.
 
-        return losses, losses.detach()  # Try using CE instead of KL for prioritization.
+        return losses, KL_div.detach()
 
     def loss(self, samples):
         """
