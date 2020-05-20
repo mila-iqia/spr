@@ -34,7 +34,7 @@ search:
     name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} --nce 1 --momentum-encoder 1 --local-nce {localnce} --classifier {classifier} --buffered-nce {buffer} --batch-size 32
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} --nce 1 --momentum-encoder 1 {ncetype} --classifier {classifier} --buffered-nce {buffer} --batch-size 64
   type: grid
   max_trials: 200
   params:
@@ -52,7 +52,7 @@ search:
       values: [1]
     - name: replay-ratio
       spec: discrete
-      values: [32]
+      values: [256]
     - name: mgn
       spec: discrete
       values: [10.]
@@ -62,15 +62,12 @@ search:
     - name: seed
       spec: discrete
       values: [100, 123, 420]
-    - name: localnce
+    - name: ncetype
       spec: discrete
-      values: [0]
+      values: ['--global-local-nce 1']
     - name: buffer
       spec: discrete
       values: [0]
     - name: classifier
       spec: discrete
-      values: ['bilinear']
-#    - name: ncelw
-#      spec: discrete
-#      values: [0.5]
+      values: ['bilinear', 'q_l1']
