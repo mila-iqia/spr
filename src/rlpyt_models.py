@@ -424,7 +424,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
                 elif self.classifier_type == "q_l1":
-                    self.global_classifier = nn.Sequential(*self.head.network[:3],
+                    self.global_classifier = nn.Sequential(*self.head.network[:2],
                                                            nn.Linear(256, 256))
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
@@ -446,7 +446,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                            noisy=0,
                                                            )
                 elif self.classifier_type == "q_l1":
-                    self.global_local_classifier = nn.Sequential(*self.head.network[:3],
+                    self.global_local_classifier = nn.Sequential(*self.head.network[:2],
                                                                  nn.Linear(256, self.hidden_size))
                     global_local_buffer_size = self.hidden_size
                 else:

@@ -318,7 +318,7 @@ if __name__ == "__main__":
     parser.add_argument('--local-nce', type=int, default=0)
     parser.add_argument('--global-nce', type=int, default=0)
     parser.add_argument('--global-local-nce', type=int, default=0)
-    parser.add_argument('--noisy-nets', type=int, default=0)
+    parser.add_argument('--noisy-nets', type=int, default=1)
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
     parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
