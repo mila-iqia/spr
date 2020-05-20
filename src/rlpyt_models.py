@@ -30,14 +30,14 @@ import time
 atari_human_scores = dict(
     alien=7127.7, amidar=1719.5, assault=742.0, asterix=8503.3, bank_heist=753.1, battle_zone=37187.5, boxing=12.1,
     breakout=30.5, chopper_command=7387.8, crazy_climber=35829.4, demon_attack=1971.0, freeway=29.6, frostbite=4334.7,
-    gopher=2412.5, hero=30826.4, jamesbond=302.8, kangaroo=3035.0, kung_fu_master=22736.3, ms_pacman=6951.6, pong=14.6,
+    gopher=2412.5, hero=30826.4, jamesbond=302.8, kangaroo=3035.0, krull=2665.5, kung_fu_master=22736.3, ms_pacman=6951.6, pong=14.6,
     private_eye=69571.3, qbert=13455.0, road_runner=7845.0, seaquest=42054.7, up_n_down=11693.2
 )
 
 atari_random_scores = dict(
     alien=227.8, amidar=5.8, assault=222.4, asterix=210.0, bank_heist=14.2, battle_zone=2360.0, boxing=0.1,
     breakout=1.7, chopper_command=811.0, crazy_climber=10780.5, demon_attack=152.1, freeway=0.0, frostbite=65.2,
-    gopher=257.6, hero=1027.0, jamesbond=29.0, kangaroo=52.0, kung_fu_master=1598.0, ms_pacman=307.3, pong=-20.7,
+    gopher=257.6, hero=1027.0, jamesbond=29.0, kangaroo=52.0, krull=1598.0, kung_fu_master=1598.0, ms_pacman=307.3, pong=-20.7,
     private_eye=24.9, qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
 )
 
