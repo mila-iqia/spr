@@ -5,6 +5,7 @@ import torch.nn as nn
 from rlpyt.models.dqn.atari_catdqn_model import DistributionalHeadModel
 from rlpyt.models.dqn.dueling import DistributionalDuelingHeadModel
 from rlpyt.models.utils import scale_grad, update_state_dict
+from rlpyt.models.conv2d import Conv2dModel
 from rlpyt.runners.async_rl import AsyncRlEval
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
 from rlpyt.runners.sync_rl import SyncRlMixin, SyncWorkerEval
@@ -318,7 +319,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.dueling = dueling
         f, c, h, w = image_shape
-        assert encoder in ["repnet", "curl", "midsize"]
+        assert encoder in ["repnet", "curl", "midsize", "nature"]
         if encoder == "repnet":
             self.conv = RepNet(f*c, norm_type=norm_type)
             self.pixels = int(np.floor(imagesize/16.))**2
@@ -334,6 +335,18 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.conv = SmallEncoder(256, f*c, norm_type=norm_type)
             self.pixels = int(np.floor(imagesize/16.))**2
             self.hidden_size = 256
+        if encoder == "nature":
+            self.conv = Conv2dModel(
+                in_channels=f*c,
+                channels=[32, 64, 64],
+                kernel_sizes=[8, 4, 3],
+                strides=[4, 2, 1],
+                paddings=[0, 0, 0],
+                use_maxpool=False,
+            )
+            self.hidden_size = 64
+            self.pixels = int(np.ceil(imagesize/12.))**2
+
         self.jumps = jumps
         self.detach_model = detach_model
         self.use_nce = nce

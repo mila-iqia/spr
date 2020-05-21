@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import torch.nn.functional as F
 from rlpyt.agents.dqn.atari.atari_catdqn_agent import AtariCatDqnAgent
 from rlpyt.models.dqn.atari_catdqn_model import AtariCatDqnModel
@@ -170,26 +171,11 @@ class VectorizedMCTS:
         self.visit_count = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
         self.virtual_loss = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
         self.reward = torch.zeros((self.n_runs, self.max_n_sims + 2, self.num_actions), device=device)
-        if self.network.pixels == 36:
-            self.pixels_shape = (self.network.hidden_size, 6, 6)
-            self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
-                                             self.network.hidden_size, 6, 6),
-                                            device=self.device)
-        if self.network.pixels == 25:
-            self.pixels_shape = (self.network.hidden_size, 5, 5)
-            self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
-                                             self.network.hidden_size, 5, 5),
-                                            device=self.device)
-        if self.network.pixels == 16:
-            self.pixels_shape = (self.network.hidden_size, 4, 4)
-            self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
-                                             self.network.hidden_size, 4, 4),
-                                            device=self.device)
-        if self.network.pixels == 9:
-            self.pixels_shape = (self.network.hidden_size, 3, 3)
-            self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
-                                             self.network.hidden_size, 3, 3),
-                                            device=self.device)
+        pixels = int(np.sqrt(self.network.pixels))
+        self.pixels_shape = (self.network.hidden_size, pixels, pixels)
+        self.hidden_state = torch.zeros((self.n_runs, self.max_n_sims + 2,
+                                         self.network.hidden_size, pixels, pixels),
+                                        device=self.device)
         self.min_q, self.max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \
                                  torch.zeros((self.n_runs,), device=device).fill_(MINIMUM_FLOAT_VALUE)
         self.init_min_q, self.init_max_q = torch.zeros((self.n_runs,), device=device).fill_(MAXIMUM_FLOAT_VALUE), \

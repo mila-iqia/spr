@@ -345,8 +345,8 @@ class BlockNCE:
         f_x1 = f_x1s.flatten(1, 2)
         f_x2 = f_x2s.flatten(1, 2)
         if self.normalize:
-            f_x1 = f_x1/(torch.norm(f_x1, dim=-1, keepdim=True) + 1.e-3)
-            f_x2 = f_x2/(torch.norm(f_x2, dim=-1, keepdim=True) + 1.e-3)
+            f_x1 = F.normalize(f_x1.float(), p=2., dim=-1, eps=1e-3)
+            f_x2 = F.normalize(f_x2.float(), p=2., dim=-1, eps=1e-3)
         f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
         n_batch = f_x1.size(1)
         neg_batch = f_x2.size(-1)
