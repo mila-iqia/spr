@@ -307,7 +307,7 @@ if __name__ == "__main__":
     parser.add_argument('--dynamics-blocks', type=int, default=2)
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
-    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize"], help='Normalization')
+    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature"], help='Normalization')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--film', type=int, default=0)
