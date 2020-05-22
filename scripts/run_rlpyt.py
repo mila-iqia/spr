@@ -77,7 +77,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         batch_T=1,  # Four time-steps per sampler iteration.
         batch_B=args.batch_b,
         max_decorrelation_steps=0,
-        eval_CollectorCls=SerialEvalCollector,
+        eval_CollectorCls=SerialEvalCollectorFixed,
         eval_n_envs=config["sampler"]["eval_n_envs"],
         eval_max_steps=config['sampler']['eval_max_steps'],
         eval_max_trajectories=config["sampler"]["eval_max_trajectories"],
@@ -313,7 +313,7 @@ if __name__ == "__main__":
     parser.add_argument('--dynamics-blocks', type=int, default=2)
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
-    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature"], help='Normalization')
+    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature", "effnet"], help='Normalization')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--frame-dropout', type=float, default=0., help='Probability to dropout frame in framestack.')
