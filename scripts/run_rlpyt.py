@@ -98,8 +98,11 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["global_nce"] = args.global_nce
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
+        config["model"]["cosine_nce"] = args.cosine_nce
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["frame_dropout"] = args.frame_dropout
+        config["model"]["keep_last_frame"] = args.keep_last_frame
         config["model"]["time_contrastive"] = args.time_contrastive
         config["model"]["aug_prob"] = args.aug_prob
         config["model"]["target_augmentation"] = args.target_augmentation
@@ -223,7 +226,10 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["global_nce"] = args.global_nce
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
+        config["model"]["cosine_nce"] = args.cosine_nce
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["frame_dropout"] = args.frame_dropout
+        config["model"]["keep_last_frame"] = args.keep_last_frame
         config["model"]["time_contrastive"] = args.time_contrastive
         config["model"]["aug_prob"] = args.aug_prob
         config["model"]["target_augmentation"] = args.target_augmentation
@@ -310,8 +316,11 @@ if __name__ == "__main__":
     parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature"], help='Normalization')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
+    parser.add_argument('--frame-dropout', type=float, default=0., help='Probability to dropout frame in framestack.')
+    parser.add_argument('--keep-last-frame', type=int, default=1, help='Always keep last frame in frame dropout.')
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
+    parser.add_argument('--cosine-nce', type=int, default=0)
     parser.add_argument('--buffered-nce', type=int, default=0)
     parser.add_argument('--momentum-encoder', type=int, default=0)
     parser.add_argument('--shared-encoder', type=int, default=0)

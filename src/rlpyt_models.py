@@ -16,6 +16,7 @@ from src.model_trainer import ValueNetwork, TransitionModel, \
     NetworkOutput, from_categorical, ScaleGradient, init, \
     ResidualBlock, renormalize, FiLMTransitionModel, init_normalization
 from src.buffered_nce import BufferedNCE, LocBufferedNCE, BlockNCE
+from src.utils import count_parameters, dummy_context_mgr
 import numpy as np
 from kornia.augmentation import RandomAffine,\
     RandomCrop,\
@@ -42,12 +43,18 @@ atari_random_scores = dict(
     private_eye=24.9, qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
 )
 
+def channel_dropout(images, drop_prob, keep_last=True):
+    mask = torch.rand(images.shape[:2], device=images.device)
+    mask = (mask > drop_prob).float()
+    if keep_last:
+        mask[:, -1] = 1.
+    else:
+        present_frames = mask.sum(-1)
+        correction = torch.clamp(1 - present_frames, 0., 1.)
+        mask[:, -1] = mask[:, -1] + correction
+    images = images * mask[:, :, None, None]
+    return images
 
-class dummy_context_mgr:
-    def __enter__(self):
-        return None
-    def __exit__(self, exc_type, exc_value, traceback):
-        return False
 
 class AsyncRlEvalWandb(AsyncRlEval):
     def log_diagnostics(self, itr, sampler_itr, throttle_time):
@@ -284,6 +291,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             momentum_encoder=False,
             shared_encoder=False,
             padding='same',
+            frame_dropout=0,
+            keep_last_frame=True,
+            cosine_nce=False,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -296,6 +306,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.transforms = []
         self.eval_transforms = []
+
         for aug in augmentation:
             assert aug in ["affine", "crop", "rrc", "blur", "none"]
             if aug == "affine":
@@ -316,6 +327,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 transformation = eval_transformation = nn.Identity()
             self.transforms.append(transformation)
             self.eval_transforms.append(eval_transformation)
+
+        frame_dropout_fn = nn.Identity() if frame_dropout <= 0 else \
+            lambda x: channel_dropout(x, frame_dropout, keep_last_frame)
+        self.transforms.append(frame_dropout_fn)
+        self.eval_transforms.append(nn.Identity())
 
         self.dueling = dueling
         f, c, h, w = image_shape
@@ -510,17 +526,19 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                   buffer_names=["main"])
                 if self.global_local_nce:
                     self.global_local_nce = LocBufferedNCE(global_local_buffer_size,
-                                                           2**12,
+                                                           2**10,
                                                            buffer_names=["main"],
                                                            n_locs=self.pixels)
             else:
                 # This style of NCE can also be used for global-local with expand()
-                self.nce = BlockNCE(normalize=False)
+                self.nce = BlockNCE(normalize=cosine_nce)
 
         if self.detach_model:
             self.target_head = copy.deepcopy(self.head)
             for param in self.target_head.parameters():
                 param.requires_grad = False
+
+        print("Initialized model with {} parameters".format(count_parameters(self)))
 
     def do_global_nce(self, latents, target_latents, observation):
         global_latents = self.global_classifier(latents)
@@ -642,7 +660,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         if self.momentum_encoder:
             update_state_dict(self.nce_target_encoder,
-                              self.conv.state_dict(), 0.001)
+                              self.conv.state_dict(),
+                              0.001)
             if self.classifier_type != "bilinear":
                 # q_l1 is also bilinear for local
                 if self.local_nce and self.classifier_type != "q_l1":
@@ -672,6 +691,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
     @torch.no_grad()
     def transform(self, images, augment=False):
+
         images = images.float()/255. if images.dtype == torch.uint8 else images
         flat_images = images.reshape(-1, *images.shape[-3:])
         if augment:
@@ -727,7 +747,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             pred_latents = []
             input_obs = observation[0].flatten(1, 2)
             input_obs = self.transform(input_obs, True)
-
             latent = self.stem_forward(input_obs,
                                        prev_action[0],
                                        prev_reward[0])
@@ -736,7 +755,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  prev_reward[0],
                                                  logits=True))
             pred_latents.append(latent)
-
             if self.jumps > 0 or not self.detach_model:
                 if self.detach_model:
                     self.target_head.load_state_dict(self.head.state_dict())
