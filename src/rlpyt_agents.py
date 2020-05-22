@@ -103,12 +103,18 @@ class DQNSearchAgent(PizeroAgent):
         super().eval_mode(itr)
         self.search.set_eval()
         self.search.epsilon = self.distribution.epsilon
+        self.search.network.head.set_sampling(False)
 
     def sample_mode(self, itr):
         """Extend method to set epsilon for sampling (including annealing)."""
         super().sample_mode(itr)
         self.search.set_train()
         self.search.epsilon = self.distribution.epsilon
+        self.search.network.head.set_sampling(True)
+
+    def train_mode(self, itr):
+        super().train_mode(itr)
+        self.search.network.head.set_sampling(True)
 
     @torch.no_grad()
     def step(self, observation, prev_action, prev_reward):
