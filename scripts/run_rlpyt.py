@@ -92,6 +92,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["nce"] = args.nce
         config["model"]["encoder"] = args.encoder
         config["model"]["padding"] = args.padding
+        config["model"]["noisy_nets"] = args.noisy_nets
         config["model"]["momentum_encoder"] = args.momentum_encoder
         config["model"]["shared_encoder"] = args.shared_encoder
         config["model"]["local_nce"] = args.local_nce
@@ -223,6 +224,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["momentum_encoder"] = args.momentum_encoder
         config["model"]["shared_encoder"] = args.shared_encoder
         config["model"]["local_nce"] = args.local_nce
+        config["model"]["noisy_nets"] = args.noisy_nets
         config["model"]["global_nce"] = args.global_nce
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce

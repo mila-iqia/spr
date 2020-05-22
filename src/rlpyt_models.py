@@ -547,6 +547,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         print("Initialized model with {} parameters".format(count_parameters(self)))
 
+    def set_sampling(self, sampling):
+        if self.noisy:
+            self.head.set_sampling(sampling)
+
     def do_global_nce(self, latents, target_latents, observation):
         global_latents = self.global_classifier(latents)
         with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
@@ -748,7 +752,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
         if train:
-            self.train()
             log_pred_ps = []
             pred_reward = []
             pred_latents = []
@@ -813,7 +816,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             return p
 
     def initial_inference(self, obs, actions=None, logits=False):
-        self.eval()
         if len(obs.shape) == 5:
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, self.eval_augmentation)
@@ -857,6 +859,7 @@ class MLPHead(torch.nn.Module):
             linear = NoisyLinear
         else:
             linear = nn.Linear
+        self.noisy = noisy
         if hidden_size <= 0:
             hidden_size = input_channels*pixels
         self.linears = [linear(input_channels*pixels, hidden_size),
@@ -874,6 +877,11 @@ class MLPHead(torch.nn.Module):
     def reset_noise(self):
         for module in self.linears:
             module.reset_noise()
+
+    def set_sampling(self, sampling):
+        for module in self.linears:
+            module.sampling = sampling
+
 
 
 class DQNDistributionalHeadModel(torch.nn.Module):
@@ -907,6 +915,10 @@ class DQNDistributionalHeadModel(torch.nn.Module):
     def reset_noise(self):
         for module in self.linears:
             module.reset_noise()
+
+    def set_sampling(self, sampling):
+        for module in self.linears:
+            module.sampling = sampling
 
 
 class DQNDistributionalDuelingHeadModel(torch.nn.Module):
@@ -960,6 +972,10 @@ class DQNDistributionalDuelingHeadModel(torch.nn.Module):
         for module in self.linears:
             module.reset_noise()
 
+    def set_sampling(self, sampling):
+        for module in self.linears:
+            module.sampling = sampling
+
 
 class PizeroDistributionalHeadModel(torch.nn.Module):
     """An MLP head which reshapes output to [B, output_size, n_atoms]."""
@@ -997,6 +1013,10 @@ class PizeroDistributionalHeadModel(torch.nn.Module):
     def reset_noise(self):
         for module in self.linears:
             module.reset_noise()
+
+    def set_sampling(self, sampling):
+        for module in self.linears:
+            module.sampling = sampling
 
 
 class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
@@ -1096,6 +1116,7 @@ class NoisyLinear(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.std_init = std_init
+        self.sampling = True
         self.weight_mu = nn.Parameter(torch.empty(out_features, in_features))
         self.weight_sigma = nn.Parameter(torch.empty(out_features, in_features))
         self.register_buffer('weight_epsilon', torch.empty(out_features, in_features))
@@ -1123,7 +1144,12 @@ class NoisyLinear(nn.Module):
         self.bias_epsilon.copy_(epsilon_out)
 
     def forward(self, input):
-        if self.training:
+        # Self.training alone isn't a good-enough check, since we may need to
+        # activate .eval() during sampling even when we want to use noise
+        # (due to batchnorm, dropout, or similar).
+        # The extra "sampling" flag serves to override this behavior and causes
+        # noise to be used even when .eval() has been called.
+        if self.training or self.sampling:
             return F.linear(input, self.weight_mu + self.weight_sigma * self.weight_epsilon, self.bias_mu + self.bias_sigma * self.bias_epsilon)
         else:
             return F.linear(input, self.weight_mu, self.bias_mu)
