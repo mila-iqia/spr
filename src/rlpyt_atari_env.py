@@ -164,7 +164,7 @@ class AtariEnv(Env):
         """Max of last two frames; crop two rows; downsample by 2x."""
         self._get_screen(2)
         np.maximum(self._raw_frame_1, self._raw_frame_2, self._max_frame)
-        img = cv2.resize(self._max_frame, (self.imagesize, self.imagesize), cv2.INTER_NEAREST)
+        img = cv2.resize(self._max_frame, (self.imagesize, self.imagesize), cv2.INTER_AREA)
         if len(img.shape) == 2:
             img = img[np.newaxis]
         else:
@@ -190,13 +190,6 @@ class AtariEnv(Env):
         return lost_life
 
     def _life_reset(self):
-        self.ale.act(0)  # (advance from lost life state)
-        if self._has_fire:
-            # TODO: for sticky actions, make sure fire is actually pressed
-            self.ale.act(1)  # (e.g. needed in Breakout, not sure what others)
-        if self._has_up:
-            self.ale.act(2)  # (not sure if this is necessary, saw it somewhere)
-        self._lives = self.ale.lives()
         self._lives = self.ale.lives()
 
     ###########################################################################
