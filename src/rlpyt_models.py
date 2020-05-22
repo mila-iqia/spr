@@ -16,6 +16,7 @@ from src.model_trainer import ValueNetwork, TransitionModel, \
     NetworkOutput, from_categorical, ScaleGradient, init, \
     ResidualBlock, renormalize, FiLMTransitionModel, init_normalization
 from src.buffered_nce import BufferedNCE, LocBufferedNCE, BlockNCE
+from src.rlpyt_effnet import RLEffNet
 from src.utils import count_parameters, dummy_context_mgr
 import numpy as np
 from kornia.augmentation import RandomAffine,\
@@ -335,7 +336,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.dueling = dueling
         f, c, h, w = image_shape
-        assert encoder in ["repnet", "curl", "midsize", "nature"]
+        assert encoder in ["repnet", "curl", "midsize", "nature", "effnet"]
         if encoder == "repnet":
             self.conv = RepNet(f*c, norm_type=norm_type)
             self.pixels = int(np.floor(imagesize/16.))**2
@@ -362,6 +363,12 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             )
             self.hidden_size = 64
             self.pixels = int(np.ceil(imagesize/12.))**2
+        if encoder == "effnet":
+            self.conv = RLEffNet(imagesize,
+                                 in_channels=f*c,
+                                 norm_type=norm_type,)
+            self.hidden_size = self.conv.hidden_size
+            self.pixels = self.conv.pixels
 
         self.jumps = jumps
         self.detach_model = detach_model
@@ -691,7 +698,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
     @torch.no_grad()
     def transform(self, images, augment=False):
-
         images = images.float()/255. if images.dtype == torch.uint8 else images
         flat_images = images.reshape(-1, *images.shape[-3:])
         if augment:
@@ -742,6 +748,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
         if train:
+            self.train()
             log_pred_ps = []
             pred_reward = []
             pred_latents = []
@@ -806,6 +813,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             return p
 
     def initial_inference(self, obs, actions=None, logits=False):
+        self.eval()
         if len(obs.shape) == 5:
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, self.eval_augmentation)
