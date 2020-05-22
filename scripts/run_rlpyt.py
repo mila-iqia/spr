@@ -129,7 +129,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         sampler=sampler,
         n_steps=args.n_steps,
         log_interval_steps=1e4,
-        affinity=dict(cuda_idx=None),
+        affinity=dict(cuda_idx=cuda_idx),
         seed=args.seed
     )
     config = dict(game=game)
