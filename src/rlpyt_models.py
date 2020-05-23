@@ -935,7 +935,7 @@ class DQNDistributionalDuelingHeadModel(torch.nn.Module):
         super().__init__()
         linear = NoisyLinear if noisy else nn.Linear
         self.linears = [linear(pixels * input_channels, hidden_size),
-                        linear(hidden_size, output_size * n_atoms, bias=False),
+                        linear(hidden_size, output_size * n_atoms),
                         linear(pixels * input_channels, hidden_size),
                         linear(hidden_size, n_atoms)
                         ]
