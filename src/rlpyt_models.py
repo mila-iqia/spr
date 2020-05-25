@@ -295,6 +295,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             frame_dropout=0,
             keep_last_frame=True,
             cosine_nce=False,
+            no_rl_augmentation=False
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -308,22 +309,28 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.transforms = []
         self.eval_transforms = []
 
+        self.uses_augmentation = False
+        self.no_rl_augmentation = no_rl_augmentation
         for aug in augmentation:
             assert aug in ["affine", "crop", "rrc", "blur", "none"]
             if aug == "affine":
                 transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
                 eval_transformation = nn.Identity()
+                self.uses_augmentation = True
             elif aug == "crop":
                 transformation = RandomCrop((84, 84))
                 # Crashes if aug-prob not 1: use CenterCrop((84, 84)) or Resize((84, 84)) in that case.
                 eval_transformation = CenterCrop((84, 84))
+                self.uses_augmentation = True
                 imagesize = 84
             elif aug == "rrc":
                 transformation = RandomResizedCrop((100, 100), (0.8, 1))
                 eval_transformation = nn.Identity()
+                self.uses_augmentation = True
             elif aug == "blur":
                 transformation = GaussianBlur2d((5, 5), (1.5, 1.5))
                 eval_transformation = nn.Identity()
+                self.uses_augmentation = True
             else:
                 transformation = eval_transformation = nn.Identity()
             self.transforms.append(transformation)
@@ -331,6 +338,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         frame_dropout_fn = nn.Identity() if frame_dropout <= 0 else \
             lambda x: channel_dropout(x, frame_dropout, keep_last_frame)
+        self.uses_augmentation = self.uses_augmentation or frame_dropout > 0
         self.transforms.append(frame_dropout_fn)
         self.eval_transforms.append(nn.Identity())
 
@@ -508,6 +516,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     param.requires_grad = False
 
             elif not self.shared_encoder:
+                # Use a separate target encoder on the last frame only.
                 self.global_target_classifier = copy.deepcopy(self.global_target_classifier)
                 self.local_target_classifier = copy.deepcopy(self.local_target_classifier)
                 self.global_local_target_classifier = copy.deepcopy(self.global_local_target_classifier)
@@ -516,7 +525,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 else:
                     input_size = c
                 if encoder == "curl":
-                    self.nce_target_encoder = CurlEncoder(input_size, norm_type=norm_type)
+                    self.nce_target_encoder = CurlEncoder(input_size,
+                                                          norm_type=norm_type,
+                                                          padding=padding)
                 else:
                     self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
                                                            norm_type=norm_type)
@@ -784,7 +795,20 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                          logits=True))
 
             if self.use_nce:
-                nce_loss, nce_model_loss, nce_accs = self.do_nce(pred_latents, observation)
+                if self.no_rl_augmentation and self.uses_augmentation:
+                    pred_nce_latents = []
+                    input_obs = self.transform(input_obs, True)
+                    nce_latent = self.stem_forward(input_obs,
+                                               prev_action[0],
+                                               prev_reward[0])
+                    pred_nce_latents.append(nce_latent)
+                    for j in range(1, self.jumps + 1):
+                        nce_latent, pred_rew, _, _ = self.step(nce_latent, prev_action[j])
+                        nce_latent = ScaleGradient.apply(nce_latent, 0.5)
+                        pred_nce_latents.append(nce_latent)
+                else:
+                    pred_nce_latents = pred_latents
+                nce_loss, nce_model_loss, nce_accs = self.do_nce(pred_nce_latents, observation)
             else:
                 nce_loss = nce_model_loss = nce_accs = torch.tensor(0.)
 
@@ -1111,8 +1135,9 @@ class CurlEncoder(nn.Module):
 
 
 class NoisyLinear(nn.Module):
-    def __init__(self, in_features, out_features, std_init=0.1):
+    def __init__(self, in_features, out_features, std_init=0.1, bias=True):
         super(NoisyLinear, self).__init__()
+        self.bias = bias
         self.in_features = in_features
         self.out_features = out_features
         self.std_init = std_init
@@ -1120,8 +1145,8 @@ class NoisyLinear(nn.Module):
         self.weight_mu = nn.Parameter(torch.empty(out_features, in_features))
         self.weight_sigma = nn.Parameter(torch.empty(out_features, in_features))
         self.register_buffer('weight_epsilon', torch.empty(out_features, in_features))
-        self.bias_mu = nn.Parameter(torch.empty(out_features))
-        self.bias_sigma = nn.Parameter(torch.empty(out_features))
+        self.bias_mu = nn.Parameter(torch.empty(out_features), requires_grad=bias)
+        self.bias_sigma = nn.Parameter(torch.empty(out_features), requires_grad=bias)
         self.register_buffer('bias_epsilon', torch.empty(out_features))
         self.reset_parameters()
         self.reset_noise()
@@ -1130,8 +1155,12 @@ class NoisyLinear(nn.Module):
         mu_range = 1 / np.sqrt(self.in_features)
         self.weight_mu.data.uniform_(-mu_range, mu_range)
         self.weight_sigma.data.fill_(self.std_init / np.sqrt(self.in_features))
-        self.bias_mu.data.uniform_(-mu_range, mu_range)
-        self.bias_sigma.data.fill_(self.std_init / np.sqrt(self.out_features))
+        if not self.bias:
+            self.bias_mu.fill_(0)
+            self.bias_sigma.fill_(0)
+        else:
+            self.bias_sigma.data.fill_(self.std_init / np.sqrt(self.out_features))
+            self.bias_mu.data.uniform_(-mu_range, mu_range)
 
     def _scale_noise(self, size):
         x = torch.randn(size)
@@ -1150,7 +1179,8 @@ class NoisyLinear(nn.Module):
         # The extra "sampling" flag serves to override this behavior and causes
         # noise to be used even when .eval() has been called.
         if self.training or self.sampling:
-            return F.linear(input, self.weight_mu + self.weight_sigma * self.weight_epsilon, self.bias_mu + self.bias_sigma * self.bias_epsilon)
+            return F.linear(input, self.weight_mu + self.weight_sigma * self.weight_epsilon,
+                            self.bias_mu + self.bias_sigma * self.bias_epsilon)
         else:
             return F.linear(input, self.weight_mu, self.bias_mu)
 
