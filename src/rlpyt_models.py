@@ -767,7 +767,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             pred_reward = []
             pred_latents = []
             input_obs = observation[0].flatten(1, 2)
-            input_obs = self.transform(input_obs, True)
+            input_obs = self.transform(input_obs, not self.no_rl_augmentation)
             latent = self.stem_forward(input_obs,
                                        prev_action[0],
                                        prev_reward[0])
