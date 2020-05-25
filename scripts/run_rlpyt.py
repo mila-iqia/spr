@@ -107,6 +107,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["time_contrastive"] = args.time_contrastive
         config["model"]["aug_prob"] = args.aug_prob
         config["model"]["target_augmentation"] = args.target_augmentation
+        config["model"]["no_rl_augmentation"] = args.no_rl_augmentation
         config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
         config["model"]["classifier"] = args.classifier
@@ -230,6 +231,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["cosine_nce"] = args.cosine_nce
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["no_rl_augmentation"] = args.no_rl_augmentation
         config["model"]["frame_dropout"] = args.frame_dropout
         config["model"]["keep_last_frame"] = args.keep_last_frame
         config["model"]["time_contrastive"] = args.time_contrastive
@@ -335,6 +337,7 @@ if __name__ == "__main__":
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
                         choices=["none", "rrc", "affine", "crop", "blur"],
                         help='Style of augmentation')
+    parser.add_argument('--no-rl-augmentation', type=int, default=0, help='Do a separate RL update without aug')
     parser.add_argument('--target-augmentation', type=int, default=0, help='Use augmentation on inputs to target networks')
     parser.add_argument('--eval-augmentation', type=int, default=0, help='Use augmentation on inputs at evaluation time')
     parser.add_argument('--reward-loss-weight', type=float, default=1.)
