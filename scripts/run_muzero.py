@@ -36,10 +36,14 @@ def build_and_train(game="ms_pacman", run_ID=0, args=None):
         collectorCls = DbGpuResetCollector
         runnerCls = AsyncRlEvalWandb
 
-    if args.n_gpu == 1:
+    if args.n_gpu <= 1:
         runnerCls = MinibatchRlEvalWandb
 
-    affinity = make_affinity(**affinity_dict)
+    if args.n_gpu == 0:
+        affinity = dict(cuda_idx=None)
+        samplerCls = SerialSampler
+    else:
+        affinity = make_affinity(**affinity_dict)
 
     print(affinity)
     wandb.config.update(affinity_dict)
