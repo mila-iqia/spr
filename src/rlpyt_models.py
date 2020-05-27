@@ -16,7 +16,7 @@ from src.model_trainer import ValueNetwork, TransitionModel, \
     NetworkOutput, from_categorical, ScaleGradient, init, \
     ResidualBlock, renormalize, FiLMTransitionModel, init_normalization
 from src.buffered_nce import BufferedNCE, LocBufferedNCE, BlockNCE
-from src.rlpyt_effnet import RLEffNet
+from src.rlpyt_effnet import RLEffNet, EffnetTransitionModel
 from src.utils import count_parameters, dummy_context_mgr
 import numpy as np
 from kornia.augmentation import RandomAffine,\
@@ -295,7 +295,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             frame_dropout=0,
             keep_last_frame=True,
             cosine_nce=False,
-            no_rl_augmentation=False
+            no_rl_augmentation=False,
+            transition_model="standard",
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -410,8 +411,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                        pixels=self.pixels,
                                                        noisy=self.noisy)
 
-        if film:
+        if transition_model == "film":
             dynamics_model = FiLMTransitionModel
+        elif transition_model == "effnet":
+            dynamics_model = EffnetTransitionModel
         else:
             dynamics_model = TransitionModel
 
@@ -528,6 +531,14 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     self.nce_target_encoder = CurlEncoder(input_size,
                                                           norm_type=norm_type,
                                                           padding=padding)
+                elif encoder == "nature":
+                    self.nce_target_encoder = Conv2dModel(in_channels=input_size,
+                                                          channels=[32, 64, 64],
+                                                          kernel_sizes=[8, 4, 3],
+                                                          strides=[4, 2, 1],
+                                                          paddings=[0, 0, 0],
+                                                          use_maxpool=False,
+                                                      )
                 else:
                     self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
                                                            norm_type=norm_type)
@@ -893,6 +904,8 @@ class MLPHead(torch.nn.Module):
                   nn.ReLU(),
                   self.linears[1]]
         self.network = nn.Sequential(*layers)
+        if not noisy:
+            self.network.apply(weights_init)
         self._output_size = output_size
 
     def forward(self, input):
@@ -905,7 +918,6 @@ class MLPHead(torch.nn.Module):
     def set_sampling(self, sampling):
         for module in self.linears:
             module.sampling = sampling
-
 
 
 class DQNDistributionalHeadModel(torch.nn.Module):

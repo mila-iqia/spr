@@ -1,12 +1,16 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import copy
+from src.model_trainer import ValueNetwork, renormalize
 
 try:
-    from geffnet.gen_efficientnet import _gen_efficientnet_condconv, _gen_efficientnet
+    from geffnet.gen_efficientnet import _gen_efficientnet_condconv, _gen_efficientnet, _create_model
+    from geffnet.efficientnet_builder import decode_arch_def, round_channels, resolve_act_layer, resolve_bn_args
 except:
     # Do nothing; will crash on its own if need be, and don't want to force
     # installation of geffnet for normal workflows.
+    print("Failed to import effnet code")
     pass
 
 
@@ -70,3 +74,80 @@ class RLEffNet(nn.Module):
     def forward(self, x):
         return self.network(x)
 
+
+class EffnetTransitionModel(nn.Module):
+    def __init__(self,
+                 channels,
+                 num_actions,
+                 action_dim=32,
+                 args=None,
+                 blocks=16,
+                 pixels=36,
+                 limit=300,
+                 norm_type="bn",
+                 renormalize=True,
+                 drop_connect_rate=0.,
+                 hidden_size=-1,
+                 drop_rate=0.,):
+        super().__init__()
+        self.hidden_size = channels
+        self.action_dim = action_dim
+        self.args = args
+        self.renormalize = renormalize
+        self.action_embedding = nn.Embedding(num_actions, action_dim)
+
+        if norm_type == "bn":
+            norm = nn.BatchNorm2d
+        elif norm_type == "in":
+            norm = nn.InstanceNorm2d
+        elif norm_type == "ln":
+            norm = curried_groupnorm
+        elif norm_type == "none":
+            norm = curried_identity
+
+        self.model = generate_condconv_resnet(channels+action_dim,
+                                              blocks,
+                                              norm_layer=norm,
+                                              drop_connect_rate=drop_connect_rate,
+                                              drop_rate=drop_rate)
+
+        self.reward_predictor = ValueNetwork(channels,
+                                             pixels=pixels,
+                                             limit=limit,
+                                             norm_type="bn" if
+                                             norm_type == "bn" else "none")
+        self.train()
+
+    def forward(self, x, action):
+        action_emb = self.action_embedding(action)
+        action_emb = action_emb[:, :, None, None].expand(-1, -1, x.shape[-2], x.shape[-1])
+        stacked_image = torch.cat([x, action_emb], 1)
+        next_state = self.model(stacked_image)
+        next_state = next_state[:, :-self.action_dim]
+        if self.renormalize:
+            next_state = renormalize(next_state, 1)
+        next_reward = self.reward_predictor(next_state)
+        return next_state, next_reward
+
+
+def generate_condconv_resnet(hidden_size,
+                             blocks,
+                             experts_multiplier=1,
+                             **kwargs):
+    """Creates an efficientnet-condconv model."""
+    arch_def = [
+      ['ir_r{}_k3_s1_e4_c{}_se0.25_cc{}'.format(blocks, hidden_size, 4*experts_multiplier)],
+    ]
+    model_kwargs = dict(
+        block_args=decode_arch_def(arch_def, 1., experts_multiplier=experts_multiplier),
+        num_features=round_channels(1280, 1., 8, None),
+        stem_size=hidden_size,
+        channel_multiplier=1.,
+        act_layer=resolve_act_layer(kwargs, 'swish'),
+        norm_kwargs=resolve_bn_args(kwargs),
+        **kwargs,
+    )
+    model = _create_model(model_kwargs, 'efficientnet_cc_b0_4e', False)
+    resnet = copy.deepcopy(model.blocks)  # only part we want
+    del model  # Scratch the rest for memory
+    return resnet

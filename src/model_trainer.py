@@ -901,7 +901,7 @@ class QNetwork(nn.Module):
 class ValueNetwork(nn.Module):
     def __init__(self,
                  input_channels,
-                 hidden_size=128,
+                 hidden_size=1,
                  pixels=36,
                  limit=300,
                  norm_type="bn"):
@@ -925,7 +925,7 @@ class PolicyNetwork(nn.Module):
     def __init__(self,
                  input_channels,
                  num_actions,
-                 hidden_size=128,
+                 hidden_size=2,
                  pixels=36,
                  norm_type="bn"):
         super().__init__()
