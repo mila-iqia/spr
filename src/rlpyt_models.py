@@ -348,19 +348,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         assert encoder in ["repnet", "curl", "midsize", "nature", "effnet"]
         if encoder == "repnet":
             self.conv = RepNet(f*c, norm_type=norm_type)
-            self.pixels = int(np.floor(imagesize/16.))**2
-            self.hidden_size = 256
         if encoder == "curl":
             self.conv = CurlEncoder(f*c, norm_type=norm_type, padding=padding)
-            if padding == 'same':
-                self.pixels = int(np.ceil(imagesize/25.))**2
-            elif padding == 'valid':
-                self.pixels = int(np.floor(imagesize/25.))**2
-            self.hidden_size = 64
         if encoder == "midsize":
             self.conv = SmallEncoder(256, f*c, norm_type=norm_type)
-            self.pixels = int(np.floor(imagesize/16.))**2
-            self.hidden_size = 256
         if encoder == "nature":
             self.conv = Conv2dModel(
                 in_channels=f*c,
@@ -370,14 +361,16 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 paddings=[0, 0, 0],
                 use_maxpool=False,
             )
-            self.hidden_size = 64
-            self.pixels = int(np.ceil(imagesize/12.))**2
         if encoder == "effnet":
             self.conv = RLEffNet(imagesize,
                                  in_channels=f*c,
                                  norm_type=norm_type,)
-            self.hidden_size = self.conv.hidden_size
-            self.pixels = self.conv.pixels
+
+        fake_input = torch.zeros(1, f*c, imagesize, imagesize)
+        fake_output = self.conv(fake_input)
+        self.hidden_size = fake_output.shape[1]
+        self.pixels = fake_output.shape[-1]*fake_output.shape[-2]
+        print("Spatial latent size is {}".format(fake_output.shape[1:]))
 
         self.jumps = jumps
         self.detach_model = detach_model
