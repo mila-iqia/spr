@@ -51,11 +51,12 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['eval_env']['imagesize'] = args.eval_imagesize
     config["model"]["dueling"] = bool(args.dueling)
     config["algo"]["min_steps_learn"] = 1600
-    config["algo"]["n_step_return"] = 20
+    config["algo"]["n_step_return"] = args.n_step
     config["algo"]["batch_size"] = args.batch_size
     config["algo"]["learning_rate"] = 0.0001
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = args.target_update_interval
+    config['algo']['target_update_tau'] = args.target_update_tau
     config['algo']['eps_steps'] = int(5e4)
     config["algo"]["clip_grad_norm"] = args.max_grad_norm
     config['algo']['pri_alpha'] = 0.5
@@ -91,6 +92,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["film"] = args.film
         config["model"]["nce"] = args.nce
         config["model"]["encoder"] = args.encoder
+        config["model"]["transition_model"] = args.transition_model
         config["model"]["padding"] = args.padding
         config["model"]["noisy_nets"] = args.noisy_nets
         config["model"]["momentum_encoder"] = args.momentum_encoder
@@ -190,7 +192,9 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config["algo"]["batch_size"] = args.batch_size
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = args.target_update_interval
+    config['algo']['target_update_tau'] = args.target_update_tau
     config["algo"]["clip_grad_norm"] = args.max_grad_norm
+    config["algo"]["n_step_return"] = args.n_step
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
     # config['optim']['eps'] = 0.00015
@@ -221,6 +225,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["film"] = args.film
         config["model"]["nce"] = args.nce
         config["model"]["encoder"] = args.encoder
+        config["model"]["transition_model"] = args.transition_model
         config["model"]["norm_type"] = args.norm_type
         config["model"]["momentum_encoder"] = args.momentum_encoder
         config["model"]["shared_encoder"] = args.shared_encoder
@@ -308,6 +313,7 @@ if __name__ == "__main__":
     parser.add_argument('--imagesize', type=int, default=100)
     parser.add_argument('--n-steps', type=int, default=100000)
     parser.add_argument('--target-update-interval', type=int, default=2000)
+    parser.add_argument('--target-update-tau', type=float, default=1.)
     parser.add_argument('--batch-b', type=int, default=1)
     parser.add_argument('--eval-imagesize', type=int, default=100)
     parser.add_argument('--beluga', action="store_true")
@@ -315,9 +321,11 @@ if __name__ == "__main__":
     parser.add_argument('--dueling', type=int, default=1)
     parser.add_argument('--replay-ratio', type=int, default=2)
     parser.add_argument('--dynamics-blocks', type=int, default=2)
+    parser.add_argument('--n-step', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=64)
+    parser.add_argument('--transition-model', type=str, default='standard', choices=["standard", "film", "effnet"], help='Type of transition model to use')
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
-    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature", "effnet"], help='Normalization')
+    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature", "effnet"], help='Type of encoder to use')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--frame-dropout', type=float, default=0., help='Probability to dropout frame in framestack.')
