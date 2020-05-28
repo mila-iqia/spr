@@ -540,6 +540,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                           paddings=[0, 0, 0],
                                                           use_maxpool=False,
                                                       )
+                elif encoder == "effnet":
+                    self.nce_target_encoder = RLEffNet(imagesize,
+                                                       in_channels=input_size,
+                                                       norm_type=norm_type,)
                 else:
                     self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
                                                            norm_type=norm_type)
