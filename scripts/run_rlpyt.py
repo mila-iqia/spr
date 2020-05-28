@@ -117,6 +117,8 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["algo"]["reward_loss_weight"] = args.reward_loss_weight
         config["algo"]["model_nce_weight"] = args.model_nce_weight
         config["algo"]["nce_loss_weight"] = args.nce_loss_weight
+        config["algo"]["nce_loss_weight_final"] = args.nce_loss_weight_final
+        config["algo"]["nce_loss_decay_steps"] = args.nce_loss_decay_steps
         config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
         config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
@@ -249,6 +251,8 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["algo"]["reward_loss_weight"] = args.reward_loss_weight
         config["algo"]["model_nce_weight"] = args.model_nce_weight
         config["algo"]["nce_loss_weight"] = args.nce_loss_weight
+        config["algo"]["nce_loss_weight_final"] = args.nce_loss_weight_final
+        config["algo"]["nce_loss_decay_steps"] = args.nce_loss_decay_steps
         config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
         config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
@@ -325,7 +329,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--transition-model', type=str, default='standard', choices=["standard", "film", "effnet"], help='Type of transition model to use')
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
-    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature", "effnet"], help='Type of encoder to use')
+    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature", "effnet", "bignature"], help='Type of encoder to use')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--frame-dropout', type=float, default=0., help='Probability to dropout frame in framestack.')
@@ -354,6 +358,8 @@ if __name__ == "__main__":
     parser.add_argument('--amortization-decay-constant', type=float, default=0.)
     parser.add_argument('--model-nce-weight', type=float, default=1.)
     parser.add_argument('--nce-loss-weight', type=float, default=1.)
+    parser.add_argument('--nce-loss-weight-final', type=float, default=-1.)
+    parser.add_argument('--nce-loss-decay-steps', type=float, default=50000)
     parser.add_argument('--detach-model', type=int, default=1)
     parser.add_argument('--time-contrastive', type=int, default=0)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)

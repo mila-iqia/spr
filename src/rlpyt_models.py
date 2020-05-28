@@ -345,14 +345,13 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.dueling = dueling
         f, c, h, w = image_shape
-        assert encoder in ["repnet", "curl", "midsize", "nature", "effnet"]
         if encoder == "repnet":
             self.conv = RepNet(f*c, norm_type=norm_type)
-        if encoder == "curl":
+        elif encoder == "curl":
             self.conv = CurlEncoder(f*c, norm_type=norm_type, padding=padding)
-        if encoder == "midsize":
+        elif encoder == "midsize":
             self.conv = SmallEncoder(256, f*c, norm_type=norm_type)
-        if encoder == "nature":
+        elif encoder == "nature":
             self.conv = Conv2dModel(
                 in_channels=f*c,
                 channels=[32, 64, 64],
@@ -361,7 +360,16 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 paddings=[0, 0, 0],
                 use_maxpool=False,
             )
-        if encoder == "effnet":
+        elif encoder == "bignature":
+            self.conv = Conv2dModel(
+                in_channels=f*c,
+                channels=[32, 64, 128, 128],
+                kernel_sizes=[8, 4, 3, 1],
+                strides=[4, 2, 1, 1],
+                paddings=[0, 0, 0, 1],
+                use_maxpool=False,
+            )
+        elif encoder == "effnet":
             self.conv = RLEffNet(imagesize,
                                  in_channels=f*c,
                                  norm_type=norm_type,)
@@ -1192,8 +1200,8 @@ class NoisyLinear(nn.Module):
 
 class SmallEncoder(nn.Module):
     def __init__(self,
-                 feature_size,
-                 input_channels,
+                 feature_size=256,
+                 input_channels=4,
                  norm_type="bn"):
         super().__init__()
         self.feature_size = feature_size
