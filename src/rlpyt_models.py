@@ -540,6 +540,14 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                           paddings=[0, 0, 0],
                                                           use_maxpool=False,
                                                       )
+                elif encoder == "bignature":
+                    self.nce_target_encoder = Conv2dModel(in_channels=input_size,
+                                                          channels=[32, 64, 128, 128],
+                                                          kernel_sizes=[8, 4, 3, 1],
+                                                          strides=[4, 2, 1, 1],
+                                                          paddings=[0, 0, 0, 1],
+                                                          use_maxpool=False,
+                                                         )
                 elif encoder == "effnet":
                     self.nce_target_encoder = RLEffNet(imagesize,
                                                        in_channels=input_size,
