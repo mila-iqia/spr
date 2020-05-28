@@ -96,6 +96,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["padding"] = args.padding
         config["model"]["noisy_nets"] = args.noisy_nets
         config["model"]["momentum_encoder"] = args.momentum_encoder
+        config["model"]["target_encoder_sn"] = args.target_encoder_sn
         config["model"]["shared_encoder"] = args.shared_encoder
         config["model"]["local_nce"] = args.local_nce
         config["model"]["global_nce"] = args.global_nce
@@ -230,6 +231,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["transition_model"] = args.transition_model
         config["model"]["norm_type"] = args.norm_type
         config["model"]["momentum_encoder"] = args.momentum_encoder
+        config["model"]["target_encoder_sn"] = args.target_encoder_sn
         config["model"]["shared_encoder"] = args.shared_encoder
         config["model"]["local_nce"] = args.local_nce
         config["model"]["noisy_nets"] = args.noisy_nets
@@ -339,6 +341,7 @@ if __name__ == "__main__":
     parser.add_argument('--cosine-nce', type=int, default=0)
     parser.add_argument('--buffered-nce', type=int, default=0)
     parser.add_argument('--momentum-encoder', type=int, default=0)
+    parser.add_argument('--target-encoder-sn', type=int, default=0)
     parser.add_argument('--shared-encoder', type=int, default=0)
     parser.add_argument('--local-nce', type=int, default=0)
     parser.add_argument('--global-nce', type=int, default=0)

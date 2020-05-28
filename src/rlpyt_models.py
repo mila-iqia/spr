@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+from torch.nn.utils import spectral_norm
 
 from rlpyt.models.dqn.atari_catdqn_model import DistributionalHeadModel
 from rlpyt.models.dqn.dueling import DistributionalDuelingHeadModel
@@ -297,6 +298,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             cosine_nce=False,
             no_rl_augmentation=False,
             transition_model="standard",
+            target_encoder_sn=False,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -366,7 +368,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 channels=[32, 64, 128, 128],
                 kernel_sizes=[8, 4, 3, 1],
                 strides=[4, 2, 1, 1],
-                paddings=[0, 0, 0, 1],
+                paddings=[0, 0, 0, 0],
                 use_maxpool=False,
             )
         elif encoder == "effnet":
@@ -440,6 +442,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.shared_encoder = shared_encoder
             assert self.local_nce or self.global_nce or self.global_local_nce
             assert not (self.shared_encoder and self.momentum_encoder)
+            assert not (target_encoder_sn and self.momentum_encoder)
 
             # in case someone tries something silly like --local-nce 2
             self.num_nces = int(bool(self.local_nce)) + \
@@ -545,7 +548,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                           channels=[32, 64, 128, 128],
                                                           kernel_sizes=[8, 4, 3, 1],
                                                           strides=[4, 2, 1, 1],
-                                                          paddings=[0, 0, 0, 1],
+                                                          paddings=[0, 0, 0, 0],
                                                           use_maxpool=False,
                                                          )
                 elif encoder == "effnet":
@@ -555,8 +558,21 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 else:
                     self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
                                                            norm_type=norm_type)
+
             elif self.shared_encoder:
                 self.nce_target_encoder = self.conv
+
+            if target_encoder_sn:
+                for module in (list(self.nce_target_encoder.modules())
+                             + list(self.global_classifier.modules())
+                             + list(self.global_target_classifier.modules())
+                             + list(self.global_local_classifier.modules())
+                             + list(self.global_local_target_classifier.modules())
+                             + list(self.local_classifier.modules())
+                             + list(self.local_target_classifier.modules())
+                              ):
+                    if hasattr(module, "weight"):
+                        spectral_norm(module)
 
             if self.buffered_nce:
                 if self.local_nce or self.global_local_nce:
