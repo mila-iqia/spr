@@ -6,6 +6,7 @@ from collections import namedtuple
 from rlpyt.algos.dqn.cat_dqn import CategoricalDQN
 from rlpyt.utils.tensor import select_at_indexes, valid_mean
 from rlpyt.algos.utils import valid_from_done
+from rlpyt.utils.logging import logger
 from src.rlpyt_buffer import AsyncPrioritizedSequenceReplayFrameBufferExtended, \
     AsyncUniformSequenceReplayFrameBufferExtended
 from src.model_trainer import from_categorical, to_categorical
@@ -146,17 +147,29 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                  model_rl_weight=1.,
                  reward_loss_weight=1.,
                  model_nce_weight=1.,
+                 nce_loss_weight_final=-1,
+                 nce_loss_decay_steps=50000,
                  amortization_loss_weight=1.,
                  amortization_decay_constant=0.,
                  **kwargs):
         super().__init__(**kwargs)
         self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy
         self.nce_loss_weight = nce_loss_weight
+        self.nce_loss_weight_initial = nce_loss_weight
+        self.nce_loss_weight_final = nce_loss_weight_final
+        self.nce_loss_decay_steps = nce_loss_decay_steps
         self.model_nce_weight = model_nce_weight
         self.reward_loss_weight = reward_loss_weight
         self.model_rl_weight = model_rl_weight
         self.amortization_loss_weight = amortization_loss_weight
         self.amortization_decay_constant = amortization_decay_constant
+
+    def update_nce_loss_weight(self):
+        prog = min(1, max(0, self.agent.itr - self.min_steps_learn) / (self.nce_loss_decay_steps - self.min_steps_learn))
+        self.nce_loss_weight = prog * self.nce_loss_weight_final + (1 - prog) * self.nce_loss_weight_initial
+        if self.agent.itr % (self.nce_loss_decay_steps // 10) == 0:
+            logger.log("Agent at itr {}, NCE loss weight {}".format(self.update_counter, self.nce_loss_weight) +
+                " (min_itr: {}, max_itr: {})".format(self.min_steps_learn, self.nce_loss_decay_steps))
 
     def initialize_replay_buffer(self, examples, batch_spec, async_=False):
         example_to_buffer = ModelSamplesToBuffer(
@@ -265,6 +278,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             self.update_counter += 1
             if self.update_counter % self.target_update_interval == 0:
                 self.agent.update_target(self.target_update_tau)
+            if self.nce_loss_weight_final >= 0:
+                self.update_nce_loss_weight()
         self.update_itr_hyperparams(itr)
         return opt_info
 
