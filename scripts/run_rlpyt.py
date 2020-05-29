@@ -37,6 +37,7 @@ from src.rlpyt_control_model import AtariCatDqnModel, CategoricalDQN
 import torch
 import numpy as np
 
+
 def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach_model=1, args=None, control=False):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -50,7 +51,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['env']['imagesize'] = args.imagesize
     config['eval_env']['imagesize'] = args.eval_imagesize
     config["model"]["dueling"] = bool(args.dueling)
-    config["algo"]["min_steps_learn"] = 1600
+    config["algo"]["min_steps_learn"] = 2000
     config["algo"]["n_step_return"] = args.n_step
     config["algo"]["batch_size"] = args.batch_size
     config["algo"]["learning_rate"] = 0.0001
@@ -132,7 +133,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         agent=agent,
         sampler=sampler,
         n_steps=args.n_steps,
-        log_interval_steps=1e4,
+        log_interval_steps=1e5,
         affinity=dict(cuda_idx=cuda_idx),
         seed=args.seed
     )
@@ -303,7 +304,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='ms_pacman')
     parser.add_argument('--n-gpu', type=int, default=4)
-    parser.add_argument('--debug', action="store_true")
+    parser.add_argument('--der', action="store_true")
     parser.add_argument('--control', action="store_true")
     parser.add_argument('--async-sample', action="store_true")
     parser.add_argument('--learn-model', action="store_true")
@@ -386,9 +387,9 @@ if __name__ == "__main__":
         args.momentum_encoder = 1
         args.buffered_nce = 0
 
-    wandb.init(project='rlpyt', entity='abs-world-models', config=args, notes='NCE / classifier fixes')
+    wandb.init(project='rlpyt', entity='abs-world-models', config=args, tags=['1M steps run'])
     wandb.config.update(vars(args))
-    if args.debug:
+    if args.der:
         debug_build_and_train(game=args.game,
                               cuda_idx=args.debug_cuda_idx,
                               model=args.learn_model,
