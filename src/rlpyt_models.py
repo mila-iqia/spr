@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+from torch.nn.utils import spectral_norm
 
 from rlpyt.models.dqn.atari_catdqn_model import DistributionalHeadModel
 from rlpyt.models.dqn.dueling import DistributionalDuelingHeadModel
@@ -297,6 +298,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             cosine_nce=False,
             no_rl_augmentation=False,
             transition_model="standard",
+            target_encoder_sn=False,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -345,23 +347,13 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.dueling = dueling
         f, c, h, w = image_shape
-        assert encoder in ["repnet", "curl", "midsize", "nature", "effnet"]
         if encoder == "repnet":
             self.conv = RepNet(f*c, norm_type=norm_type)
-            self.pixels = int(np.floor(imagesize/16.))**2
-            self.hidden_size = 256
-        if encoder == "curl":
+        elif encoder == "curl":
             self.conv = CurlEncoder(f*c, norm_type=norm_type, padding=padding)
-            if padding == 'same':
-                self.pixels = int(np.ceil(imagesize/25.))**2
-            elif padding == 'valid':
-                self.pixels = int(np.floor(imagesize/25.))**2
-            self.hidden_size = 64
-        if encoder == "midsize":
+        elif encoder == "midsize":
             self.conv = SmallEncoder(256, f*c, norm_type=norm_type)
-            self.pixels = int(np.floor(imagesize/16.))**2
-            self.hidden_size = 256
-        if encoder == "nature":
+        elif encoder == "nature":
             self.conv = Conv2dModel(
                 in_channels=f*c,
                 channels=[32, 64, 64],
@@ -370,14 +362,25 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 paddings=[0, 0, 0],
                 use_maxpool=False,
             )
-            self.hidden_size = 64
-            self.pixels = int(np.ceil(imagesize/12.))**2
-        if encoder == "effnet":
+        elif encoder == "bignature":
+            self.conv = Conv2dModel(
+                in_channels=f*c,
+                channels=[32, 64, 128, 128],
+                kernel_sizes=[8, 4, 3, 1],
+                strides=[4, 2, 1, 1],
+                paddings=[0, 0, 0, 0],
+                use_maxpool=False,
+            )
+        elif encoder == "effnet":
             self.conv = RLEffNet(imagesize,
                                  in_channels=f*c,
                                  norm_type=norm_type,)
-            self.hidden_size = self.conv.hidden_size
-            self.pixels = self.conv.pixels
+
+        fake_input = torch.zeros(1, f*c, imagesize, imagesize)
+        fake_output = self.conv(fake_input)
+        self.hidden_size = fake_output.shape[1]
+        self.pixels = fake_output.shape[-1]*fake_output.shape[-2]
+        print("Spatial latent size is {}".format(fake_output.shape[1:]))
 
         self.jumps = jumps
         self.detach_model = detach_model
@@ -439,6 +442,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.shared_encoder = shared_encoder
             assert self.local_nce or self.global_nce or self.global_local_nce
             assert not (self.shared_encoder and self.momentum_encoder)
+            assert not (target_encoder_sn and self.momentum_encoder)
 
             # in case someone tries something silly like --local-nce 2
             self.num_nces = int(bool(self.local_nce)) + \
@@ -539,11 +543,36 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                           paddings=[0, 0, 0],
                                                           use_maxpool=False,
                                                       )
+                elif encoder == "bignature":
+                    self.nce_target_encoder = Conv2dModel(in_channels=input_size,
+                                                          channels=[32, 64, 128, 128],
+                                                          kernel_sizes=[8, 4, 3, 1],
+                                                          strides=[4, 2, 1, 1],
+                                                          paddings=[0, 0, 0, 0],
+                                                          use_maxpool=False,
+                                                         )
+                elif encoder == "effnet":
+                    self.nce_target_encoder = RLEffNet(imagesize,
+                                                       in_channels=input_size,
+                                                       norm_type=norm_type,)
                 else:
                     self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
                                                            norm_type=norm_type)
+
             elif self.shared_encoder:
                 self.nce_target_encoder = self.conv
+
+            if target_encoder_sn:
+                for module in (list(self.nce_target_encoder.modules())
+                             + list(self.global_classifier.modules())
+                             + list(self.global_target_classifier.modules())
+                             + list(self.global_local_classifier.modules())
+                             + list(self.global_local_target_classifier.modules())
+                             + list(self.local_classifier.modules())
+                             + list(self.local_target_classifier.modules())
+                              ):
+                    if hasattr(module, "weight"):
+                        spectral_norm(module)
 
             if self.buffered_nce:
                 if self.local_nce or self.global_local_nce:
@@ -1199,8 +1228,8 @@ class NoisyLinear(nn.Module):
 
 class SmallEncoder(nn.Module):
     def __init__(self,
-                 feature_size,
-                 input_channels,
+                 feature_size=256,
+                 input_channels=4,
                  norm_type="bn"):
         super().__init__()
         self.feature_size = feature_size
