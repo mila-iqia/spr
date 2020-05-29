@@ -66,11 +66,6 @@ class RLEffNet(nn.Module):
                                      model.act1,
                                      model.blocks)
 
-        fake_input = torch.zeros(1, in_channels, imagesize, imagesize)
-        fake_output = self.network(fake_input)
-        self.hidden_size = fake_output.shape[1]
-        self.pixels = fake_output.shape[-1]*fake_output.shape[-2]
-
     def forward(self, x):
         return self.network(x)
 
