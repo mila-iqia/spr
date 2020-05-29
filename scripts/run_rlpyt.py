@@ -25,10 +25,12 @@ from rlpyt.runners.minibatch_rl import MinibatchRl as MinibatchRl
 from rlpyt.utils.launching.affinity import encode_affinity, make_affinity, quick_affinity_code, affinity_from_code
 from rlpyt.utils.logging.context import logger_context
 import wandb
+import os
 import psutil
 
 from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel, \
-    SyncRlEvalWandb, SerialEvalCollectorFixed
+    SyncRlEvalWandb
+from src.sampler import SerialEvalCollectorFixed, OneToOneGpuEvalCollector
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
 from src.rlpyt_agents import DQNSearchAgent
 from src.rlpyt_atari_env import AtariEnv
@@ -130,13 +132,24 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
+    affinity_dict = dict(
+        n_cpu_core=min(args.batch_b, 6),
+        n_gpu=1,
+        n_socket=1,
+        gpu_per_run=1,
+    )
+    affinity = make_affinity(**affinity_dict)
+
+    if args.beluga:
+        affinity = convert_affinity(affinity, psutil.Process().cpu_affinity())
+
     runner = MinibatchRlEvalWandb(
         algo=algo,
         agent=agent,
         sampler=sampler,
         n_steps=args.n_steps,
         log_interval_steps=1e4,
-        affinity=dict(cuda_idx=cuda_idx),
+        affinity=affinity,
         seed=args.seed
     )
     config = dict(game=game)
@@ -310,6 +323,7 @@ if __name__ == "__main__":
     parser.add_argument('--game', help='Atari game', default='ms_pacman')
     parser.add_argument('--n-gpu', type=int, default=4)
     parser.add_argument('--debug', action="store_true")
+    parser.add_argument('--dryrun', type=int, default=0)
     parser.add_argument('--control', action="store_true")
     parser.add_argument('--async-sample', action="store_true")
     parser.add_argument('--learn-model', action="store_true")
@@ -395,7 +409,11 @@ if __name__ == "__main__":
         args.momentum_encoder = 1
         args.buffered_nce = 0
 
-    wandb.init(project='rlpyt', entity='abs-world-models', config=args, notes='NCE / classifier fixes')
+    if args.dryrun:
+        os.environ["WANDB_MODE"] = "dryrun"
+    wandb.init(project='rlpyt', entity='abs-world-models',
+               config=args,
+               notes='NCE / classifier fixes',)
     wandb.config.update(vars(args))
     if args.debug:
         debug_build_and_train(game=args.game,
