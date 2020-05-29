@@ -34,16 +34,16 @@ search:
     name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --debug --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder curl --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} --nce 1 --momentum-encoder 1 {ncetype} --classifier {classifier} --buffered-nce {buffer} --batch-size 64
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder nature --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} {ncetype} --classifier {classifier} --buffered-nce {buffer} --batch-size 64 --target-update-interval 2000 --n-step 10 --n-steps 1000000
   type: grid
-  max_trials: 200
+  max_trials: 500
   params:
     - name: game
       spec: discrete
       values: ['alien','amidar', 'assault', 'asterix', 'bank_heist', 'battle_zone', 'boxing', 'breakout', 'chopper_command', 'crazy_climber', 'demon_attack', 'freeway', 'frostbite', 'gopher', 'hero', 'jamesbond', 'kangaroo', 'krull', 'kung_fu_master', 'ms_pacman', 'pong', 'private_eye', 'qbert', 'seaquest', 'road_runner', 'up_n_down']
     - name: arguments
       spec: discrete
-      values: ['--padding valid --imagesize 84 --eval-imagesize 84', '--time-contrastive 1 --nce-loss-weight 0.5 --padding valid --imagesize 84 --eval-imagesize 84']
+      values: ['--padding valid --imagesize 84 --eval-imagesize 84 --nce 1 --time-contrastive 1 --momentum-encoder 0 --shared-encoder 0 --global-local-nce 1']
     - name: jumps
       spec: discrete
       values: [0]
@@ -52,7 +52,7 @@ search:
       values: [1]
     - name: replay-ratio
       spec: discrete
-      values: [256]
+      values: [32]
     - name: mgn
       spec: discrete
       values: [10.]
@@ -61,13 +61,13 @@ search:
       values: [0]
     - name: seed
       spec: discrete
-      values: [100, 123, 420]
+      values: [101, 123, 420, 88, 444]
     - name: ncetype
       spec: discrete
-      values: ['--global-local-nce 1']
+      values: ['']
     - name: buffer
       spec: discrete
       values: [0]
     - name: classifier
       spec: discrete
-      values: ['bilinear', 'q_l1']
+      values: ['bilinear']
