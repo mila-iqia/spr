@@ -74,8 +74,9 @@ def delete_ind_from_array(array, ind):
     return tensor
 
 
-class SerialEvalCollectorFixed(SerialEvalCollector):
+class OneToOneSerialEvalCollector(SerialEvalCollector):
     def collect_evaluation(self, itr):
+        assert self.max_trajectories == len(self.envs)
         traj_infos = [self.TrajInfoCls() for _ in range(len(self.envs))]
         completed_traj_infos = list()
         observations = list()
@@ -99,17 +100,18 @@ class SerialEvalCollectorFixed(SerialEvalCollector):
             b = 0
             while b < len(live_envs):  # don't want to do a for loop on live envs, since we change it during the process.
                 env_id = live_envs[b]
-                env = self.envs[env_id]
-                o, r, d, env_info = env.step(action[b])
-                traj_infos[b].step(observation[b], action[b], r, d,
-                                   agent_info[b], env_info)
+                o, r, d, env_info = self.envs[env_id].step(action[b])
+                traj_infos[env_id].step(observation[b],
+                                        action[b], r, d,
+                                        agent_info[b], env_info)
                 if getattr(env_info, "traj_done", d):
+                    completed_traj_infos.append(traj_infos[env_id].terminate(o))
+
                     observation = delete_ind_from_array(observation, b)
                     reward = delete_ind_from_array(reward, b)
                     action = delete_ind_from_array(action, b)
                     obs_pyt, act_pyt, rew_pyt = torchify_buffer((observation, action, reward))
 
-                    completed_traj_infos.append(traj_infos[env_id].terminate(o))
                     del live_envs[b]
                     b -= 1  # live_envs[b] is now the next env, so go back one.
                 else:
@@ -127,4 +129,59 @@ class SerialEvalCollectorFixed(SerialEvalCollector):
         if t == self.max_T - 1:
             logger.log("Evaluation reached max num time steps "
                        f"({self.max_T}).")
+        return completed_traj_infos
+
+
+class SerialEvalCollector(BaseEvalCollector):
+    """Does not record intermediate data."""
+    def __init__(
+            self,
+            envs,
+            agent,
+            TrajInfoCls,
+            max_T,
+            max_trajectories=None,
+            ):
+        save__init__args(locals())
+
+    def collect_evaluation(self, itr):
+        traj_infos = [self.TrajInfoCls() for _ in range(len(self.envs))]
+        completed_traj_infos = list()
+        observations = list()
+        for env in self.envs:
+            observations.append(env.reset())
+        observation = buffer_from_example(observations[0], len(self.envs))
+        for b, o in enumerate(observations):
+            observation[b] = o
+        action = buffer_from_example(self.envs[0].action_space.null_value(),
+            len(self.envs))
+        reward = np.zeros(len(self.envs), dtype="float32")
+        obs_pyt, act_pyt, rew_pyt = torchify_buffer((observation, action, reward))
+        self.agent.reset()
+        self.agent.eval_mode(itr)
+        for t in range(self.max_T):
+            act_pyt, agent_info = self.agent.step(obs_pyt, act_pyt, rew_pyt)
+            action = numpify_buffer(act_pyt)
+            for b, env in enumerate(self.envs):
+                o, r, d, env_info = env.step(action[b])
+                traj_infos[b].step(observation[b], action[b], r, d,
+                    agent_info[b], env_info)
+                if getattr(env_info, "traj_done", d):
+                    completed_traj_infos.append(traj_infos[b].terminate(o))
+                    traj_infos[b] = self.TrajInfoCls()
+                    o = env.reset()
+                if d:
+                    action[b] = 0  # Prev_action for next step.
+                    r = 0
+                    self.agent.reset_one(idx=b)
+                observation[b] = o
+                reward[b] = r
+            if (self.max_trajectories is not None and
+                    len(completed_traj_infos) >= self.max_trajectories):
+                logger.log("Evaluation reached max num trajectories "
+                    f"({self.max_trajectories}).")
+                break
+        if t == self.max_T - 1:
+            logger.log("Evaluation reached max num time steps "
+                f"({self.max_T}).")
         return completed_traj_infos

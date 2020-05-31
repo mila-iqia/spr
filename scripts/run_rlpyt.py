@@ -14,7 +14,6 @@ from rlpyt.experiments.configs.atari.dqn.atari_dqn import configs
 from rlpyt.samplers.async_.collectors import DbGpuResetCollector, DbGpuWaitResetCollector
 from rlpyt.samplers.async_.gpu_sampler import AsyncGpuSampler
 from rlpyt.samplers.parallel.gpu.sampler import GpuSampler
-from rlpyt.samplers.serial.collectors import SerialEvalCollector
 from rlpyt.samplers.serial.sampler import SerialSampler
 from rlpyt.samplers.parallel.gpu.collectors import GpuWaitResetCollector, GpuResetCollector
 from rlpyt.envs.atari.atari_env import AtariTrajInfo
@@ -30,7 +29,7 @@ import psutil
 
 from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel, \
     SyncRlEvalWandb
-from src.sampler import SerialEvalCollectorFixed, OneToOneGpuEvalCollector
+from src.sampler import OneToOneSerialEvalCollector, OneToOneGpuEvalCollector, SerialEvalCollector
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
 from src.rlpyt_agents import DQNSearchAgent
 from src.rlpyt_atari_env import AtariEnv
@@ -52,7 +51,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['env']['imagesize'] = args.imagesize
     config['eval_env']['imagesize'] = args.eval_imagesize
     config["model"]["dueling"] = bool(args.dueling)
-    config["algo"]["min_steps_learn"] = 1600
+    config["algo"]["min_steps_learn"] = 2000
     config["algo"]["n_step_return"] = args.n_step
     config["algo"]["batch_size"] = args.batch_size
     config["algo"]["learning_rate"] = 0.0001
@@ -66,7 +65,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['optim']['eps'] = 0.00015
     config["sampler"]["eval_max_trajectories"] = 100
     config["sampler"]["eval_n_envs"] = 100
-    config["sampler"]["eval_max_steps"] = 2000000
+    config["sampler"]["eval_max_steps"] = 100*28000
     if args.noisy_nets:
         config['agent']['eps_init'] = 0.
         config['agent']['eps_final'] = 0.
@@ -80,7 +79,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         batch_T=1,  # Four time-steps per sampler iteration.
         batch_B=args.batch_b,
         max_decorrelation_steps=0,
-        eval_CollectorCls=SerialEvalCollectorFixed,
+        eval_CollectorCls=OneToOneSerialEvalCollector if args.fasteval else SerialEvalCollector,
         eval_n_envs=config["sampler"]["eval_n_envs"],
         eval_max_steps=config['sampler']['eval_max_steps'],
         eval_max_trajectories=config["sampler"]["eval_max_trajectories"],
@@ -132,24 +131,14 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     else:
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
-    affinity_dict = dict(
-        n_cpu_core=min(args.batch_b, 6),
-        n_gpu=1,
-        n_socket=1,
-        gpu_per_run=1,
-    )
-    affinity = make_affinity(**affinity_dict)
-
-    if args.beluga:
-        affinity = convert_affinity(affinity, psutil.Process().cpu_affinity())
 
     runner = MinibatchRlEvalWandb(
         algo=algo,
         agent=agent,
         sampler=sampler,
         n_steps=args.n_steps,
-        log_interval_steps=1e4,
-        affinity=affinity,
+        affinity=dict(cuda_idx=cuda_idx),
+        log_interval_steps=args.n_steps//10,
         seed=args.seed
     )
     config = dict(game=game)
@@ -322,9 +311,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='ms_pacman')
     parser.add_argument('--n-gpu', type=int, default=4)
-    parser.add_argument('--debug', action="store_true")
-    parser.add_argument('--dryrun', type=int, default=0)
+    parser.add_argument('--der', action="store_true")
     parser.add_argument('--control', action="store_true")
+    parser.add_argument('--fasteval', type=int, default=1)
     parser.add_argument('--async-sample', action="store_true")
     parser.add_argument('--learn-model', action="store_true")
     parser.add_argument('--stack-actions', type=int, default=0)
@@ -344,6 +333,7 @@ if __name__ == "__main__":
     parser.add_argument('--n-step', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--transition-model', type=str, default='standard', choices=["standard", "film", "effnet"], help='Type of transition model to use')
+    parser.add_argument('--tag', type=str, default='', help='Tag for wandb run.')
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
     parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature", "effnet", "bignature"], help='Type of encoder to use')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
@@ -409,13 +399,9 @@ if __name__ == "__main__":
         args.momentum_encoder = 1
         args.buffered_nce = 0
 
-    if args.dryrun:
-        os.environ["WANDB_MODE"] = "dryrun"
-    wandb.init(project='rlpyt', entity='abs-world-models',
-               config=args,
-               notes='NCE / classifier fixes',)
+    wandb.init(project='rlpyt', entity='abs-world-models', config=args, tags=[args.tag])
     wandb.config.update(vars(args))
-    if args.debug:
+    if args.der:
         debug_build_and_train(game=args.game,
                               cuda_idx=args.debug_cuda_idx,
                               model=args.learn_model,
