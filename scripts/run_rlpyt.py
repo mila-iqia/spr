@@ -76,7 +76,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         TrajInfoCls=AtariTrajInfo,  # default traj info + GameScore
         env_kwargs=config["env"],
         eval_env_kwargs=config["eval_env"],
-        batch_T=1,  # Four time-steps per sampler iteration.
+        batch_T=args.batch_t,
         batch_B=args.batch_b,
         max_decorrelation_steps=0,
         eval_CollectorCls=OneToOneSerialEvalCollector if args.fasteval else SerialEvalCollector,
@@ -206,7 +206,8 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config["sampler"]["eval_max_trajectories"] = 20
     config["sampler"]["eval_n_envs"] = config["sampler"]["eval_max_trajectories"]
     config["sampler"]["eval_max_steps"] = 625000  # int(125e3) / 4 * 50 (not actual max length, that's horizon)
-    config['sampler']['batch_B'] = 4
+    config['sampler']['batch_B'] = args.batch_b
+    config['sampler']['batch_T'] = args.batch_t
     config["runner"]["log_interval_steps"] = 1e4
     if args.noisy_nets:
         config['agent']['eps_init'] = 0.
@@ -324,6 +325,7 @@ if __name__ == "__main__":
     parser.add_argument('--target-update-interval', type=int, default=2000)
     parser.add_argument('--target-update-tau', type=float, default=1.)
     parser.add_argument('--batch-b', type=int, default=1)
+    parser.add_argument('--batch-t', type=int, default=1)
     parser.add_argument('--eval-imagesize', type=int, default=100)
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=0)
