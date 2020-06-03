@@ -36,11 +36,37 @@ atari_human_scores = dict(
     private_eye=69571.3, qbert=13455.0, road_runner=7845.0, seaquest=42054.7, up_n_down=11693.2
 )
 
+atari_der_scores = dict(
+    alien=739.9, amidar=188.6, assault=431.2, asterix=470.8,
+    bank_heist=51.0, battle_zone=10124.6, boxing=0.2,
+    breakout=1.9, chopper_command=861.8, crazy_climber=16185.3,
+    demon_attack=508, freeway=27.9, frostbite=866.8,
+    gopher=349.5, hero=6857.0, jamesbond=301.6,
+    kangaroo=779.3, krull=2851.5, kung_fu_master=14346.1,
+    ms_pacman=1204.1, pong=-19.3, private_eye=97.8, qbert=1152.9,
+    road_runner=9600.0, seaquest=354.1, up_n_down=2877.4,
+)
+
+atari_nature_scores = dict(
+    alien=3069, amidar=739.5, assault=3359,
+    asterix=6012, bank_heist=429.7, battle_zone=26300.,
+    boxing=71.8, breakout=401.2, chopper_command=6687.,
+    crazy_climber=114103, demon_attack=9711., freeway=30.3,
+    frostbite=328.3, gopher=8520., hero=19950., jamesbond=576.7,
+    kangaroo=6740., krull=3805., kung_fu_master=23270.,
+    ms_pacman=2311., pong=18.9, private_eye=1788.,
+    qbert=10596., road_runner=18257., seaquest=5286., up_n_down=8456.
+)
+
 atari_random_scores = dict(
-    alien=227.8, amidar=5.8, assault=222.4, asterix=210.0, bank_heist=14.2, battle_zone=2360.0, boxing=0.1,
-    breakout=1.7, chopper_command=811.0, crazy_climber=10780.5, demon_attack=152.1, freeway=0.0, frostbite=65.2,
-    gopher=257.6, hero=1027.0, jamesbond=29.0, kangaroo=52.0, krull=1598.0, kung_fu_master=1598.0, ms_pacman=307.3, pong=-20.7,
-    private_eye=24.9, qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
+    alien=227.8, amidar=5.8, assault=222.4,
+    asterix=210.0, bank_heist=14.2, battle_zone=2360.0,
+    boxing=0.1, breakout=1.7, chopper_command=811.0,
+    crazy_climber=10780.5, demon_attack=152.1, freeway=0.0,
+    frostbite=65.2, gopher=257.6, hero=1027.0, jamesbond=29.0,
+    kangaroo=52.0, krull=1598.0, kung_fu_master=1598.0,
+    ms_pacman=307.3, pong=-20.7, private_eye=24.9,
+    qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
 )
 
 def channel_dropout(images, drop_prob, keep_last=True):
@@ -55,6 +81,12 @@ def channel_dropout(images, drop_prob, keep_last=True):
     images = images * mask[:, :, None, None]
     return images
 
+
+def maybe_update_summary(key, value):
+    if key not in wandb.run.summary:
+        wandb.run.summary[key] = value
+    else:
+        wandb.run.summary[key] = max(value, wandb.run.summary[key])
 
 class AsyncRlEvalWandb(AsyncRlEval):
     def log_diagnostics(self, itr, sampler_itr, throttle_time):
@@ -83,14 +115,28 @@ class AsyncRlEvalWandb(AsyncRlEval):
                     self.wandb_info[k + "Median"] = np.median(values)
                     if k == 'GameScore':
                         game = self.sampler.env_kwargs['game']
-                        random_score, human_score = atari_random_scores[game], atari_human_scores[game]
+                        random_score = atari_random_scores[game]
+                        der_score = atari_der_scores[game]
+                        nature_score = atari_nature_scores[game]
+                        human_score = atari_human_scores[game]
                         normalized_score = (np.average(values) - random_score) / (human_score - random_score)
+                        der_normalized_score = (np.average(values) - random_score) / (der_score - random_score)
+                        nature_normalized_score = (np.average(values) - random_score) / (nature_score - random_score)
                         self.wandb_info[k + "Normalized"] = normalized_score
+                        self.wandb_info[k + "DERNormalized"] = der_normalized_score
+                        self.wandb_info[k + "NatureNormalized"] = nature_normalized_score
+
+                        maybe_update_summary(k+"Best", np.average(values))
+                        maybe_update_summary(k+"NormalizedBest", normalized_score)
+                        maybe_update_summary(k+"DERNormalizedBest", der_normalized_score)
+                        maybe_update_summary(k+"NatureNormalizedBest", nature_normalized_score)
+
 
         if self._opt_infos:
             for k, v in self._opt_infos.items():
                 logger.record_tabular_misc_stat(k, v)
                 self.wandb_info[k] = np.average(v)
+                wandb.run.summary[k] = np.average(v)
         self._opt_infos = {k: list() for k in self._opt_infos}  # (reset)
 
 
@@ -114,6 +160,8 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
                     values = [info[k] for info in traj_infos]
                     logger.record_tabular_misc_stat(k,
                                                     values)
+
+                    wandb.run.summary[k] = np.average(values)
                     self.wandb_info[k + "Average"] = np.average(values)
                     self.wandb_info[k + "Std"] = np.std(values)
                     self.wandb_info[k + "Min"] = np.min(values)
@@ -121,14 +169,27 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
                     self.wandb_info[k + "Median"] = np.median(values)
                     if k == 'GameScore':
                         game = self.sampler.env_kwargs['game']
-                        random_score, human_score = atari_random_scores[game], atari_human_scores[game]
+                        random_score = atari_random_scores[game]
+                        der_score = atari_der_scores[game]
+                        nature_score = atari_nature_scores[game]
+                        human_score = atari_human_scores[game]
                         normalized_score = (np.average(values) - random_score) / (human_score - random_score)
+                        der_normalized_score = (np.average(values) - random_score) / (der_score - random_score)
+                        nature_normalized_score = (np.average(values) - random_score) / (nature_score - random_score)
                         self.wandb_info[k + "Normalized"] = normalized_score
+                        self.wandb_info[k + "DERNormalized"] = der_normalized_score
+                        self.wandb_info[k + "NatureNormalized"] = nature_normalized_score
+
+                        maybe_update_summary(k+"Best", np.average(values))
+                        maybe_update_summary(k+"NormalizedBest", normalized_score)
+                        maybe_update_summary(k+"DERNormalizedBest", der_normalized_score)
+                        maybe_update_summary(k+"NatureNormalizedBest", nature_normalized_score)
 
         if self._opt_infos:
             for k, v in self._opt_infos.items():
                 logger.record_tabular_misc_stat(k, v)
                 self.wandb_info[k] = np.average(v)
+                wandb.run.summary[k] = np.average(v)
         self._opt_infos = {k: list() for k in self._opt_infos}  # (reset)
 
 
