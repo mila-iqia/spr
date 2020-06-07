@@ -26,11 +26,8 @@ AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 ModelSamplesToBuffer = namedarraytuple("SamplesToBuffer",
                                        ["observation", "action", "reward", "done", "policy_probs", "value"])
 OptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr"])
-ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
-                                      "tdAbsErr",
-                                      "modelRLLoss",
-                                      "RewardLoss",
-                                      "modelGradNorm"])
+ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr",
+                                      "RewardLoss", "PolicyLoss", "ValueLoss"])
 
 
 class MuZeroAgent(AtariMixin, DqnAgent):
@@ -141,7 +138,6 @@ class MuZeroModel(torch.nn.Module):
     def initial_inference(self, obs, actions=None, logits=False):
         if len(obs.shape) == 5:
             obs = obs.flatten(1, 2)
-        obs = obs.float().mul_(1. / 255)  # TODO: Figure out a better way to do float conversion that works with mixed predision
         hidden_state = self.conv(obs)
         policy_logits = self.policy_head(hidden_state)
         value_logits = self.value_head(hidden_state)
@@ -329,6 +325,8 @@ class MuZeroAlgo(RlAlgorithm):
             opt_info.loss.append(loss.item())
             opt_info.gradNorm.append(torch.tensor(grad_norm).item())  # grad_norm is a float sometimes, so wrap in tensor
             opt_info.RewardLoss.append(reward_loss.item())
+            opt_info.PolicyLoss.append(policy_loss.item())
+            opt_info.ValueLoss.append(value_loss.item())
             opt_info.tdAbsErr.extend(td_abs_errors[::8].numpy())  # Downsample.
             self.update_counter += 1
             if self.update_counter % self.target_update_interval and self.use_target_network == 0:
@@ -336,12 +334,16 @@ class MuZeroAlgo(RlAlgorithm):
         return opt_info
 
     def loss(self, samples):
-        current_state, pred_reward, pred_policy, pred_value = self.model.initial_inference(samples.all_observation[0],
+        obs = samples.all_observation[0].to(self.agent.device).float() / 255.
+        actions = samples.all_action.long().to(self.agent.device)
+        rewards = samples.all_reward.float().to(self.agent.device)
+        policies = samples.policy_probs.float().to(self.agent.device)
+        current_state, pred_reward, pred_policy, pred_value = self.model.initial_inference(obs,
                                                                                            logits=True)
         predictions = [(1.0, pred_reward, pred_policy, pred_value)]
 
         for i in range(1, self.jumps+1):
-            action = samples.actions[i]  # actions[i] is the action at step [i-1]
+            action = actions[i]  # actions[i] is the action at step [i-1]
             current_state, pred_reward, pred_policy, pred_value = self.model.step(current_state, action)
             # TODO: Missing scale grad here
             # current_state = ScaleGradient.apply(current_state, self.args.grad_scale_factor)
@@ -354,8 +356,8 @@ class MuZeroAlgo(RlAlgorithm):
             target_value = samples.return_[i] + \
                                (self.discount ** self.n_step_return * samples.values[i+self.n_step_return] *
                                 (1 - samples.done_n[i].float()))
-            target_value = to_categorical(transform(target_value))
-            target_reward = to_categorical(transform(target_value))
+            target_value = to_categorical(transform(target_value)).to(self.agent.device)
+            target_reward = to_categorical(transform(rewards[i]))
 
             pred_logvalue = F.log_softmax(pred_value, -1)
             pred_logreward = F.log_softmax(pred_reward, -1)
@@ -363,7 +365,7 @@ class MuZeroAlgo(RlAlgorithm):
 
             current_reward_loss = (-target_reward * pred_logreward).sum(1)
             current_value_loss = (-target_value * pred_logvalue).sum(1)
-            current_policy_loss = (-samples.policy_probs[i] * pred_logpolicy).sum(1)
+            current_policy_loss = (-policies[i] * pred_logpolicy).sum(1)
 
             reward_loss += current_reward_loss
             value_loss += current_value_loss
@@ -371,11 +373,12 @@ class MuZeroAlgo(RlAlgorithm):
 
             if i == 0:
                 pred_value = inverse_transform(from_categorical(pred_value.detach(), logits=True))
-                value_error = torch.abs(pred_value - target_value).cpu().numpy()
+                target_value = inverse_transform(from_categorical(target_value.detach(), logits=True))
+                value_error = torch.abs(pred_value - target_value).cpu()
 
         loss = self.value_loss_weight * value_loss + self.policy_loss_weight * policy_loss \
                + self.reward_loss_weight * reward_loss
         loss *= samples.is_weights[0]
         loss = loss.mean()
-        return loss, value_error, reward_loss.mean().item(), policy_loss.mean().item(), value_loss.mean().item()
+        return loss, value_error, reward_loss.mean(), policy_loss.mean(), value_loss.mean()
 
