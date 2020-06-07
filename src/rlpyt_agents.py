@@ -140,6 +140,7 @@ class VectorizedMCTS:
         self.env_steps = 0
         self.eval = eval
         self.distribution = distribution
+        self.first_call = True
         if self.eval:
             self.root_exploration_fraction = 0.
         self.initialize_on_device("cpu") # Need to have a CPU setup to generate examples.
@@ -305,7 +306,14 @@ class VectorizedMCTS:
 
         # Get action, policy and value from the root after the search has finished
         action, policy = self.select_action()
+        # Stupid, stupid hack because rlpyt does _not_ handle batch_b=1 well.
+
         value = torch.sum(self.visit_count[:, 0] * self.q[:, 0], dim=-1)/torch.sum(self.visit_count[:, 0], dim=-1)
+        if self.first_call:
+            action = action.squeeze()
+            policy = policy.squeeze()
+            value = value.squeeze()
+            self.first_call = False
 
         # end = time.time()
         # print("Searched {} environments, took {}".format(obs.shape[0], end-start))
