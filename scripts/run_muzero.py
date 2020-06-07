@@ -66,8 +66,9 @@ def build_and_train(game="ms_pacman", run_ID=0, args=None):
     config["sampler"]["eval_max_trajectories"] = 20
     config["sampler"]["eval_n_envs"] = config["sampler"]["eval_max_trajectories"]
     config["sampler"]["eval_max_steps"] = 625000  # int(125e3) / 4 * 50 (not actual max length, that's horizon)
-    config['sampler']['batch_B'] = 4
+    config['sampler']['batch_B'] = 16
     config["runner"]["log_interval_steps"] = 1e5
+    config["runner"]["n_steps"] = 10e6
     wandb.config.update(config)
     sampler = samplerCls(
         EnvCls=AtariEnv,
