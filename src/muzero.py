@@ -3,6 +3,9 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Categorical
+import numpy as np
+
 from rlpyt.agents.dqn.atari.mixin import AtariMixin
 from rlpyt.agents.dqn.dqn_agent import DqnAgent
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -27,7 +30,8 @@ ModelSamplesToBuffer = namedarraytuple("SamplesToBuffer",
                                        ["observation", "action", "reward", "done", "policy_probs", "value"])
 OptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr"])
 ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr",
-                                      "RewardLoss", "PolicyLoss", "ValueLoss"])
+                                      "RewardLoss", "PolicyLoss", "ValueLoss",
+                                      "PredEntropy", "TargetEntropy"])
 
 
 class MuZeroAgent(AtariMixin, DqnAgent):
@@ -172,7 +176,7 @@ class MuZeroAlgo(RlAlgorithm):
     def __init__(self, jumps=5, reward_loss_weight=1., policy_loss_weight=1., value_loss_weight=1.,
                  discount=0.99,
                  batch_size=32,
-                 min_steps_learn=int(5e4),
+                 min_steps_learn=int(2e4),
                  replay_size=int(1e6),
                  replay_ratio=8,  # data_consumption / data_generation.
                  target_update_tau=1,
@@ -313,7 +317,8 @@ class MuZeroAlgo(RlAlgorithm):
             return opt_info
         for _ in range(self.updates_per_optimize):
             samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
-            loss, td_abs_errors, reward_loss, policy_loss, value_loss = self.loss(samples_from_replay)
+            loss, td_abs_errors, reward_loss, policy_loss, value_loss, pred_entropy, target_entropy = self.loss(
+                samples_from_replay)
             self.optimizer.zero_grad()
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -324,9 +329,12 @@ class MuZeroAlgo(RlAlgorithm):
                 self.replay_buffer.update_batch_priorities(td_abs_errors)
             opt_info.loss.append(loss.item())
             opt_info.gradNorm.append(torch.tensor(grad_norm).item())  # grad_norm is a float sometimes, so wrap in tensor
-            opt_info.RewardLoss.append(reward_loss.item())
-            opt_info.PolicyLoss.append(policy_loss.item())
-            opt_info.ValueLoss.append(value_loss.item())
+            opt_info.RewardLoss.append(reward_loss)
+            opt_info.PolicyLoss.append(policy_loss)
+            opt_info.ValueLoss.append(value_loss)
+            opt_info.PredEntropy.append(pred_entropy)
+            opt_info.TargetEntropy.append(target_entropy)
+
             opt_info.tdAbsErr.extend(td_abs_errors[::8].numpy())  # Downsample.
             self.update_counter += 1
             if self.update_counter % self.target_update_interval and self.use_target_network == 0:
@@ -338,6 +346,7 @@ class MuZeroAlgo(RlAlgorithm):
         actions = samples.all_action.long().to(self.agent.device)
         rewards = samples.all_reward.float().to(self.agent.device)
         policies = samples.policy_probs.float().to(self.agent.device)
+        is_weights = samples.is_weights[0].float().to(self.args.device)
         current_state, pred_reward, pred_policy, pred_value = self.model.initial_inference(obs,
                                                                                            logits=True)
         predictions = [(1.0, pred_reward, pred_policy, pred_value)]
@@ -347,9 +356,11 @@ class MuZeroAlgo(RlAlgorithm):
             current_state, pred_reward, pred_policy, pred_value = self.model.step(current_state, action)
             # TODO: Missing scale grad here
             # current_state = ScaleGradient.apply(current_state, self.args.grad_scale_factor)
-            predictions.append((1., pred_reward, pred_policy, pred_value))
+            predictions.append((1. / self.jumps, pred_reward, pred_policy, pred_value))
 
-        reward_loss, policy_loss, value_loss = 0, 0, 0
+        reward_losses, value_losses, policy_losses = [], [], []
+        target_entropies, pred_entropies = [], []
+        loss = 0.
         for i, prediction in enumerate(predictions):
             loss_scale, pred_reward, pred_policy, pred_value = prediction
 
@@ -359,6 +370,11 @@ class MuZeroAlgo(RlAlgorithm):
             target_value = to_categorical(transform(target_value)).to(self.agent.device)
             target_reward = to_categorical(transform(rewards[i]))
 
+            pred_entropy = Categorical(logits=pred_policy).entropy()
+            target_entropy = Categorical(probs=policies[i]).entropy()
+            pred_entropies.append(pred_entropy.mean().cpu().detach().item())
+            target_entropies.append(target_entropy.mean().cpu().detach().item())
+
             pred_logvalue = F.log_softmax(pred_value, -1)
             pred_logreward = F.log_softmax(pred_reward, -1)
             pred_logpolicy = F.log_softmax(pred_policy, -1)
@@ -367,18 +383,20 @@ class MuZeroAlgo(RlAlgorithm):
             current_value_loss = (-target_value * pred_logvalue).sum(1)
             current_policy_loss = (-policies[i] * pred_logpolicy).sum(1)
 
-            reward_loss += current_reward_loss
-            value_loss += current_value_loss
-            policy_loss += current_policy_loss
+            loss = loss + loss_scale * (is_weights * (
+                    current_value_loss*self.value_loss_weight +
+                    current_policy_loss*self.policy_loss_weight +
+                    current_reward_loss*self.reward_loss_weight).mean())
+
+            reward_losses.append(current_reward_loss.detach().mean().cpu().item())
+            value_losses.append(current_value_loss.detach().mean().cpu().item())
+            policy_losses.append(current_policy_loss.detach().mean().cpu().item())
 
             if i == 0:
                 pred_value = inverse_transform(from_categorical(pred_value.detach(), logits=True))
                 target_value = inverse_transform(from_categorical(target_value.detach(), logits=True))
                 value_error = torch.abs(pred_value - target_value).cpu()
 
-        loss = self.value_loss_weight * value_loss + self.policy_loss_weight * policy_loss \
-               + self.reward_loss_weight * reward_loss
-        loss *= samples.is_weights[0]
-        loss = loss.mean()
-        return loss, value_error, reward_loss.mean(), policy_loss.mean(), value_loss.mean()
+        return loss, value_error, np.array(reward_losses).mean(), np.array(policy_losses).mean(),\
+               np.array(value_losses).mean(), np.array(pred_entropies).mean(), np.array(target_entropies).mean()
 

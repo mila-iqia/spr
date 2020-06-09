@@ -1,6 +1,8 @@
 from rlpyt.experiments.configs.atari.dqn.atari_dqn import configs
+from rlpyt.runners.minibatch_rl import MinibatchRl
 from rlpyt.samplers.async_.collectors import DbGpuResetCollector
 from rlpyt.samplers.async_.gpu_sampler import AsyncGpuSampler
+from rlpyt.samplers.parallel.cpu.collectors import CpuResetCollector
 from rlpyt.samplers.parallel.gpu.sampler import GpuSampler
 from rlpyt.samplers.serial.sampler import SerialSampler
 from rlpyt.samplers.parallel.gpu.collectors import GpuWaitResetCollector, GpuResetCollector
@@ -41,7 +43,9 @@ def build_and_train(game="ms_pacman", run_ID=0, args=None):
 
     if args.n_gpu == 0:
         affinity = dict(cuda_idx=None)
+        runnerCls = MinibatchRlEvalWandb
         samplerCls = SerialSampler
+        collectorCls = CpuResetCollector
     else:
         affinity = make_affinity(**affinity_dict)
 
@@ -85,6 +89,7 @@ def build_and_train(game="ms_pacman", run_ID=0, args=None):
     config["model"]["dynamics_blocks"] = args.dynamics_blocks
     config["model"]["film"] = args.film
     config["model"]["stack_actions"] = args.stack_actions
+    config["algo"]["n_step_return"] = 5
     config["algo"]["reward_loss_weight"] = args.reward_lw
     config["algo"]["policy_loss_weight"] = args.policy_lw
     config["algo"]["value_loss_weight"] = args.value_lw

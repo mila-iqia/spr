@@ -148,12 +148,12 @@ class VectorizedMCTS:
     def set_eval(self):
         self.n_sims = self.eval_n_sims
         self.eval = True
-        self.warmup_sims = 1
+        self.warmup_sims = 2
 
     def set_train(self):
         self.n_sims = self.train_n_sims
         self.eval = False
-        self.warmup_sims = 1
+        self.warmup_sims = 2
 
     def initialize_on_device(self, device):
         # Initialize search tensors on the current device.
