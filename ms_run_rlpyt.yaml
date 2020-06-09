@@ -1,7 +1,7 @@
 description: AWM
 
 target:
-  cluster: eu2
+  cluster: eu1
   vc: msrlabs
 
 environment:
@@ -34,7 +34,7 @@ search:
     name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder nature --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} {ncetype} --classifier {classifier} --buffered-nce {buffer} --batch-size 64 --target-update-interval 2000 --n-step 10 --n-steps 1000000
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder nature --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} {ncetype} --classifier {classifier} --buffered-nce {buffer} --batch-size 32 --target-update-interval 1 --n-step 10 --n-steps 100000
   type: grid
   max_trials: 500
   params:
