@@ -68,7 +68,7 @@ atari_random_scores = dict(
     boxing=0.1, breakout=1.7, chopper_command=811.0,
     crazy_climber=10780.5, demon_attack=152.1, freeway=0.0,
     frostbite=65.2, gopher=257.6, hero=1027.0, jamesbond=29.0,
-    kangaroo=52.0, krull=1598.0, kung_fu_master=1598.0,
+    kangaroo=52.0, krull=1598.0, kung_fu_master=258.5,
     ms_pacman=307.3, pong=-20.7, private_eye=24.9,
     qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
 )
