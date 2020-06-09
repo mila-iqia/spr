@@ -463,7 +463,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         else:
             self.dynamics_model = nn.Identity()
 
-        # assert hard_neg_factor == 0 or self.jumps > 0
         assert hard_neg_factor == 0 or buffered_nce == 0
         assert hard_neg_factor == 0 or self.use_nce
 
