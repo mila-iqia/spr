@@ -380,7 +380,7 @@ class BlockNCE:
                     mask = torch.zeros((n_batch, neg_batch),
                                        dtype=f_x1.dtype,
                                        device=f_x1.device)
-                    mask[:n_batch, :n_batch] += batch_mask
+                    mask[:num_poses, :num_poses] += pos_mask
                     batch_mask = mask
             batch_mask = batch_mask.unsqueeze(dim=0)
             weight_mask = 1 - (batch_mask - pos_mask)
