@@ -61,6 +61,7 @@ def build_and_train(game="ms_pacman", run_ID=0, args=None):
     config["eval_env"]["grayscale"] = args.grayscale
     config['env']['imagesize'] = args.imagesize
     config['eval_env']['imagesize'] = args.imagesize
+    config["algo"]["n_step_return"] = 5
     config["algo"]["batch_size"] = args.batch_size
     config['algo']['learning_rate'] = args.learning_rate
     config['algo']['replay_ratio'] = args.replay_ratio
@@ -89,7 +90,6 @@ def build_and_train(game="ms_pacman", run_ID=0, args=None):
     config["model"]["dynamics_blocks"] = args.dynamics_blocks
     config["model"]["film"] = args.film
     config["model"]["stack_actions"] = args.stack_actions
-    config["algo"]["n_step_return"] = 5
     config["algo"]["reward_loss_weight"] = args.reward_lw
     config["algo"]["policy_loss_weight"] = args.policy_lw
     config["algo"]["value_loss_weight"] = args.value_lw
