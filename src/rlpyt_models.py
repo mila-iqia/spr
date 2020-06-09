@@ -463,9 +463,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         else:
             self.dynamics_model = nn.Identity()
 
-        assert hard_neg_factor == 0 or buffered_nce == 0
-        assert hard_neg_factor == 0 or self.use_nce
-
         if self.use_nce:
             self.local_nce = local_nce
             self.global_nce = global_nce
@@ -477,6 +474,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             assert self.local_nce or self.global_nce or self.global_local_nce
             assert not (self.shared_encoder and self.momentum_encoder)
             assert not (target_encoder_sn and self.momentum_encoder)
+
+            assert hard_neg_factor == 0 or buffered_nce == 0
+            assert hard_neg_factor == 0 or self.use_nce
+            assert hard_neg_factor == 0 or self.jumps == 0 or use_all_targets
 
             # in case someone tries something silly like --local-nce 2
             self.num_nces = int(bool(self.local_nce)) + \
@@ -624,7 +625,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             else:
                 # This style of NCE can also be used for global-local with expand()
                 self.nce = BlockNCE(normalize=cosine_nce,
-                                    use_self_targets=use_all_targets)
+                                    use_self_targets=use_all_targets
+                                                     or self.jumps == 0)
 
         if self.detach_model:
             self.target_head = copy.deepcopy(self.head)
