@@ -365,7 +365,7 @@ if __name__ == "__main__":
     parser.add_argument('--use-all-targets', type=int, default=0, help="Also use different timesteps in the same trajectory as negative samples."
                                                                        " Only applies if jumps>0, buffered-nce 0")
     parser.add_argument('--hard-neg-factor', type=int, default=0, help="How many extra hard negatives to use for each example"
-                                                                       " Only applies if jumps>0, buffered-nce 0")
+                                                                       " Only applies if buffered-nce 0")
     parser.add_argument('--noisy-nets', type=int, default=1)
     parser.add_argument('--grad-scale-factor', type=float, default=0.5, help="Amount by which to scale gradients for trans. model")
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
