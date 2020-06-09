@@ -63,8 +63,8 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
     config['optim']['eps'] = 0.00015
-    config["sampler"]["eval_max_trajectories"] = 100
-    config["sampler"]["eval_n_envs"] = 100
+    config["sampler"]["eval_max_trajectories"] = 10
+    config["sampler"]["eval_n_envs"] = 10
     config["sampler"]["eval_max_steps"] = 100*28000
     config['sampler']['batch_B'] = args.batch_b
     config['sampler']['batch_T'] = args.batch_t
@@ -103,6 +103,9 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["shared_encoder"] = args.shared_encoder
         config["model"]["local_nce"] = args.local_nce
         config["model"]["global_nce"] = args.global_nce
+        config["model"]["hard_neg_factor"] = args.hard_neg_factor
+        config["model"]["use_all_targets"] = args.use_all_targets
+        config["model"]["grad_scale_factor"] = args.grad_scale_factor
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["cosine_nce"] = args.cosine_nce
@@ -125,6 +128,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["algo"]["nce_loss_decay_steps"] = args.nce_loss_decay_steps
         config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
         config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
+        config["algo"]["time_contrastive"] = args.time_contrastive
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     elif control:
@@ -241,6 +245,9 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["local_nce"] = args.local_nce
         config["model"]["noisy_nets"] = args.noisy_nets
         config["model"]["global_nce"] = args.global_nce
+        config["model"]["hard_neg_factor"] = args.hard_neg_factor
+        config["model"]["use_all_targets"] = args.use_all_targets
+        config["model"]["grad_scale_factor"] = args.grad_scale_factor
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["cosine_nce"] = args.cosine_nce
@@ -262,6 +269,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["algo"]["nce_loss_decay_steps"] = args.nce_loss_decay_steps
         config["algo"]["amortization_loss_weight"] = args.amortization_loss_weight
         config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
+        config["algo"]["time_contrastive"] = args.time_contrastive
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     elif control:
@@ -339,7 +347,7 @@ if __name__ == "__main__":
     parser.add_argument('--transition-model', type=str, default='standard', choices=["standard", "film", "effnet"], help='Type of transition model to use')
     parser.add_argument('--tag', type=str, default='', help='Tag for wandb run.')
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
-    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature", "effnet", "bignature"], help='Type of encoder to use')
+    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature", "effnet", "bignature", "deepnature"], help='Type of encoder to use')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--frame-dropout', type=float, default=0., help='Probability to dropout frame in framestack.')
@@ -354,7 +362,12 @@ if __name__ == "__main__":
     parser.add_argument('--local-nce', type=int, default=0)
     parser.add_argument('--global-nce', type=int, default=0)
     parser.add_argument('--global-local-nce', type=int, default=0)
+    parser.add_argument('--use-all-targets', type=int, default=0, help="Also use different timesteps in the same trajectory as negative samples."
+                                                                       " Only applies if jumps>0, buffered-nce 0")
+    parser.add_argument('--hard-neg-factor', type=int, default=0, help="How many extra hard negatives to use for each example"
+                                                                       " Only applies if jumps>0, buffered-nce 0")
     parser.add_argument('--noisy-nets', type=int, default=1)
+    parser.add_argument('--grad-scale-factor', type=float, default=0.5, help="Amount by which to scale gradients for trans. model")
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
     parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",

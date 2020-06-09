@@ -357,13 +357,14 @@ class BlockNCE:
 
         # make a mask for picking out the NCE scores for positive pairs
 
-        pos_mask = torch.eye(n_batch, dtype=f_x1.dtype, device=f_x1.device)
+        num_poses = min(n_batch, neg_batch)
+        pos_mask = torch.eye(num_poses, dtype=f_x1.dtype, device=f_x1.device)
         if n_batch != neg_batch:
             with torch.no_grad():
                 mask = torch.zeros((n_batch, neg_batch),
                                    dtype=f_x1.dtype,
                                    device=f_x1.device)
-                mask[:n_batch, :n_batch] += pos_mask
+                mask[:num_poses, :num_poses] += pos_mask
                 pos_mask = mask
 
         pos_mask = pos_mask.unsqueeze(dim=0)
@@ -392,11 +393,12 @@ class BlockNCE:
         lsmax_x1_to_x2 = -F.log_softmax(raw_scores, dim=2)  # (n_locs, n_batch, n_batch)
         lsmax_x2_to_x1 = -F.log_softmax(raw_scores, dim=1)  # (n_locs, n_batch, n_batch)
         # use masked sums to select NCE scores for positive pairs
-        loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=2)  # (n_locs, n_batch)
-        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)[:, :n_batch]  # (n_locs, n_batch)
+        loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=2)[:, :num_poses]  # (n_locs, n_batch)
+        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)[:, :num_poses]  # (n_locs, n_batch)
         # combine forwards/backwards prediction costs (or whatever)
         loss_nce = 0.5 * (loss_nce_x1_to_x2 + loss_nce_x2_to_x1)
-        loss_nce = loss_nce.view(*f_x1.shape[0:2])
-        corrects = self.calculate_accuracy(lsmax_x1_to_x2)
-        accuracy = torch.mean(corrects.float().view(*f_x1s.shape[:3]), (0, 2)).detach().cpu().numpy()
-        return loss_nce.mean(0).view(f_x1s.shape[1], f_x1s.shape[2]).transpose(0, 1).flatten(), accuracy
+        loss_nce = loss_nce.view(f_x1.shape[0], num_poses)
+        corrects = self.calculate_accuracy(lsmax_x1_to_x2[:, :num_poses]).float()
+        corrects = 0.5*(self.calculate_accuracy(lsmax_x2_to_x1[:, :num_poses].transpose(-1, -2)).float() + corrects)
+        accuracy = torch.mean(corrects).detach().cpu().numpy()
+        return loss_nce.mean(0), accuracy

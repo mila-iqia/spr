@@ -151,6 +151,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                  nce_loss_decay_steps=50000,
                  amortization_loss_weight=1.,
                  amortization_decay_constant=0.,
+                 time_contrastive=0,
                  **kwargs):
         super().__init__(**kwargs)
         self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy
@@ -163,6 +164,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         self.model_rl_weight = model_rl_weight
         self.amortization_loss_weight = amortization_loss_weight
         self.amortization_decay_constant = amortization_decay_constant
+        self.time_contrastive = time_contrastive
 
     def update_nce_loss_weight(self):
         prog = min(1, max(0, self.agent.itr - self.min_steps_learn) / (self.nce_loss_decay_steps - self.min_steps_learn))
@@ -183,7 +185,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             example=example_to_buffer,
             size=self.replay_size,
             B=batch_spec.B,
-            batch_T=self.jumps+1,
+            batch_T=self.jumps+1+self.time_contrastive,
             discount=self.discount,
             n_step_return=self.n_step_return,
             rnn_state_interval=0,
@@ -341,7 +343,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         if self.model.noisy:
             self.model.head.reset_noise()
         # start = time.time()
-        log_pred_ps, pred_rew, nce_loss, model_nce_loss, nce_acc\
+        log_pred_ps, pred_rew, nce_loss, nce_acc\
             = self.agent(samples.all_observation.to(self.agent.device),
                          samples.all_action.to(self.agent.device),
                          samples.all_reward.to(self.agent.device),
@@ -352,7 +354,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             pred_rew = torch.stack(pred_rew, 0)
             with torch.no_grad():
                 reward_target = to_categorical(samples.all_reward[:self.jumps+1].flatten().to(self.agent.device), limit=1).view(*pred_rew.shape)
-            reward_loss = -torch.sum(reward_target * pred_rew, (0, 2)).cpu()
+            reward_loss = -torch.sum(reward_target * pred_rew, 2).mean(0).cpu()
         else:
             reward_loss = torch.zeros(samples.all_observation.shape[1],)
         model_rl_loss = torch.zeros_like(reward_loss)
@@ -369,13 +371,23 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         else:
             value_loss = torch.zeros_like(reward_loss)
 
-        for i in range(1, self.jumps+1):
-            if self.model_rl_weight > 0:
-                jump_rl_loss, model_KL = self.rl_loss(log_pred_ps[i],
-                                               samples,
-                                               i)
-                model_rl_loss = model_rl_loss + jump_rl_loss
+        if self.model_rl_weight > 0:
+            for i in range(1, self.jumps+1):
+                    jump_rl_loss, model_KL = self.rl_loss(log_pred_ps[i],
+                                                   samples,
+                                                   i)
+                    model_rl_loss = model_rl_loss + jump_rl_loss
 
+        nonterminals = 1. - torch.sign(torch.cumsum(samples.done.to(self.agent.device), 0)).float()
+        nonterminals = nonterminals[self.model.time_contrastive:
+                                    self.jumps + self.model.time_contrastive+1]
+        nce_loss = nce_loss*nonterminals.transpose(0, 1)
+        if self.jumps > 0:
+            model_nce_loss = nce_loss[:, 1:].mean(1)
+            nce_loss = nce_loss[:, 0]
+        else:
+            nce_loss = nce_loss[:, 0]
+            model_nce_loss = torch.zeros_like(nce_loss)
         nce_loss = nce_loss.cpu()
         model_nce_loss = model_nce_loss.cpu()
         reward_loss = reward_loss.cpu()
