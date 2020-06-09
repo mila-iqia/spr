@@ -30,10 +30,14 @@ import wandb
 import time
 
 atari_human_scores = dict(
-    alien=7127.7, amidar=1719.5, assault=742.0, asterix=8503.3, bank_heist=753.1, battle_zone=37187.5, boxing=12.1,
-    breakout=30.5, chopper_command=7387.8, crazy_climber=35829.4, demon_attack=1971.0, freeway=29.6, frostbite=4334.7,
-    gopher=2412.5, hero=30826.4, jamesbond=302.8, kangaroo=3035.0, krull=2665.5, kung_fu_master=22736.3, ms_pacman=6951.6, pong=14.6,
-    private_eye=69571.3, qbert=13455.0, road_runner=7845.0, seaquest=42054.7, up_n_down=11693.2
+    alien=7127.7, amidar=1719.5, assault=742.0, asterix=8503.3,
+    bank_heist=753.1, battle_zone=37187.5, boxing=12.1,
+    breakout=30.5, chopper_command=7387.8, crazy_climber=35829.4,
+    demon_attack=1971.0, freeway=29.6, frostbite=4334.7,
+    gopher=2412.5, hero=30826.4, jamesbond=302.8, kangaroo=3035.0,
+    krull=2665.5, kung_fu_master=22736.3, ms_pacman=6951.6, pong=14.6,
+    private_eye=69571.3, qbert=13455.0, road_runner=7845.0,
+    seaquest=42054.7, up_n_down=11693.2
 )
 
 atari_der_scores = dict(
@@ -311,6 +315,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             no_rl_augmentation=False,
             transition_model="standard",
             target_encoder_sn=False,
+            use_all_targets=False,
+            grad_scale_factor=0.5,
+            hard_neg_factor=0,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -374,6 +381,15 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 paddings=[0, 0, 0],
                 use_maxpool=False,
             )
+        elif encoder == "deepnature":
+            self.conv = Conv2dModel(
+                in_channels=f*c,
+                channels=[32, 64, 64, 64, 64],
+                kernel_sizes=[8, 4, 3, 3, 3],
+                strides=[4, 2, 1, 1, 1],
+                paddings=[0, 0, 0, 1, 1],
+                use_maxpool=False,
+            )
         elif encoder == "bignature":
             self.conv = Conv2dModel(
                 in_channels=f*c,
@@ -395,11 +411,13 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         print("Spatial latent size is {}".format(fake_output.shape[1:]))
 
         self.jumps = jumps
+        self.grad_scale_factor = grad_scale_factor
         self.detach_model = detach_model
         self.use_nce = nce
         self.target_augmentation = target_augmentation
         self.eval_augmentation = eval_augmentation
         self.stack_actions = stack_actions
+        self.num_actions = output_size
 
         if encoder in ["repnet", "midsize"]:
             if dueling:
@@ -445,6 +463,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         else:
             self.dynamics_model = nn.Identity()
 
+        # assert hard_neg_factor == 0 or self.jumps > 0
+        assert hard_neg_factor == 0 or buffered_nce == 0
+        assert hard_neg_factor == 0 or self.use_nce
+
         if self.use_nce:
             self.local_nce = local_nce
             self.global_nce = global_nce
@@ -452,6 +474,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.momentum_encoder = momentum_encoder
             self.buffered_nce = buffered_nce
             self.shared_encoder = shared_encoder
+            self.hard_neg_factor = hard_neg_factor
             assert self.local_nce or self.global_nce or self.global_local_nce
             assert not (self.shared_encoder and self.momentum_encoder)
             assert not (target_encoder_sn and self.momentum_encoder)
@@ -547,7 +570,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     self.nce_target_encoder = CurlEncoder(input_size,
                                                           norm_type=norm_type,
                                                           padding=padding)
-                elif encoder == "nature":
+                elif encoder == "nature" or encoder == "deepnature":
                     self.nce_target_encoder = Conv2dModel(in_channels=input_size,
                                                           channels=[32, 64, 64],
                                                           kernel_sizes=[8, 4, 3],
@@ -601,7 +624,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                            n_locs=self.pixels)
             else:
                 # This style of NCE can also be used for global-local with expand()
-                self.nce = BlockNCE(normalize=cosine_nce)
+                self.nce = BlockNCE(normalize=cosine_nce,
+                                    use_self_targets=use_all_targets)
 
         if self.detach_model:
             self.target_head = copy.deepcopy(self.head)
@@ -623,7 +647,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             # to mask out negatives from the same trajectory if desired.
             global_targets = global_targets.view(-1, observation.shape[1],
                                                  self.jumps+1, global_targets.shape[-1]).transpose(1, 2)
-            global_latents = global_latents.view(-1, observation.shape[1],
+            global_latents = global_latents.view(-1, observation.shape[1]*(self.hard_neg_factor + 1),
                                                  self.jumps+1, global_latents.shape[-1]).transpose(1, 2)
             global_nce_loss, global_nce_accs = self.nce.forward(global_latents, global_targets)
         else:
@@ -642,7 +666,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         if not self.buffered_nce:
             if self.local_nce or self.global_local_nce:
                 local_latents = local_latents.view(-1,
-                                                   observation.shape[1],
+                                                   observation.shape[1]*(self.hard_neg_factor + 1),
                                                    self.jumps+1,
                                                    local_latents.shape[-1]).transpose(1, 2)
                 local_targets = local_targets.view(-1,
@@ -657,14 +681,14 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
     def do_global_local_nce(self, latents, target_latents, observation):
         local_latents = latents.flatten(-2, -1).permute(2, 0, 1)
-        local_target_latents = latents.flatten(-2, -1).permute(2, 0, 1)
+        local_target_latents = target_latents.flatten(-2, -1).permute(2, 0, 1)
         global_latents = self.global_local_classifier(latents)
 
         if not self.buffered_nce:
             with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
                 global_targets = self.global_local_target_classifier(target_latents)
             global_latents = global_latents.view(-1,
-                                                 observation.shape[1],
+                                                 observation.shape[1]*(1+self.hard_neg_factor),
                                                  self.jumps + 1,
                                                  global_latents.shape[-1]).transpose(1, 2)
             global_targets = global_targets.view(-1,
@@ -672,7 +696,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  self.jumps + 1,
                                                  global_targets.shape[-1]).transpose(1, 2)
             local_latents = local_latents.view(local_latents.shape[0],
-                                               observation.shape[1],
+                                               observation.shape[1]*(1+self.hard_neg_factor),
                                                self.jumps+1,
                                                local_latents.shape[-1],
                                                ).transpose(1, 2)
@@ -697,8 +721,34 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.global_local_nce.update_buffer(local_target_latents)
         return gl_nce_loss, gl_nce_accs
 
+    def add_hard_negatives(self, latents, actions):
+        if self.hard_neg_factor <= 0:
+            return latents, actions
+        else:
+            hard_negs = torch.randint(0, self.num_actions, (self.hard_neg_factor*actions.shape[0],), dtype=torch.long, device=actions.device)
+            neg_actions = actions[hard_negs]
+            latents = torch.cat((self.hard_neg_factor+1)*[latents], 0)
+            actions = torch.cat([actions, neg_actions], 0)
+            return latents, actions
+
+    def add_observation_negatives(self, observation):
+        base_observation = observation[0]
+        if self.hard_neg_factor <= 0:
+            return base_observation
+
+        hard_negs = torch.randint(1, observation.shape[0],
+                                  (self.hard_neg_factor*observation.shape[1],),
+                                  dtype=torch.long, device=observation.device)
+        range = torch.arange(0, observation.shape[1], 1, dtype=torch.long, device=observation.device)
+        range = range.repeat(self.hard_neg_factor)
+        hard_negs = observation[hard_negs, range]
+        return torch.cat([base_observation, hard_negs], 0)
+
     def do_nce(self, pred_latents, observation):
-        latents = torch.stack(pred_latents, 1).flatten(0, 1)
+        pred_latents = torch.stack(pred_latents, 1)
+        latents = pred_latents[:observation.shape[1]].flatten(0, 1)  # batch*jumps, *
+        neg_latents = pred_latents[observation.shape[1]:].flatten(0, 1)
+        latents = torch.cat([latents, neg_latents], 0)
         target_images = observation[self.time_contrastive:self.jumps + self.time_contrastive+1].transpose(0, 1).flatten(2, 3)
         target_images = self.transform(target_images, True)
 
@@ -723,13 +773,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         nce_loss = (global_nce_loss + local_nce_loss + gl_nce_loss)/self.num_nces
         nce_accs = (global_nce_accs + local_nce_accs + gl_nce_accs)/self.num_nces
 
-        nce_loss = nce_loss.view(observation.shape[1], -1)
-        if self.jumps > 0:
-            nce_model_loss = nce_loss[:, 1:].mean(1)
-            nce_loss = nce_loss[:, 0]
-        else:
-            nce_loss = nce_loss[:, 0]
-            nce_model_loss = torch.zeros_like(nce_loss)
+        nce_loss = nce_loss.view(observation.shape[1], -1) # split to batch, jumps
         nce_accs = nce_accs.mean().item()
 
         if self.momentum_encoder:
@@ -751,7 +795,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                       self.global_local_classifier.state_dict(),
                                       0.001)
 
-        return nce_loss, nce_model_loss, nce_accs
+        return nce_loss, nce_accs
 
     def apply_transforms(self, transforms, eval_transforms, image):
         if eval_transforms is None:
@@ -818,55 +862,58 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             log_pred_ps = []
             pred_reward = []
             pred_latents = []
-            input_obs = observation[0].flatten(1, 2)
+            pred_nce_latents = []
+            input_obs = self.add_observation_negatives(observation).flatten(1, 2)
             input_obs = self.transform(input_obs, not self.no_rl_augmentation)
             latent = self.stem_forward(input_obs,
                                        prev_action[0],
                                        prev_reward[0])
-            log_pred_ps.append(self.head_forward(latent,
-                                                 prev_action[0],
-                                                 prev_reward[0],
-                                                 logits=True))
-            pred_latents.append(latent)
+            pred_latents.append(latent[:observation.shape[1]])
+            pred_nce_latents.append(latent)
             if self.jumps > 0 or not self.detach_model:
                 if self.detach_model:
                     self.target_head.load_state_dict(self.head.state_dict())
                     latent = latent.detach()
-                pred_rew = self.dynamics_model.reward_predictor(latent)
+                pred_rew = self.dynamics_model.reward_predictor(pred_latents[0])
                 pred_reward.append(F.log_softmax(pred_rew, -1))
 
                 for j in range(1, self.jumps + 1):
-                    latent, pred_rew, _, _ = self.step(latent, prev_action[j])
-                    latent = ScaleGradient.apply(latent, 0.5)
-                    pred_latents.append(latent)
+                    latent, action = self.add_hard_negatives(latent[:observation.shape[1]], prev_action[j])
+                    latent, pred_rew, _, _ = self.step(latent, action)
+                    pred_rew = pred_rew[:observation.shape[1]]
+                    latent = ScaleGradient.apply(latent, self.grad_scale_factor)
+                    pred_latents.append(latent[:observation.shape[1]])
+                    pred_nce_latents.append(latent)
                     pred_reward.append(F.log_softmax(pred_rew, -1))
-                    log_pred_ps.append(self.head_forward(latent,
-                                                         prev_action[j],
-                                                         prev_reward[j],
-                                                         target=self.detach_model,
-                                                         logits=True))
+
+            for i in range(len(pred_latents)):
+                log_pred_ps.append(self.head_forward(pred_latents[i],
+                                                     prev_action[i],
+                                                     prev_reward[i],
+                                                     target=self.detach_model and i > 0,
+                                                     logits=True))
 
             if self.use_nce:
                 if self.no_rl_augmentation and self.uses_augmentation:
                     pred_nce_latents = []
                     input_obs = self.transform(input_obs, True)
                     nce_latent = self.stem_forward(input_obs,
-                                               prev_action[0],
-                                               prev_reward[0])
+                                                   prev_action[0],
+                                                   prev_reward[0])
                     pred_nce_latents.append(nce_latent)
                     for j in range(1, self.jumps + 1):
-                        nce_latent, pred_rew, _, _ = self.step(nce_latent, prev_action[j])
-                        nce_latent = ScaleGradient.apply(nce_latent, 0.5)
+                        nce_latent, _ = self.dynamics_model(nce_latent, prev_action[j])
+                        nce_latent = ScaleGradient.apply(nce_latent, self.grad_scale_factor)
                         pred_nce_latents.append(nce_latent)
-                else:
-                    pred_nce_latents = pred_latents
-                nce_loss, nce_model_loss, nce_accs = self.do_nce(pred_nce_latents, observation)
+                nce_loss, nce_accs = self.do_nce(pred_nce_latents, observation)
             else:
-                nce_loss = nce_model_loss = nce_accs = torch.tensor(0.)
+                nce_loss = torch.zeros((observation.shape[1], self.jumps + 1), device=latent.device)
+                nce_accs = torch.zeros(1,)
 
             return log_pred_ps,\
                    pred_reward,\
-                   nce_loss, nce_model_loss, nce_accs
+                   nce_loss,\
+                   nce_accs
 
         else:
             observation = observation.flatten(-4, -3)
