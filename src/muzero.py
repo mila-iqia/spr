@@ -346,7 +346,7 @@ class MuZeroAlgo(RlAlgorithm):
         actions = samples.all_action.long().to(self.agent.device)
         rewards = samples.all_reward.float().to(self.agent.device)
         policies = samples.policy_probs.float().to(self.agent.device)
-        is_weights = samples.is_weights[0].float().to(self.args.device)
+        is_weights = samples.is_weights[0].float().to(self.agent.device)
         current_state, pred_reward, pred_policy, pred_value = self.model.initial_inference(obs,
                                                                                            logits=True)
         predictions = [(1.0, pred_reward, pred_policy, pred_value)]
