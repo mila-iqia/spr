@@ -210,12 +210,10 @@ class VectorizedMCTS:
         #     self.virtual_loss.fill_(0)
         # if sim_id <= 2:
         #     return -self.virtual_loss
-        valid_indices = torch.where(self.visit_count > 0., self.dummy_ones, self.dummy_zeros)
         if sim_id <= self.warmup_sims:
             return -self.visit_count
-        values = self.q - (valid_indices * self.min_q[:, None, None])
+        values = self.q - self.min_q[:, None, None]
         values /= (self.max_q - self.min_q)[:, None, None]
-        values = valid_indices * values
 
         # Multiply by visit_counts / (virtual_loss + visit_counts)
         return values
@@ -245,6 +243,9 @@ class VectorizedMCTS:
         hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
         self.prior[:, 0] = F.softmax(policy_logits, dim=-1).to(self.device)
+        self.q[:, 0, :] = initial_value.unsqueeze(-1)
+        self.min_q = torch.min(self.min_q, initial_value)
+        self.max_q = torch.max(self.max_q, initial_value)
         self.add_exploration_noise()
 
         for sim_id in range(1, self.n_sims+1):
@@ -295,6 +296,9 @@ class VectorizedMCTS:
             self.hidden_state[:, sim_id, :] = hidden_state
             self.reward[self.batch_range, sim_id, self.actions_final.squeeze()] = reward.to(self.device)
             self.prior[:, sim_id] = F.softmax(policy_logits, dim=-1).to(self.device)
+            self.q[:, sim_id, :] = value.unsqueeze(-1)
+            self.min_q = torch.min(self.min_q, value)
+            self.max_q = torch.max(self.max_q, value)
 
             # Store the pointers from parent to new node and back.
             self.id_children[self.batch_range, self.id_final.squeeze(), self.actions_final.squeeze()] = sim_id
@@ -345,11 +349,11 @@ class VectorizedMCTS:
             returns = returns*self.args.discount + reward
 
             # Update q and count at the parent for the actions taken then
-            self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
             # self.virtual_loss[self.batch_range, parent_id.squeeze(), actions.squeeze()] += (self.vl_c * not_done_mask.squeeze())
             values = ((self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] *
                        self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()]) + returns) \
                      / (self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] + 1)
+            self.visit_count[self.batch_range, parent_id.squeeze(), actions.squeeze()] += not_done_mask.squeeze()
             values *= not_done_mask.squeeze()
             self.q[self.batch_range, parent_id.squeeze(), actions.squeeze()] = values
             values = values.squeeze()
