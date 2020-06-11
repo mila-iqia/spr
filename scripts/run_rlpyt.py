@@ -58,7 +58,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = args.target_update_interval
     config['algo']['target_update_tau'] = args.target_update_tau
-    config['algo']['eps_steps'] = int(5e4)
+    config['algo']['eps_steps'] = args.eps_steps
     config["algo"]["clip_grad_norm"] = args.max_grad_norm
     config['algo']['pri_alpha'] = 0.5
     config['algo']['pri_beta_steps'] = int(10e4)
@@ -145,7 +145,8 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         n_steps=args.n_steps,
         affinity=dict(cuda_idx=cuda_idx),
         log_interval_steps=args.n_steps//10,
-        seed=args.seed
+        seed=args.seed,
+        final_eval_only=args.final_eval_only,
     )
     config = dict(game=game)
     name = "dqn_" + game
@@ -371,7 +372,7 @@ if __name__ == "__main__":
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
     parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
-                        choices=["none", "rrc", "affine", "crop", "blur"],
+                        choices=["none", "rrc", "affine", "crop", "blur", "shift", "intensity"],
                         help='Style of augmentation')
     parser.add_argument('--no-rl-augmentation', type=int, default=0, help='Do a separate RL update without aug')
     parser.add_argument('--target-augmentation', type=int, default=0, help='Use augmentation on inputs to target networks')
@@ -384,7 +385,9 @@ if __name__ == "__main__":
     parser.add_argument('--nce-loss-weight', type=float, default=1.)
     parser.add_argument('--nce-loss-weight-final', type=float, default=-1.)
     parser.add_argument('--nce-loss-decay-steps', type=float, default=50000)
+    parser.add_argument('--eps-steps', type=int, default=50000)
     parser.add_argument('--detach-model', type=int, default=1)
+    parser.add_argument('--final-eval-only', type=int, default=0)
     parser.add_argument('--time-contrastive', type=int, default=0)
     parser.add_argument('--debug_cuda_idx', help='gpu to use ', type=int, default=0)
     parser.add_argument('--max-grad-norm', type=float, default=10., help='Max Grad Norm')
