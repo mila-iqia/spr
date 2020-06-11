@@ -145,6 +145,11 @@ class AsyncRlEvalWandb(AsyncRlEval):
 
 
 class MinibatchRlEvalWandb(MinibatchRlEval):
+
+    def __init__(self, final_eval_only=False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.final_eval_only = final_eval_only
+
     def log_diagnostics(self, itr, eval_traj_infos, eval_time):
         cum_steps = (itr + 1) * self.sampler.batch_size * self.world_size
         self.wandb_info = {'cum_steps': cum_steps}
@@ -195,6 +200,55 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
                 self.wandb_info[k] = np.average(v)
                 wandb.run.summary[k] = np.average(v)
         self._opt_infos = {k: list() for k in self._opt_infos}  # (reset)
+
+    def evaluate_agent(self, itr):
+        """
+        Record offline evaluation of agent performance, by ``sampler.evaluate_agent()``.
+        """
+        if itr > 0:
+            self.pbar.stop()
+
+        if self.final_eval_only:
+            eval = itr == 0 or itr >= self.n_itr - 1
+        else:
+            eval = itr == 0 or itr >= self.min_itr_learn - 1
+        if eval:
+            logger.log("Evaluating agent...")
+            self.agent.eval_mode(itr)  # Might be agent in sampler.
+            eval_time = -time.time()
+            traj_infos = self.sampler.evaluate_agent(itr)
+            eval_time += time.time()
+        else:
+            traj_infos = []
+            eval_time = 0.0
+        logger.log("Evaluation runs complete.")
+        return traj_infos, eval_time
+
+    def train(self):
+        """
+        Performs startup, evaluates the initial agent, then loops by
+        alternating between ``sampler.obtain_samples()`` and
+        ``algo.optimize_agent()``.  Pauses to evaluate the agent at the
+        specified log interval.
+        """
+        n_itr = self.startup()
+        self.n_itr = n_itr
+        with logger.prefix(f"itr #0 "):
+            eval_traj_infos, eval_time = self.evaluate_agent(0)
+            self.log_diagnostics(0, eval_traj_infos, eval_time)
+        for itr in range(n_itr):
+            logger.set_iteration(itr)
+            with logger.prefix(f"itr #{itr} "):
+                self.agent.sample_mode(itr)
+                samples, traj_infos = self.sampler.obtain_samples(itr)
+                self.agent.train_mode(itr)
+                opt_info = self.algo.optimize_agent(itr, samples)
+                self.store_diagnostics(itr, traj_infos, opt_info)
+                if (itr + 1) % self.log_interval_itrs == 0:
+                    eval_traj_infos, eval_time = self.evaluate_agent(itr)
+                    self.log_diagnostics(itr, eval_traj_infos, eval_time)
+        self.shutdown()
+
 
 
 class SyncRlEvalWandb(SyncRlMixin, MinibatchRlEvalWandb):
@@ -334,7 +388,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.uses_augmentation = False
         self.no_rl_augmentation = no_rl_augmentation
         for aug in augmentation:
-            assert aug in ["affine", "crop", "rrc", "blur", "none"]
             if aug == "affine":
                 transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
                 eval_transformation = nn.Identity()
@@ -353,8 +406,14 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 transformation = GaussianBlur2d((5, 5), (1.5, 1.5))
                 eval_transformation = nn.Identity()
                 self.uses_augmentation = True
+            elif aug == "shift":
+                transformation = nn.Sequential(nn.ReplicationPad2d(4), RandomCrop((84, 84)))
+                eval_transformation = nn.Identity()
+            elif aug == "intensity":
+                transformation = Intensity(scale=0.1)
+                eval_transformation = nn.Identity()
             else:
-                transformation = eval_transformation = nn.Identity()
+                raise NotImplementedError()
             self.transforms.append(transformation)
             self.eval_transforms.append(eval_transformation)
 
@@ -1393,3 +1452,13 @@ def maybe_transform(image, transform, alt_transform, p=0.8):
         mask = (mask < p).float()
         processed_images = mask * processed_images + (1 - mask) * base_images
         return processed_images
+
+class Intensity(nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x):
+        r = torch.randn((x.size(0), 1, 1, 1), device=x.device)
+        noise = 1.0 + (self.scale * r.clamp(-2.0, 2.0))
+        return x * noise
