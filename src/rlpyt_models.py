@@ -477,6 +477,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.eval_augmentation = eval_augmentation
         self.stack_actions = stack_actions
         self.num_actions = output_size
+        self.hard_neg_factor = hard_neg_factor
 
         if encoder in ["repnet", "midsize"]:
             if dueling:
@@ -529,7 +530,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.momentum_encoder = momentum_encoder
             self.buffered_nce = buffered_nce
             self.shared_encoder = shared_encoder
-            self.hard_neg_factor = hard_neg_factor
             assert self.local_nce or self.global_nce or self.global_local_nce
             assert not (self.shared_encoder and self.momentum_encoder)
             assert not (target_encoder_sn and self.momentum_encoder)
