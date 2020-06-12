@@ -372,6 +372,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             use_all_targets=False,
             grad_scale_factor=0.5,
             hard_neg_factor=0,
+            distributional=1,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -381,6 +382,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.time_contrastive = time_contrastive
         self.aug_prob = aug_prob
         self.classifier_type = classifier
+
+        self.distributional = distributional
+        n_atoms = 1 if not self.distributional else n_atoms
 
         self.transforms = []
         self.eval_transforms = []
@@ -412,6 +416,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             elif aug == "intensity":
                 transformation = Intensity(scale=0.1)
                 eval_transformation = nn.Identity()
+            elif aug == "none":
+                transformation = eval_transformation = nn.Identity()
             else:
                 raise NotImplementedError()
             self.transforms.append(transformation)
@@ -483,25 +489,29 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 self.head = PizeroDistributionalDuelingHeadModel(self.hidden_size, output_size,
                                                                  pixels=self.pixels,
                                                                  norm_type=norm_type,
-                                                                 noisy=self.noisy)
+                                                                 noisy=self.noisy,
+                                                                 n_atoms=n_atoms)
             else:
                 self.head = PizeroDistributionalHeadModel(self.hidden_size, output_size,
                                                           pixels=self.pixels,
                                                           norm_type=norm_type,
-                                                          noisy=self.noisy)
+                                                          noisy=self.noisy,
+                                                          n_atoms=n_atoms)
         else:
             if dueling:
                 self.head = DQNDistributionalDuelingHeadModel(self.hidden_size,
                                                               output_size,
                                                               hidden_size=256,
                                                               pixels=self.pixels,
-                                                              noisy=self.noisy)
+                                                              noisy=self.noisy,
+                                                              n_atoms=n_atoms)
             else:
                 self.head = DQNDistributionalHeadModel(self.hidden_size,
                                                        output_size,
                                                        hidden_size=256,
                                                        pixels=self.pixels,
-                                                       noisy=self.noisy)
+                                                       noisy=self.noisy,
+                                                       n_atoms=n_atoms)
 
         if transition_model == "film":
             dynamics_model = FiLMTransitionModel
@@ -906,10 +916,14 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             p = self.target_head(conv_out)
         else:
             p = self.head(conv_out)
-        if logits:
-            p = F.log_softmax(p, dim=-1)
+
+        if self.distributional:
+            if logits:
+                p = F.log_softmax(p, dim=-1)
+            else:
+                p = F.softmax(p, dim=-1)
         else:
-            p = F.softmax(p, dim=-1)
+            p = p.squeeze(-1)
 
         # Restore leading dimensions: [T,B], [B], or [], as input.
         p = restore_leading_dims(p, lead_dim, T, B)
@@ -939,7 +953,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
                 for j in range(1, self.jumps + 1):
                     latent, action = self.add_hard_negatives(latent[:observation.shape[1]], prev_action[j])
-                    latent, pred_rew, _, _ = self.step(latent, action)
+                    latent, pred_rew = self.step(latent, action)
                     pred_rew = pred_rew[:observation.shape[1]]
                     latent = ScaleGradient.apply(latent, self.grad_scale_factor)
                     pred_latents.append(latent[:observation.shape[1]])
@@ -987,11 +1001,15 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
             conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
             p = self.head(conv_out)
-            p = F.softmax(p, dim=-1)
 
             p = p.view(observation.shape[0],
                        max(1, self.target_augmentation),
                        *p.shape[1:]).mean(1)
+
+            if self.distributional:
+                p = F.softmax(p, dim=-1)
+            else:
+                p = p.squeeze(-1)
 
             # Restore leading dimensions: [T,B], [B], or [], as input.
             p = restore_leading_dims(p, lead_dim, T, B)
@@ -1003,31 +1021,33 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, self.eval_augmentation)
         hidden_state = self.conv(obs)
-        policy_logits = None
         value_logits = self.head(hidden_state)
 
         # reward_logits = self.dynamics_model.reward_predictor(hidden_state)
 
         if logits:
-            return hidden_state, None, policy_logits, value_logits
+            return hidden_state, value_logits
 
-        value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
-        # reward = from_categorical(reward_logits, logits=True, limit=1)
-        return hidden_state, None, policy_logits, value
+        if self.distributional:
+            value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
+        else:
+            value = value_logits.squeeze(-1)
+        return hidden_state, value
 
     def inference(self, state, action):
-        next_state, reward_logits, \
-        policy_logits, value_logits = self.step(state, action)
-        value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
+        next_state, reward_logits, value_logits = self.step(state, action)
+        value_logits = self.head(next_state)
+        if self.distributional:
+            value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
+        else:
+            value = value_logits.squeeze(-1)
         reward = from_categorical(reward_logits, logits=True, limit=1)
 
-        return NetworkOutput(next_state, reward, policy_logits, value)
+        return next_state, reward, value
 
     def step(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)
-        policy_logits = None
-        value_logits = self.head(next_state)
-        return next_state, reward_logits, policy_logits, value_logits
+        return next_state, reward_logits
 
 
 class MLPHead(torch.nn.Module):
@@ -1133,7 +1153,7 @@ class DQNDistributionalDuelingHeadModel(torch.nn.Module):
                              self.linears[3]]
         self.advantage_hidden = nn.Sequential(*self.advantage_layers[:3])
         self.advantage_out = self.advantage_layers[3]
-        self.advantage_bias = torch.nn.Parameter(torch.zeros(n_atoms))
+        self.advantage_bias = torch.nn.Parameter(torch.zeros(n_atoms), requires_grad=True)
         self.value = nn.Sequential(*self.value_layers)
         self.network = self.advantage_hidden
         self._grad_scale = grad_scale
@@ -1236,7 +1256,7 @@ class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
             init_normalization(hidden_size, norm_type),
             nn.Flatten(-3, -1))
         self.advantage_out = self.linears[2]
-        self.advantage_bias = torch.nn.Parameter(torch.zeros(n_atoms))
+        self.advantage_bias = torch.nn.Parameter(torch.zeros(n_atoms), requires_grad=True)
         self.value = nn.Sequential(*layers)
         self._grad_scale = grad_scale
         self._output_size = output_size
