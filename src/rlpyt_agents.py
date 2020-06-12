@@ -417,7 +417,7 @@ class VectorizedQMCTS(VectorizedMCTS):
         self.reset_tensors()
         obs = obs.to(self.device).float() / 255.
 
-        hidden_state, reward, policy_logits, initial_value = self.network.initial_inference(obs)
+        hidden_state, initial_value = self.network.initial_inference(obs)
         self.hidden_state[:, 0, :] = hidden_state
         self.q[:, 0] = initial_value.to(self.device)
         self.min_q = torch.min(self.q[:, 0], dim=-1)[0]
@@ -465,7 +465,7 @@ class VectorizedQMCTS(VectorizedMCTS):
                     break
 
             input_state = self.hidden_state.gather(1, self.id_final[:, :, None, None, None].expand(-1, -1, *self.pixels_shape).to(self.device)).squeeze(1)
-            hidden_state, reward, policy_logits, value = self.network.inference(
+            hidden_state, reward, value = self.network.inference(
                 input_state, self.actions_final.to(self.device))
             value = value.to(self.device)
 

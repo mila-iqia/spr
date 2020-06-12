@@ -152,6 +152,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                  amortization_loss_weight=1.,
                  amortization_decay_constant=0.,
                  time_contrastive=0,
+                 distributional=1,
                  **kwargs):
         super().__init__(**kwargs)
         self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy
@@ -165,6 +166,11 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         self.amortization_loss_weight = amortization_loss_weight
         self.amortization_decay_constant = amortization_decay_constant
         self.time_contrastive = time_contrastive
+
+        if not distributional:
+            self.rl_loss = self.dqn_rl_loss
+        else:
+            self.rl_loss = self.dist_rl_loss
 
     def update_nce_loss_weight(self):
         prog = min(1, max(0, self.agent.itr - self.min_steps_learn) / (self.nce_loss_decay_steps - self.min_steps_learn))
@@ -285,7 +291,55 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         self.update_itr_hyperparams(itr)
         return opt_info
 
-    def rl_loss(self, log_pred_ps, samples, index):
+    def dqn_rl_loss(self, qs, samples, index):
+        """
+        Computes the Q-learning loss, based on: 0.5 * (Q - target_Q) ^ 2.
+        Implements regular DQN or Double-DQN for computing target_Q values
+        using the agent's target network.  Computes the Huber loss using
+        ``delta_clip``, or if ``None``, uses MSE.  When using prioritized
+        replay, multiplies losses by importance sample weights.
+
+        Input ``samples`` have leading batch dimension [B,..] (but not time).
+
+        Calls the agent to compute forward pass on training inputs, and calls
+        ``agent.target()`` to compute target values.
+
+        Returns loss and TD-absolute-errors for use in prioritization.
+
+        Warning:
+            If not using mid_batch_reset, the sampler will only reset environments
+            between iterations, so some samples in the replay buffer will be
+            invalid.  This case is not supported here currently.
+        """
+        q = select_at_indexes(samples.all_action[index+1], qs).cpu()
+        with torch.no_grad():
+            target_qs = self.agent.target(samples.all_observation[index + self.n_step_return],
+                                          samples.all_action[index + self.n_step_return],
+                                          samples.all_reward[index + self.n_step_return])  # [B,A,P']
+            if self.double_dqn:
+                next_qs = self.agent(samples.all_observation[index + self.n_step_return],
+                                     samples.all_action[index + self.n_step_return],
+                                     samples.all_reward[index + self.n_step_return])  # [B,A,P']
+                next_a = torch.argmax(next_qs, dim=-1)
+                target_q = select_at_indexes(next_a, target_qs)
+            else:
+                target_q = torch.max(target_qs, dim=-1).values
+
+            disc_target_q = (self.discount ** self.n_step_return) * target_q
+            y = samples.return_[index] + (1 - samples.done_n[index].float()) * disc_target_q
+
+        delta = y - q
+        losses = 0.5 * delta ** 2
+        abs_delta = abs(delta)
+        if self.delta_clip is not None:  # Huber loss.
+            b = self.delta_clip * (abs_delta - self.delta_clip / 2)
+            losses = torch.where(abs_delta <= self.delta_clip, losses, b)
+        td_abs_errors = abs_delta.detach()
+        if self.delta_clip is not None:
+            td_abs_errors = torch.clamp(td_abs_errors, 0, self.delta_clip)
+        return losses, td_abs_errors
+
+    def dist_rl_loss(self, log_pred_ps, samples, index):
         delta_z = (self.V_max - self.V_min) / (self.agent.n_atoms - 1)
         z = torch.linspace(self.V_min, self.V_max, self.agent.n_atoms)
         # Make 2-D tensor of contracted z_domain for each data point,
