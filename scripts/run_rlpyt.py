@@ -194,7 +194,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     print(affinity)
     wandb.config.update(affinity_dict)
 
-    config = configs['double_dqn']
+    config = configs['double']
     config['env']['game'] = game
     config["env"]["stack_actions"] = args.stack_actions
     config["env"]["grayscale"] = args.grayscale
