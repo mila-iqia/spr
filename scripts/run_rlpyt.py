@@ -194,7 +194,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     print(affinity)
     wandb.config.update(affinity_dict)
 
-    config = configs['ernbw']
+    config = configs['double_dqn']
     config['env']['game'] = game
     config["env"]["stack_actions"] = args.stack_actions
     config["env"]["grayscale"] = args.grayscale
@@ -207,18 +207,17 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config["algo"]["batch_size"] = args.batch_size
     config['algo']['replay_ratio'] = args.replay_ratio
     config['algo']['target_update_interval'] = args.target_update_interval
-    config['algo']['target_update_tau'] = args.target_update_tau
     config["algo"]["clip_grad_norm"] = args.max_grad_norm
     config["algo"]["n_step_return"] = args.n_step
     config['algo']['pri_alpha'] = 0.5
-    config['algo']['pri_beta_steps'] = int(10e4)
+    config['algo']['pri_beta_steps'] = args.n_steps
     # config['optim']['eps'] = 0.00015
-    config["sampler"]["eval_max_trajectories"] = 20
+    config["sampler"]["eval_max_trajectories"] = 100
     config["sampler"]["eval_n_envs"] = config["sampler"]["eval_max_trajectories"]
-    config["sampler"]["eval_max_steps"] = 625000  # int(125e3) / 4 * 50 (not actual max length, that's horizon)
+    config["sampler"]["eval_max_steps"] = 100*28000
     config['sampler']['batch_B'] = args.batch_b
     config['sampler']['batch_T'] = args.batch_t
-    config["runner"]["log_interval_steps"] = 1e4
+    config["runner"]["log_interval_steps"] = 1e6
     if args.noisy_nets:
         config['agent']['eps_init'] = 0.
         config['agent']['eps_final'] = 0.
@@ -230,6 +229,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         CollectorCls=collectorCls,
         TrajInfoCls=AtariTrajInfo,
         eval_env_kwargs=config["eval_env"],
+        eval_CollectorCls=OneToOneGpuEvalCollector,
         **config["sampler"]
     )
     args.discount = config["algo"]["discount"]
@@ -338,9 +338,9 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=69)
     parser.add_argument('--grayscale', type=int, default=1)
     parser.add_argument('--imagesize', type=int, default=100)
-    parser.add_argument('--n-steps', type=int, default=100000)
+    parser.add_argument('--n-steps', type=int, default=int(50e6))
     parser.add_argument('--dqn-hidden-size', type=int, default=256)
-    parser.add_argument('--target-update-interval', type=int, default=2000)
+    parser.add_argument('--target-update-interval', type=int, default=312)
     parser.add_argument('--target-update-tau', type=float, default=1.)
     parser.add_argument('--batch-b', type=int, default=1)
     parser.add_argument('--batch-t', type=int, default=1)
@@ -350,7 +350,7 @@ if __name__ == "__main__":
     parser.add_argument('--dueling', type=int, default=1)
     parser.add_argument('--replay-ratio', type=int, default=2)
     parser.add_argument('--dynamics-blocks', type=int, default=2)
-    parser.add_argument('--n-step', type=int, default=20)
+    parser.add_argument('--n-step', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--transition-model', type=str, default='standard', choices=["standard", "film", "effnet"], help='Type of transition model to use')
     parser.add_argument('--tag', type=str, default='', help='Tag for wandb run.')
