@@ -131,6 +131,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
         config["algo"]["time_contrastive"] = args.time_contrastive
         config["algo"]["distributional"] = args.distributional
+        config["algo"]["prioritized_replay"] = args.prioritized_replay
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     elif control:
@@ -362,6 +363,7 @@ if __name__ == "__main__":
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
     parser.add_argument('--distributional', type=int, default=1)
+    parser.add_argument('--prioritized-replay', type=int, default=1)
     parser.add_argument('--cosine-nce', type=int, default=0)
     parser.add_argument('--buffered-nce', type=int, default=0)
     parser.add_argument('--momentum-encoder', type=int, default=0)
