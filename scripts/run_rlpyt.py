@@ -428,7 +428,7 @@ if __name__ == "__main__":
         args.momentum_encoder = 1
         args.buffered_nce = 0
 
-    wandb.init(project='rlpyt', entity='abs-world-models', config=args, tags=[args.tag])
+    wandb.init(project='rlpyt', entity='resnet-exps', config=args, tags=[args.tag])
     wandb.config.update(vars(args))
     if args.der:
         debug_build_and_train(game=args.game,
