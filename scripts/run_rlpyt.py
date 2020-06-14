@@ -15,7 +15,7 @@ from rlpyt.samplers.async_.collectors import DbGpuResetCollector, DbGpuWaitReset
 from rlpyt.samplers.async_.gpu_sampler import AsyncGpuSampler
 from rlpyt.samplers.parallel.gpu.sampler import GpuSampler
 from rlpyt.samplers.serial.sampler import SerialSampler
-from rlpyt.samplers.parallel.gpu.collectors import GpuWaitResetCollector, GpuResetCollector
+from rlpyt.samplers.parallel.gpu.collectors import GpuWaitResetCollector, GpuResetCollector, GpuEvalCollector
 from rlpyt.envs.atari.atari_env import AtariTrajInfo
 from rlpyt.algos.dqn.dqn import DQN
 from rlpyt.agents.dqn.atari.atari_dqn_agent import AtariDqnAgent
@@ -174,6 +174,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     samplerCls = GpuSampler
     collectorCls = GpuResetCollector
     runnerCls = SyncRlEvalWandb
+    eval_CollectorCls = GpuEvalCollector
 
     if args.async_sample:
         affinity_dict['async_sample'] = True
@@ -183,10 +184,15 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         collectorCls = DbGpuResetCollector
         runnerCls = AsyncRlEvalWandb
 
-    if args.n_gpu == 1:
+    if args.n_gpu <= 1:
         runnerCls = MinibatchRlEvalWandb
+        samplerCls = SerialSampler
+        eval_CollectorCls = SerialEvalCollector
 
-    affinity = make_affinity(**affinity_dict)
+    if args.n_gpu == 0:
+        affinity = dict(cuda_idx=None)
+    else:
+        affinity = make_affinity(**affinity_dict)
 
     if args.beluga:
         affinity = convert_affinity(affinity, psutil.Process().cpu_affinity())
@@ -229,7 +235,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         CollectorCls=collectorCls,
         TrajInfoCls=AtariTrajInfo,
         eval_env_kwargs=config["eval_env"],
-        eval_CollectorCls=OneToOneGpuEvalCollector,
+        eval_CollectorCls=eval_CollectorCls,
         **config["sampler"]
     )
     args.discount = config["algo"]["discount"]
