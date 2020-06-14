@@ -357,7 +357,7 @@ if __name__ == "__main__":
     parser.add_argument('--dueling', type=int, default=1)
     parser.add_argument('--replay-ratio', type=int, default=2)
     parser.add_argument('--dynamics-blocks', type=int, default=2)
-    parser.add_argument('--n-step', type=int, default=10)
+    parser.add_argument('--n-step', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--transition-model', type=str, default='standard', choices=["standard", "film", "effnet"], help='Type of transition model to use')
     parser.add_argument('--tag', type=str, default='', help='Tag for wandb run.')
