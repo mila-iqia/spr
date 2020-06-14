@@ -286,6 +286,7 @@ class PizeroCatDqnModel(torch.nn.Module):
             grayscale=True,
             actions=False,
             imagesize=84,
+            distributional=0,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -297,13 +298,18 @@ class PizeroCatDqnModel(torch.nn.Module):
         fake_output = self.conv(fake_input)
         self.pixels = fake_output.shape[-1]*fake_output.shape[-2]
 
+        self.distributional = distributional
+        n_atoms = 1 if not self.distributional else n_atoms
+
         # conv_out_size = self.conv.conv_out_size(h, w)
         # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
         # self.reward_network = ValueNetwork(conv_out_size)
         if dueling:
-            self.head = PizeroDistributionalDuelingHeadModel(256, output_size, hidden_size=1, pixels=self.pixels)
+            self.head = PizeroDistributionalDuelingHeadModel(256, output_size, hidden_size=1, pixels=self.pixels,
+                                                             n_atoms=n_atoms)
         else:
-            self.head = PizeroDistributionalHeadModel(256, output_size, hidden_size=1, pixels=self.pixels)
+            self.head = PizeroDistributionalHeadModel(256, output_size, hidden_size=1, pixels=self.pixels,
+                                                      n_atoms=n_atoms)
 
     def forward(self, observation, prev_action, prev_reward):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values

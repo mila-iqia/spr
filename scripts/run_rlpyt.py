@@ -138,8 +138,8 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         algo = CategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=AtariCatDqnModel, model_kwargs=config["model"], **config["agent"])
     else:
-        algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
-        agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
+        algo = Dqn(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
+        agent = AtariDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
 
     runner = MinibatchRlEvalWandb(
         algo=algo,
@@ -284,7 +284,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         agent = AtariCatDqnAgent(ModelCls=AtariCatDqnModel, model_kwargs=config["model"], **config["agent"])
     else:
         config["model"]["imagesize"] = args.imagesize
-        algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
+        algo = DQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
     runner = runnerCls(
         algo=algo,
