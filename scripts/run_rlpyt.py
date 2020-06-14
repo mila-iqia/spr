@@ -223,7 +223,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config["sampler"]["eval_max_steps"] = 100*28000
     config['sampler']['batch_B'] = args.batch_b
     config['sampler']['batch_T'] = args.batch_t
-    config["runner"]["log_interval_steps"] = 1e6
+    config["runner"]["log_interval_steps"] = 1e5
     if args.noisy_nets:
         config['agent']['eps_init'] = 0.
         config['agent']['eps_final'] = 0.
