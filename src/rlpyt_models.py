@@ -1211,6 +1211,7 @@ class PizeroDistributionalHeadModel(torch.nn.Module):
         else:
             linear = nn.Linear
         self.hidden_size = hidden_size
+        self.n_atoms = n_atoms
         self.linears = [linear(pixels*hidden_size, 256),
                         linear(256, output_size * n_atoms)]
         layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
@@ -1225,7 +1226,9 @@ class PizeroDistributionalHeadModel(torch.nn.Module):
         self._n_atoms = n_atoms
 
     def forward(self, input):
-        return self.network(input).view(-1, self._output_size, self._n_atoms)
+        if self.n_atoms > 1:
+            return self.network(input).view(-1, self._output_size, self._n_atoms)
+        return self.network(input)
 
     def reset_noise(self):
         for module in self.linears:
