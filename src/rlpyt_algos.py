@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from rlpyt.replays.sequence.frame import AsyncPrioritizedSequenceReplayFrameBuffer, \
+    AsyncUniformSequenceReplayFrameBuffer
 from rlpyt.utils.collections import namedarraytuple
 from collections import namedtuple
 from rlpyt.algos.dqn.cat_dqn import CategoricalDQN
@@ -62,9 +64,9 @@ class PizeroCategoricalDQN(CategoricalDQN):
             replay_kwargs['alpha'] = self.pri_alpha
             replay_kwargs['beta'] = self.pri_beta_init
             # replay_kwargs["input_priorities"] = self.input_priorities
-            buffer = AsyncPrioritizedSequenceReplayFrameBufferExtended(**replay_kwargs)
+            buffer = AsyncPrioritizedSequenceReplayFrameBuffer(**replay_kwargs)
         else:
-            buffer = AsyncUniformSequenceReplayFrameBufferExtended(**replay_kwargs)
+            buffer = AsyncUniformSequenceReplayFrameBuffer(**replay_kwargs)
 
         self.replay_buffer = buffer
 
