@@ -283,6 +283,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         algo = CategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=AtariCatDqnModel, model_kwargs=config["model"], **config["agent"])
     else:
+        config["model"]["imagesize"] = args.imagesize
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
     runner = runnerCls(
