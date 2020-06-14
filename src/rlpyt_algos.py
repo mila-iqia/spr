@@ -47,7 +47,6 @@ class PizeroCategoricalDQN(CategoricalDQN):
             action=examples["action"],
             reward=examples["reward"],
             done=examples["done"],
-            value=examples["agent_info"].p
         )
         replay_kwargs = dict(
             example=example_to_buffer,
