@@ -305,10 +305,10 @@ class PizeroCatDqnModel(torch.nn.Module):
         # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
         # self.reward_network = ValueNetwork(conv_out_size)
         if dueling:
-            self.head = PizeroDistributionalDuelingHeadModel(256, output_size, hidden_size=1, pixels=self.pixels,
+            self.head = PizeroDistributionalDuelingHeadModel(128, output_size, hidden_size=1, pixels=self.pixels,
                                                              n_atoms=n_atoms)
         else:
-            self.head = PizeroDistributionalHeadModel(256, output_size, hidden_size=1, pixels=self.pixels,
+            self.head = PizeroDistributionalHeadModel(128, output_size, hidden_size=1, pixels=self.pixels,
                                                       n_atoms=n_atoms)
 
     def forward(self, observation, prev_action, prev_reward):
@@ -1418,7 +1418,7 @@ class RepNet(nn.Module):
         super().__init__()
         self.input_channels = channels
         layers = nn.ModuleList()
-        hidden_channels = 128
+        hidden_channels = 64
         layers.append(nn.Conv2d(self.input_channels, hidden_channels,
                                 kernel_size=3, stride=2, padding=1))
         layers.append(nn.ReLU())

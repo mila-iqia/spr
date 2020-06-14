@@ -223,7 +223,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config["sampler"]["eval_max_steps"] = 100*28000
     config['sampler']['batch_B'] = args.batch_b
     config['sampler']['batch_T'] = args.batch_t
-    config["runner"]["log_interval_steps"] = 1e6
+    config["runner"]["log_interval_steps"] = 1e5
     if args.noisy_nets:
         config['agent']['eps_init'] = 0.
         config['agent']['eps_final'] = 0.
@@ -358,7 +358,7 @@ if __name__ == "__main__":
     parser.add_argument('--replay-ratio', type=int, default=2)
     parser.add_argument('--dynamics-blocks', type=int, default=2)
     parser.add_argument('--n-step', type=int, default=10)
-    parser.add_argument('--batch-size', type=int, default=64)
+    parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--transition-model', type=str, default='standard', choices=["standard", "film", "effnet"], help='Type of transition model to use')
     parser.add_argument('--tag', type=str, default='', help='Tag for wandb run.')
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
