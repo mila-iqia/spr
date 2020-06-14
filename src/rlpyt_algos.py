@@ -78,8 +78,8 @@ class PizeroCategoricalDQN(CategoricalDQN):
 
         Returns loss and KL-divergence-errors for use in prioritization.
         """
-        if self.model.noisy:
-            self.model.head.reset_noise()
+        # if self.model.noisy:
+        #     self.model.head.reset_noise()
         delta_z = (self.V_max - self.V_min) / (self.agent.n_atoms - 1)
         z = torch.linspace(self.V_min, self.V_max, self.agent.n_atoms)
         # Make 2-D tensor of contracted z_domain for each data point,
