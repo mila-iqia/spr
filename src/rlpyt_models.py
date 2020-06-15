@@ -330,7 +330,7 @@ class PizeroCatDqnModel(torch.nn.Module):
 
         # Restore leading dimensions: [T,B], [B], or [], as input.
         q = restore_leading_dims(q, lead_dim, T, B)
-        return q
+        return q.squeeze()
 
 
 class PizeroSearchCatDqnModel(torch.nn.Module):
