@@ -324,12 +324,13 @@ class PizeroCatDqnModel(torch.nn.Module):
         lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
 
         conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
-        p = self.head(conv_out)
-        p = F.softmax(p, dim=-1)
+        q = self.head(conv_out)
+        if self.distributional:
+            q = F.softmax(q, dim=-1)
 
         # Restore leading dimensions: [T,B], [B], or [], as input.
-        p = restore_leading_dims(p, lead_dim, T, B)
-        return p.squeeze()
+        q = restore_leading_dims(q, lead_dim, T, B)
+        return q
 
 
 class PizeroSearchCatDqnModel(torch.nn.Module):

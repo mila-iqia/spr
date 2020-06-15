@@ -354,7 +354,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval-imagesize', type=int, default=100)
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=0)
-    parser.add_argument('--dueling', type=int, default=1)
+    parser.add_argument('--dueling', type=int, default=0)
     parser.add_argument('--replay-ratio', type=int, default=2)
     parser.add_argument('--dynamics-blocks', type=int, default=2)
     parser.add_argument('--n-step', type=int, default=1)
