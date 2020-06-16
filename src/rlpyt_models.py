@@ -374,6 +374,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             hard_neg_factor=0,
             distributional=1,
             byol=0,
+            dqn_hidden_size=256,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -386,6 +387,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         self.distributional = distributional
         n_atoms = 1 if not self.distributional else n_atoms
+        self.dqn_hidden_size = dqn_hidden_size
 
         self.transforms = []
         self.eval_transforms = []
@@ -503,14 +505,14 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             if dueling:
                 self.head = DQNDistributionalDuelingHeadModel(self.hidden_size,
                                                               output_size,
-                                                              hidden_size=256,
+                                                              hidden_size=self.dqn_hidden_size,
                                                               pixels=self.pixels,
                                                               noisy=self.noisy,
                                                               n_atoms=n_atoms)
             else:
                 self.head = DQNDistributionalHeadModel(self.hidden_size,
                                                        output_size,
-                                                       hidden_size=256,
+                                                       hidden_size=self.dqn_hidden_size,
                                                        pixels=self.pixels,
                                                        noisy=self.noisy,
                                                        n_atoms=n_atoms)
