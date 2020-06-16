@@ -124,8 +124,9 @@ class AtariEnv(Env):
         self.ale.reset_game()
         self._reset_obs()
         self._life_reset()
-        for _ in range(self.np_random.randint(1, self._max_start_noops + 1)):
-            self.ale.act(0)
+        if self._max_start_noops > 0:
+            for _ in range(self.np_random.randint(1, self._max_start_noops + 1)):
+                self.ale.act(0)
         self._update_obs(0)  # (don't bother to populate any frame history)
         self._step_counter = 0
         return self.get_obs()
@@ -202,6 +203,7 @@ class AtariEnv(Env):
         return lost_life
 
     def _life_reset(self):
+        self.ale.act(0)
         self._lives = self.ale.lives()
 
     ###########################################################################
