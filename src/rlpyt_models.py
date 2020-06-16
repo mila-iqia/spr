@@ -854,7 +854,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         nce_loss = (global_nce_loss + local_nce_loss + gl_nce_loss)/self.num_nces
         nce_accs = (global_nce_accs + local_nce_accs + gl_nce_accs)/self.num_nces
 
-        nce_loss = nce_loss.view(observation.shape[1], -1) # split to batch, jumps
+        nce_loss = nce_loss.view(-1, observation.shape[1]) # split to batch, jumps
         nce_accs = nce_accs.mean().item()
 
         if self.momentum_encoder:
@@ -992,7 +992,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                         pred_nce_latents.append(nce_latent)
                 nce_loss, nce_accs = self.do_nce(pred_nce_latents, observation)
             else:
-                nce_loss = torch.zeros((observation.shape[1], self.jumps + 1), device=latent.device)
+                nce_loss = torch.zeros((self.jumps + 1, observation.shape[1]), device=latent.device)
                 nce_accs = torch.zeros(1,)
 
             return log_pred_ps,\

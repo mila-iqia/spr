@@ -355,7 +355,7 @@ class BlockNCE:
         if self.byol:
             loss = torch.norm(f_x1 - f_x2, p=2, dim=-1).mean(0)
             loss = loss.view(f_x1s.shape[1], f_x1s.shape[2])
-            return loss, 0
+            return loss, torch.zeros_like(loss)
 
         f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
 

@@ -441,12 +441,12 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         nonterminals = 1. - torch.sign(torch.cumsum(samples.done.to(self.agent.device), 0)).float()
         nonterminals = nonterminals[self.model.time_contrastive:
                                     self.jumps + self.model.time_contrastive+1]
-        nce_loss = nce_loss*nonterminals.transpose(0, 1)
+        nce_loss = nce_loss*nonterminals
         if self.jumps > 0:
-            model_nce_loss = nce_loss[:, 1:].mean(1)
-            nce_loss = nce_loss[:, 0]
+            model_nce_loss = nce_loss[1:].mean(0)
+            nce_loss = nce_loss[0]
         else:
-            nce_loss = nce_loss[:, 0]
+            nce_loss = nce_loss[0]
             model_nce_loss = torch.zeros_like(nce_loss)
         nce_loss = nce_loss.cpu()
         model_nce_loss = model_nce_loss.cpu()
