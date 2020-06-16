@@ -4,6 +4,7 @@ import os
 import atari_py
 import cv2
 from collections import namedtuple
+from gym.utils import seeding
 
 from rlpyt.envs.base import Env, EnvStep
 from rlpyt.spaces.int_box import IntBox
@@ -73,6 +74,7 @@ class AtariEnv(Env):
                  stack_actions=0,
                  grayscale=True,
                  imagesize=84,
+                 seed=42,
                  ):
         save__init__args(locals(), underscore=True)
         # ALE
@@ -81,6 +83,7 @@ class AtariEnv(Env):
             raise IOError("You asked for game {} but path {} does not "
                 " exist".format(game, game_path))
         self.ale = atari_py.ALEInterface()
+        self.seed()
         self.ale.setFloat(b'repeat_action_probability', repeat_action_probability)
         self.ale.loadROM(game_path)
 
@@ -107,12 +110,21 @@ class AtariEnv(Env):
         self._horizon = int(horizon)
         self.reset()
 
+    def seed(self, seed=None):
+        self.np_random, seed1 = seeding.np_random(seed)
+        # Derive a random seed. This gets passed as a uint, but gets
+        # checked as an int elsewhere, so we need to keep it below
+        # 2**31.
+        seed2 = seeding.hash_seed(seed1 + 1) % 2**31
+        # Empirically, we need to seed before loading the ROM.
+        self.ale.setInt(b'random_seed', seed2)
+
     def reset(self):
         """Performs hard reset of ALE game."""
         self.ale.reset_game()
         self._reset_obs()
         self._life_reset()
-        for _ in range(np.random.randint(0, self._max_start_noops + 1)):
+        for _ in range(self.np_random.randint(1, self._max_start_noops + 1)):
             self.ale.act(0)
         self._update_obs(0)  # (don't bother to populate any frame history)
         self._step_counter = 0
@@ -164,7 +176,7 @@ class AtariEnv(Env):
         """Max of last two frames; crop two rows; downsample by 2x."""
         self._get_screen(2)
         np.maximum(self._raw_frame_1, self._raw_frame_2, self._max_frame)
-        img = cv2.resize(self._max_frame, (self.imagesize, self.imagesize), cv2.INTER_AREA)
+        img = cv2.resize(self._max_frame, (self.imagesize, self.imagesize), cv2.INTER_LINEAR)
         if len(img.shape) == 2:
             img = img[np.newaxis]
         else:
