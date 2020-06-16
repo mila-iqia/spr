@@ -83,7 +83,7 @@ class AtariEnv(Env):
             raise IOError("You asked for game {} but path {} does not "
                 " exist".format(game, game_path))
         self.ale = atari_py.ALEInterface()
-        self.seed()
+        self.seed(seed)
         self.ale.setFloat(b'repeat_action_probability', repeat_action_probability)
         self.ale.loadROM(game_path)
 
