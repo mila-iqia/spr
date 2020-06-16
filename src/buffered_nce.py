@@ -311,10 +311,14 @@ class BlockNCE:
     def __init__(self,
                  temperature=0.1,
                  use_self_targets=False,
-                 normalize=True):
+                 normalize=True,
+                 byol=False):
         self.inv_temp = 1/temperature
+        if use_self_targets != "both":
+            use_self_targets = int(use_self_targets)
         self.use_self_targets = use_self_targets
         self.normalize = normalize
+        self.byol = byol
 
     def calculate_accuracy(self, preds):
         labels = torch.arange(preds.shape[-2], dtype=torch.long, device=preds.device)
@@ -347,9 +351,13 @@ class BlockNCE:
         if self.normalize:
             f_x1 = F.normalize(f_x1.float(), p=2., dim=-1, eps=1e-3)
             f_x2 = F.normalize(f_x2.float(), p=2., dim=-1, eps=1e-3)
+
+        if self.byol:
+            loss = torch.norm(f_x1 - f_x2, p=2, dim=-1).mean(0)
+            loss = loss.view(f_x1s.shape[1], f_x1s.shape[2])
+            return loss, 0
+
         f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
-        n_batch = f_x1.size(1)
-        neg_batch = f_x2.size(-1)
 
         # compute dot(f_glb[i, :, l], f_lcl[j, :, l]) for all i, j, l
         # -- after matmul: raw_scores[l, i, j] = dot(f_x1[i, :, l], f_x2[j, :, l])
@@ -357,7 +365,25 @@ class BlockNCE:
 
         # make a mask for picking out the NCE scores for positive pairs
 
+        if self.use_self_targets == "both":
+            losses1, accs1 = self.calculate_losses(raw_scores, True,
+                                                   f_x1, f_x2, f_x1s)
+            losses2, accs2 = self.calculate_losses(raw_scores, False,
+                                                   f_x1, f_x2, f_x1s)
+            losses = (losses1 + losses2)*0.5
+            accs = (accs1 + accs2)*0.5
+        else:
+            losses, accs = self.calculate_losses(raw_scores,
+                                                 self.use_self_targets,
+                                                 f_x1, f_x2, f_x1s)
+
+        return losses, accs
+
+    def calculate_losses(self, raw_scores, uat, f_x1, f_x2, f_x1s):
+        n_batch = f_x1.size(1)
+        neg_batch = f_x2.size(-1)
         num_poses = min(n_batch, neg_batch)
+        num_fakes = max(n_batch, neg_batch) - num_poses
         pos_mask = torch.eye(num_poses, dtype=f_x1.dtype, device=f_x1.device)
         if n_batch != neg_batch:
             with torch.no_grad():
@@ -368,20 +394,22 @@ class BlockNCE:
                 pos_mask = mask
 
         pos_mask = pos_mask.unsqueeze(dim=0)
-        if not self.use_self_targets:
+        if not uat:
             t = f_x1s.shape[1]
-            batch_mask = torch.eye(f_x1s.shape[2],
+            batch_mask = torch.eye(num_poses//t,
                                    dtype=f_x1.dtype,
                                    device=f_x1.device)
             batch_mask = batch_mask[None, :, None, :].expand(t, -1, t, -1)
             batch_mask = batch_mask.flatten(0, 1).flatten(1, 2)
             if n_batch != neg_batch:
                 with torch.no_grad():
-                    mask = torch.zeros((n_batch, neg_batch),
-                                       dtype=f_x1.dtype,
-                                       device=f_x1.device)
-                    mask[:num_poses, :num_poses] += pos_mask
-                    batch_mask = mask
+                    batch_mask_fakes = torch.eye(num_fakes//t,
+                                           dtype=f_x1.dtype,
+                                           device=f_x1.device)
+                    batch_mask_fakes = batch_mask_fakes[None, :, None, :].expand(t, -1, t, -1)
+                    batch_mask_fakes = batch_mask_fakes.flatten(0, 1).flatten(1, 2)
+
+                    batch_mask = torch.cat([batch_mask, batch_mask_fakes], 0)
             batch_mask = batch_mask.unsqueeze(dim=0)
             weight_mask = 1 - (batch_mask - pos_mask)
             raw_scores = raw_scores * weight_mask

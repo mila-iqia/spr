@@ -373,6 +373,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             grad_scale_factor=0.5,
             hard_neg_factor=0,
             distributional=1,
+            byol=0,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -538,6 +539,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.global_nce = global_nce
             self.global_local_nce = global_local_nce
             self.momentum_encoder = momentum_encoder
+            self.momentum_tau = 0.01
             self.buffered_nce = buffered_nce
             self.shared_encoder = shared_encoder
             assert self.local_nce or self.global_nce or self.global_local_nce
@@ -560,8 +562,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                           nn.ReLU(),
                                                           nn.Linear(self.hidden_size,
                                                                     self.hidden_size))
-                else:
+                elif self.classifier_type == "bilinear":
                     self.local_classifier = nn.Linear(self.hidden_size, self.hidden_size)
+                elif self.classifier_type == "none":
+                    self.local_classifier = nn.Identity()
 
                 self.local_target_classifier = self.local_classifier
                 local_buffer_size = self.hidden_size
@@ -583,11 +587,15 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                            nn.Linear(256, 256))
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
-                else:
+                elif self.classifier_type == "bilinear":
                     self.global_classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                            nn.Linear(self.hidden_size*self.pixels,
                                                                      self.hidden_size*self.pixels))
                     self.global_target_classifier = nn.Flatten(-3, -1)
+                elif self.classifier_type == "none":
+                    self.global_classifier = nn.Flatten(-3, -1)
+                    self.global_target_classifier = nn.Flatten(-3, -1)
+
                     global_buffer_size = self.hidden_size*self.pixels
                 self.global_classifier.apply(weights_init)
             else:
@@ -695,7 +703,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 # This style of NCE can also be used for global-local with expand()
                 self.nce = BlockNCE(normalize=cosine_nce,
                                     use_self_targets=use_all_targets
-                                                     or self.jumps == 0)
+                                                     or self.jumps == 0,
+                                    byol=byol)
 
         if self.detach_model:
             self.target_head = copy.deepcopy(self.head)
@@ -849,7 +858,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         if self.momentum_encoder:
             update_state_dict(self.nce_target_encoder,
                               self.conv.state_dict(),
-                              0.001)
+                              self.momentum_tau)
             if self.classifier_type != "bilinear":
                 # q_l1 is also bilinear for local
                 if self.local_nce and self.classifier_type != "q_l1":
