@@ -110,6 +110,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["cosine_nce"] = args.cosine_nce
+        config["model"]["byol"] = args.byol
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
         config["model"]["frame_dropout"] = args.frame_dropout
@@ -255,6 +256,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["cosine_nce"] = args.cosine_nce
+        config["model"]["byol"] = args.byol
         config["model"]["augmentation"] = args.augmentation
         config["model"]["no_rl_augmentation"] = args.no_rl_augmentation
         config["model"]["frame_dropout"] = args.frame_dropout
@@ -361,6 +363,7 @@ if __name__ == "__main__":
     parser.add_argument('--nce', type=int, default=0)
     parser.add_argument('--distributional', type=int, default=1)
     parser.add_argument('--cosine-nce', type=int, default=0)
+    parser.add_argument('--byol', type=int, default=0)
     parser.add_argument('--buffered-nce', type=int, default=0)
     parser.add_argument('--momentum-encoder', type=int, default=0)
     parser.add_argument('--target-encoder-sn', type=int, default=0)
@@ -368,14 +371,15 @@ if __name__ == "__main__":
     parser.add_argument('--local-nce', type=int, default=0)
     parser.add_argument('--global-nce', type=int, default=0)
     parser.add_argument('--global-local-nce', type=int, default=0)
-    parser.add_argument('--use-all-targets', type=int, default=0, help="Also use different timesteps in the same trajectory as negative samples."
-                                                                       " Only applies if jumps>0, buffered-nce 0")
+    parser.add_argument('--use-all-targets', type=str, default="0", help="Also use different timesteps in the same trajectory as negative samples."
+                                                                         " Only applies if jumps>0, buffered-nce 0",
+                        choices=["0", "1", "both"])
     parser.add_argument('--hard-neg-factor', type=int, default=0, help="How many extra hard negatives to use for each example"
                                                                        " Only applies if buffered-nce 0")
     parser.add_argument('--noisy-nets', type=int, default=1)
     parser.add_argument('--grad-scale-factor', type=float, default=0.5, help="Amount by which to scale gradients for trans. model")
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
-    parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1"], help='Style of NCE classifier')
+    parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1", "none"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
                         choices=["none", "rrc", "affine", "crop", "blur", "shift", "intensity"],
                         help='Style of augmentation')
