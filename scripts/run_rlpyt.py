@@ -50,6 +50,8 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["eval_env"]["grayscale"] = args.grayscale
     config['env']['imagesize'] = args.imagesize
     config['eval_env']['imagesize'] = args.eval_imagesize
+    config['env']['seed'] = args.seed
+    config['eval_env']['seed'] = args.seed
     config["model"]["dueling"] = bool(args.dueling)
     config["algo"]["min_steps_learn"] = 2000
     config["algo"]["n_step_return"] = args.n_step
