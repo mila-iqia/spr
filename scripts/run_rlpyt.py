@@ -50,6 +50,8 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config["eval_env"]["grayscale"] = args.grayscale
     config['env']['imagesize'] = args.imagesize
     config['eval_env']['imagesize'] = args.eval_imagesize
+    config['env']['seed'] = args.seed
+    config['eval_env']['seed'] = args.seed
     config["model"]["dueling"] = bool(args.dueling)
     config["algo"]["min_steps_learn"] = 2000
     config["algo"]["n_step_return"] = args.n_step
@@ -132,6 +134,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
         config["algo"]["time_contrastive"] = args.time_contrastive
         config["algo"]["distributional"] = args.distributional
+        config["algo"]["prioritized_replay"] = args.prioritized_replay
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     elif control:
@@ -277,6 +280,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
         config["algo"]["time_contrastive"] = args.time_contrastive
         config["algo"]["distributional"] = args.distributional
+        config["algo"]["dqn_hidden_size"] = args.dqn_hidden_size
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     elif control:
@@ -339,6 +343,7 @@ if __name__ == "__main__":
     parser.add_argument('--grayscale', type=int, default=1)
     parser.add_argument('--imagesize', type=int, default=100)
     parser.add_argument('--n-steps', type=int, default=100000)
+    parser.add_argument('--dqn-hidden-size', type=int, default=256)
     parser.add_argument('--target-update-interval', type=int, default=2000)
     parser.add_argument('--target-update-tau', type=float, default=1.)
     parser.add_argument('--batch-b', type=int, default=1)
@@ -362,6 +367,7 @@ if __name__ == "__main__":
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
     parser.add_argument('--distributional', type=int, default=1)
+    parser.add_argument('--prioritized-replay', type=int, default=1)
     parser.add_argument('--cosine-nce', type=int, default=0)
     parser.add_argument('--byol', type=int, default=0)
     parser.add_argument('--buffered-nce', type=int, default=0)
