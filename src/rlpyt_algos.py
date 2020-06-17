@@ -162,9 +162,6 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         self.nce_loss_decay_steps = nce_loss_decay_steps
         self.model_nce_weight = model_nce_weight
         self.model_nce_weight_initial = model_nce_weight
-        self.model_nce_weight_final = self.model_nce_weight_initial*\
-                                      (self.nce_loss_weight_final/
-                                       self.nce_loss_weight_initial)
 
         self.reward_loss_weight = reward_loss_weight
         self.model_rl_weight = model_rl_weight
@@ -179,8 +176,8 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
 
     def update_nce_loss_weight(self):
         prog = min(1, max(0, self.agent.itr - self.min_steps_learn) / (self.nce_loss_decay_steps - self.min_steps_learn))
-        self.nce_loss_weight = prog * self.nce_loss_weight_final + (1 - prog) * self.nce_loss_weight_initial
-        self.model_nce_weight = prog * self.model_nce_weight_final + (1 - prog) * self.model_nce_weight_initial
+        self.nce_loss_weight = self.nce_loss_weight_initial*(prog * self.nce_loss_weight_final + (1 - prog))
+        self.model_nce_weight = self.model_nce_weight_initial*(prog * self.nce_loss_weight_final + (1 - prog))
         if self.agent.itr % (self.nce_loss_decay_steps // 10) == 0:
             logger.log("Agent at itr {}, NCE loss weight {}".format(self.update_counter, self.nce_loss_weight) +
                 " (min_itr: {}, max_itr: {})".format(self.min_steps_learn, self.nce_loss_decay_steps))

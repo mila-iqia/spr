@@ -802,12 +802,20 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.global_local_nce.update_buffer(local_target_latents)
         return gl_nce_loss, gl_nce_accs
 
-    def add_hard_negatives(self, latents, actions):
+    def add_hard_negatives(self, latents, actions, pred_qs=None):
         if self.hard_neg_factor <= 0:
             return latents, actions
         else:
-            hard_negs = torch.randint(0, self.num_actions, (self.hard_neg_factor*actions.shape[0],), dtype=torch.long, device=actions.device)
-            neg_actions = actions[hard_negs]
+            if pred_qs is None:
+                hard_negs = torch.randint(0, self.num_actions, (self.hard_neg_factor*actions.shape[0],), dtype=torch.long, device=actions.device)
+                neg_actions = actions[hard_negs]
+            else:
+                with torch.no_grad():
+                    censored_qs = pred_qs.copy()
+                    censored_qs[torch.arange(0, actions.shape[0], dtype=torch.long, device=actions.device), actions] = -10000.
+                    best_actions = torch.argsort(censored_qs, -1, descending=True)
+                    neg_actions = best_actions[:, :self.hard_neg_factor].transpose(0, 1).flatten()
+
             latents = torch.cat((self.hard_neg_factor+1)*[latents], 0)
             actions = torch.cat([actions, neg_actions], 0)
             return latents, actions
