@@ -1,7 +1,7 @@
 description: AWM
 
 target:
-  cluster: eu1
+  cluster: eu2
   vc: msrlabs
 
 environment:
@@ -34,40 +34,43 @@ search:
     name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --num-simulations 0 --eval-simulations 0 --encoder nature --jumps {jumps} --dynamics-blocks 4 --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} {ncetype} --classifier {classifier} --buffered-nce {buffer} --batch-size 32 --target-update-interval 1 --n-step 10 --n-steps 100000
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --encoder nature --jumps {jumps} --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} {ncetype} --classifier {classifier} --batch-size 32 --target-update-interval 1 --n-step 10 --n-steps 100000 --final-eval-only 1 --distributional {distributional}
   type: grid
   max_trials: 500
   params:
     - name: game
       spec: discrete
-      values: ['alien','amidar', 'assault', 'asterix', 'bank_heist', 'battle_zone', 'boxing', 'breakout', 'chopper_command', 'crazy_climber', 'demon_attack', 'freeway', 'frostbite', 'gopher', 'hero', 'jamesbond', 'kangaroo', 'krull', 'kung_fu_master', 'ms_pacman', 'pong', 'private_eye', 'qbert', 'seaquest', 'road_runner', 'up_n_down']
+      values: ["bank_heist", "alien", "pong", "demon_attack", "qbert", "ms_pacman", "battle_zone", "kung_fu_master"]
     - name: arguments
       spec: discrete
-      values: ['--padding valid --imagesize 84 --eval-imagesize 84 --nce 1 --time-contrastive 1 --momentum-encoder 0 --shared-encoder 0 --global-local-nce 1']
+      values: ['--padding valid --imagesize 84 --eval-imagesize 84 --nce 1 --time-contrastive 0 --nce-loss-weight 0.
+       --model-nce-weight 1. --momentum-encoder 1 --cosine-nce 1 --byol 1 --reward-loss-weight 0. --model-rl-weight 0. --norm-type bn
+       --dynamics-blocks 1 --transition-model standard --detach-model 0']
     - name: jumps
       spec: discrete
-      values: [0]
+      values: [1, 5]
     - name: noisy
       spec: discrete
       values: [1]
     - name: replay-ratio
       spec: discrete
-      values: [32]
+      values: [32, 64]
     - name: mgn
       spec: discrete
       values: [10.]
     - name: dueling
       spec: discrete
-      values: [0]
+      values: [1]
     - name: seed
       spec: discrete
       values: [101, 123, 420, 88, 444]
     - name: ncetype
       spec: discrete
-      values: ['']
-    - name: buffer
-      spec: discrete
-      values: [0]
+      values: ['--global-nce 1']
     - name: classifier
       spec: discrete
       values: ['bilinear']
+    - name: distributional
+      spec: discrete
+      values: [0, 1]
+
