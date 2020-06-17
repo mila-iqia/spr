@@ -124,6 +124,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
         config["model"]["classifier"] = args.classifier
+        config['model']['byol_tau'] = args.byol_tau
         config["algo"]["model_rl_weight"] = args.model_rl_weight
         config["algo"]["reward_loss_weight"] = args.reward_loss_weight
         config["algo"]["model_nce_weight"] = args.model_nce_weight
@@ -270,6 +271,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
         config["model"]["classifier"] = args.classifier
+        config['model']['byol_tau'] = args.byol_tau
         config["algo"]["model_rl_weight"] = args.model_rl_weight
         config["algo"]["reward_loss_weight"] = args.reward_loss_weight
         config["algo"]["model_nce_weight"] = args.model_nce_weight
@@ -346,6 +348,7 @@ if __name__ == "__main__":
     parser.add_argument('--dqn-hidden-size', type=int, default=256)
     parser.add_argument('--target-update-interval', type=int, default=2000)
     parser.add_argument('--target-update-tau', type=float, default=1.)
+    parser.add_argument('--byol-tau', type=float, default=0.01)
     parser.add_argument('--batch-b', type=int, default=1)
     parser.add_argument('--batch-t', type=int, default=1)
     parser.add_argument('--eval-imagesize', type=int, default=100)
@@ -369,7 +372,8 @@ if __name__ == "__main__":
     parser.add_argument('--distributional', type=int, default=1)
     parser.add_argument('--prioritized-replay', type=int, default=1)
     parser.add_argument('--cosine-nce', type=int, default=0)
-    parser.add_argument('--byol', type=int, default=0)
+    parser.add_argument('--byol', type=str, default="0",
+                        choices=["0", "1", "both"])
     parser.add_argument('--buffered-nce', type=int, default=0)
     parser.add_argument('--momentum-encoder', type=int, default=0)
     parser.add_argument('--target-encoder-sn', type=int, default=0)
@@ -379,7 +383,7 @@ if __name__ == "__main__":
     parser.add_argument('--global-local-nce', type=int, default=0)
     parser.add_argument('--use-all-targets', type=str, default="0", help="Also use different timesteps in the same trajectory as negative samples."
                                                                          " Only applies if jumps>0, buffered-nce 0",
-                        choices=["0", "1", "both"])
+                        choices=["0", "1", "both", "only"])
     parser.add_argument('--hard-neg-factor', type=int, default=0, help="How many extra hard negatives to use for each example"
                                                                        " Only applies if buffered-nce 0")
     parser.add_argument('--noisy-nets', type=int, default=1)
