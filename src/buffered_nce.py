@@ -314,8 +314,10 @@ class BlockNCE:
                  normalize=True,
                  byol=False):
         self.inv_temp = 1/temperature
-        if use_self_targets != "both":
+        if use_self_targets != "both" and use_self_targets != "only":
             use_self_targets = int(use_self_targets)
+        if byol != "both":
+            byol = int(byol)
         self.use_self_targets = use_self_targets
         self.normalize = normalize
         self.byol = byol
@@ -325,6 +327,30 @@ class BlockNCE:
         preds = torch.argmax(-preds, dim=-1)
         corrects = torch.eq(labels, preds)
         return corrects
+
+    def self_nce(self, f_x1s, f_x2s):
+        num_poses = f_x1s.shape[1]
+        f_x1 = f_x1s.transpose(1, 2).flatten(0, 1) #batchxlocs, time, rkhs
+        f_x2 = f_x2s.transpose(1, 2).flatten(0, 1) #batchxlocs, time, rkhs
+        f_x2 = f_x2.transpose(-1, -2) #batchxlocs, rkhs, time
+        raw_scores = torch.bmm(f_x1, f_x2) #batchxlocs, time, time
+        pos_mask = torch.eye(num_poses, dtype=f_x1.dtype, device=f_x1.device)
+
+        loss, acc = self.nce_loss(raw_scores, pos_mask, num_poses)
+        loss = loss.view(f_x1s.shape[0], f_x1s.shape[2], f_x1s.shape[1]) # loc, batch, time
+        return loss.mean(0).transpose(0, 1), acc
+
+    def byol_loss(self, f_x1s, f_x2s):
+        if not self.normalize:
+            f_x1s = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
+            f_x2s = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
+
+        f_x1 = f_x1s.flatten(1, 2)
+        f_x2 = f_x2s.flatten(1, 2)
+
+        loss = torch.norm(f_x1 - f_x2, p=2, dim=-1).mean(0)
+        loss = loss.view(f_x1s.shape[1], f_x1s.shape[2])
+        return loss
 
     def forward(self, f_x1s, f_x2s):
         """
@@ -339,23 +365,41 @@ class BlockNCE:
         f_x2[j, :, l] as negative samples, for all j != i.
 
         Input:
-          f_x1 : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs source vectors per item
-          f_x2 : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs target vectors per item.  Negative samples.
+          f_x1s : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs source vectors per item
+          f_x2s : (n_locs, n_times, n_batch, n_rkhs)  -- n_locs target vectors per item.  Negative samples.
         Output:
           loss_nce : (n_batch, n_locs)       -- InfoNCE cost at each location
         """
         # reshaping for big matrix multiply
         # f_x1 = f_x1.permute(2, 0, 1)  # (n_locs, n_batch, n_rkhs)
-        f_x1 = f_x1s.flatten(1, 2)
-        f_x2 = f_x2s.flatten(1, 2)
         if self.normalize:
-            f_x1 = F.normalize(f_x1.float(), p=2., dim=-1, eps=1e-3)
-            f_x2 = F.normalize(f_x2.float(), p=2., dim=-1, eps=1e-3)
+            f_x1s = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
+            f_x2s = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
 
         if self.byol:
-            loss = torch.norm(f_x1 - f_x2, p=2, dim=-1).mean(0)
-            loss = loss.view(f_x1s.shape[1], f_x1s.shape[2])
-            return loss, torch.zeros_like(loss)
+            byol_loss = self.byol_loss(f_x1s, f_x2s)
+            accs = 0
+        else:
+            byol_loss = 0
+
+        if self.byol == "both" or not self.byol:
+            if self.use_self_targets == "both":
+                losses1, accs1 = self.calculate_block_losses(f_x1s, f_x2s, True)
+                losses2, accs2 = self.calculate_block_losses(f_x1s, f_x2s, False)
+                losses = (losses1 + losses2)*0.5
+                accs = (accs1 + accs2)*0.5
+            elif self.use_self_targets == "only":
+                losses, accs = self.self_nce(f_x1s, f_x1s)
+            else:
+                losses, accs = self.calculate_block_losses(f_x1s, f_x2s, self.use_self_targets)
+        else:
+            losses = 0.
+
+        return losses+byol_loss, accs
+
+    def do_block_nce(self, f_x1s, f_x2s, uat):
+        f_x1 = f_x1s.flatten(1, 2)
+        f_x2 = f_x2s.flatten(1, 2)
 
         f_x2 = f_x2.permute(0, 2, 1)  # (n_locs, n_rkhs, n_batch)
 
@@ -363,23 +407,6 @@ class BlockNCE:
         # -- after matmul: raw_scores[l, i, j] = dot(f_x1[i, :, l], f_x2[j, :, l])
         raw_scores = torch.matmul(f_x1, f_x2)*self.inv_temp  # (n_locs, n_batch, n_batch)
 
-        # make a mask for picking out the NCE scores for positive pairs
-
-        if self.use_self_targets == "both":
-            losses1, accs1 = self.calculate_losses(raw_scores, True,
-                                                   f_x1, f_x2, f_x1s)
-            losses2, accs2 = self.calculate_losses(raw_scores, False,
-                                                   f_x1, f_x2, f_x1s)
-            losses = (losses1 + losses2)*0.5
-            accs = (accs1 + accs2)*0.5
-        else:
-            losses, accs = self.calculate_losses(raw_scores,
-                                                 self.use_self_targets,
-                                                 f_x1, f_x2, f_x1s)
-
-        return losses, accs
-
-    def calculate_losses(self, raw_scores, uat, f_x1, f_x2, f_x1s):
         n_batch = f_x1.size(1)
         neg_batch = f_x2.size(-1)
         num_poses = min(n_batch, neg_batch)
@@ -414,19 +441,23 @@ class BlockNCE:
             weight_mask = 1 - (batch_mask - pos_mask)
             raw_scores = raw_scores * weight_mask
 
+        loss, acc = self.nce_loss(raw_scores, pos_mask, num_poses)
+        loss = loss.mean(0).view(f_x1s.shape[1], f_x1s.shape[2])
+        return loss, acc
+
+    def nce_loss(self, scores, pos_mask, num_poses):
         # We get NCE log softmax by normalizing over dim 1 or 2 of raw_scores...
         # -- normalizing over dim 1 gives scores for predicting x2->x1
         # -- normalizing over dim 2 gives scores for predicting x1->x2
 
-        lsmax_x1_to_x2 = -F.log_softmax(raw_scores, dim=2)  # (n_locs, n_batch, n_batch)
-        lsmax_x2_to_x1 = -F.log_softmax(raw_scores, dim=1)  # (n_locs, n_batch, n_batch)
+        lsmax_x1_to_x2 = -F.log_softmax(scores, dim=-2)  # (n_locs, n_batch, n_batch)
+        lsmax_x2_to_x1 = -F.log_softmax(scores, dim=-1)  # (n_locs, n_batch, n_batch)
         # use masked sums to select NCE scores for positive pairs
-        loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=2)[:, :num_poses]  # (n_locs, n_batch)
-        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=1)[:, :num_poses]  # (n_locs, n_batch)
+        loss_nce_x1_to_x2 = (lsmax_x1_to_x2 * pos_mask).sum(dim=-2)[:, :num_poses]  # (n_locs, n_batch)
+        loss_nce_x2_to_x1 = (lsmax_x2_to_x1 * pos_mask).sum(dim=-1)[:, :num_poses]  # (n_locs, n_batch)
         # combine forwards/backwards prediction costs (or whatever)
         loss_nce = 0.5 * (loss_nce_x1_to_x2 + loss_nce_x2_to_x1)
-        loss_nce = loss_nce.view(f_x1.shape[0], num_poses)
         corrects = self.calculate_accuracy(lsmax_x1_to_x2[:, :num_poses]).float()
         corrects = 0.5*(self.calculate_accuracy(lsmax_x2_to_x1[:, :num_poses].transpose(-1, -2)).float() + corrects)
         accuracy = torch.mean(corrects).detach().cpu().numpy()
-        return loss_nce.mean(0), accuracy
+        return loss_nce, accuracy
