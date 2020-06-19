@@ -112,6 +112,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["cosine_nce"] = args.cosine_nce
+        config["model"]["init"] = args.init
         config["model"]["byol"] = args.byol
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
@@ -260,6 +261,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["cosine_nce"] = args.cosine_nce
+        config["model"]["init"] = args.init
         config["model"]["byol"] = args.byol
         config["model"]["augmentation"] = args.augmentation
         config["model"]["no_rl_augmentation"] = args.no_rl_augmentation
@@ -366,6 +368,7 @@ if __name__ == "__main__":
                                                                         "nature", "effnet", "bignature",
                                                                         "deepnature", "impala"], help='Type of encoder to use')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
+    parser.add_argument('--init', type=str, default='pytorch', choices=["pytorch", "orthogonal"], help='Initialization type')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--frame-dropout', type=float, default=0., help='Probability to dropout frame in framestack.')
     parser.add_argument('--keep-last-frame', type=int, default=1, help='Always keep last frame in frame dropout.')

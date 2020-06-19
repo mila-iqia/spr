@@ -376,6 +376,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             byol=0,
             dqn_hidden_size=256,
             byol_tau=0.01,
+            init="standard",
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -731,6 +732,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.target_head = copy.deepcopy(self.head)
             for param in self.target_head.parameters():
                 param.requires_grad = False
+
+        if init == "orthogonal":
+            self.apply(orthogonal_init)
 
         print("Initialized model with {} parameters".format(count_parameters(self)))
 
@@ -1325,6 +1329,19 @@ def weights_init(m):
         torch.nn.init.kaiming_uniform_(m.weight, nonlinearity='linear')
         torch.nn.init.zeros_(m.bias)
 
+def orthogonal_init(m):
+    """Custom weight init for Conv2D and Linear layers."""
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(m.weight.data)
+        m.bias.data.fill_(0.0)
+    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+        # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
+        assert m.weight.size(2) == m.weight.size(3)
+        m.weight.data.fill_(0.0)
+        m.bias.data.fill_(0.0)
+        mid = m.weight.size(2) // 2
+        gain = nn.init.calculate_gain('relu')
+        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 class CurlEncoder(nn.Module):
     def __init__(self,
