@@ -468,6 +468,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 paddings=[0, 0, 0, 1],
                 use_maxpool=False,
             )
+        elif encoder == "impala":
+            self.conv = ImpalaCNN(f*c, depths=[16, 32, 64],
+                                  norm_type=norm_type)
         elif encoder == "effnet":
             self.conv = RLEffNet(imagesize,
                                  in_channels=f*c,
@@ -1496,6 +1499,38 @@ class Conv2dSame(nn.Module):
         return x_out
 
 
+class ImpalaCNN(nn.Module):
+    def __init__(self, input_channels,
+                 depths=(16, 32, 32, 32),
+                 norm_type="bn"):
+        super(ImpalaCNN, self).__init__()
+        self.depths = [input_channels] + depths
+        self.layers = []
+        self.norm_type = norm_type
+        for i in range(len(depths)):
+            self.layers.append(self._make_layer(self.depths[i],
+                                                self.depths[i+1]))
+        self.layers = nn.Sequential(*self.layers)
+        self.train()
+
+    def _make_layer(self, in_channels, depth):
+        return nn.Sequential(
+            Conv2dSame(in_channels, depth, 3),
+            nn.MaxPool2d(3, stride=2),
+            nn.ReLU(),
+            ResidualBlock(depth, depth, norm_type=self.norm_type),
+            nn.ReLU(),
+            ResidualBlock(depth, depth, norm_type=self.norm_type)
+        )
+
+    @property
+    def local_layer_depth(self):
+        return self.depths[-2]
+
+    def forward(self, inputs, fmaps=False):
+        return self.layers(inputs)
+
+
 def maybe_transform(image, transform, alt_transform, p=0.8):
     processed_images = transform(image)
     if p >= 1:
@@ -1517,3 +1552,4 @@ class Intensity(nn.Module):
         r = torch.randn((x.size(0), 1, 1, 1), device=x.device)
         noise = 1.0 + (self.scale * r.clamp(-2.0, 2.0))
         return x * noise
+
