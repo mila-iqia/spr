@@ -463,9 +463,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.conv = Conv2dModel(
                 in_channels=f*c,
                 channels=[32, 64, 128, 128],
-                kernel_sizes=[8, 4, 3, 1],
+                kernel_sizes=[8, 4, 3, 3],
                 strides=[4, 2, 1, 1],
-                paddings=[0, 0, 0, 0],
+                paddings=[0, 0, 0, 1],
                 use_maxpool=False,
             )
         elif encoder == "effnet":
@@ -900,7 +900,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     update_state_dict(self.global_local_target_classifier,
                                       self.global_local_classifier.state_dict(),
                                       self.momentum_tau)
-
         return nce_loss, nce_accs
 
     def apply_transforms(self, transforms, eval_transforms, image):
