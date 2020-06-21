@@ -112,6 +112,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["cosine_nce"] = args.cosine_nce
+        config["model"]["init"] = args.init
         config["model"]["byol"] = args.byol
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
@@ -124,6 +125,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
         config["model"]["classifier"] = args.classifier
+        config['model']['byol_tau'] = args.byol_tau
         config["algo"]["model_rl_weight"] = args.model_rl_weight
         config["algo"]["reward_loss_weight"] = args.reward_loss_weight
         config["algo"]["model_nce_weight"] = args.model_nce_weight
@@ -259,6 +261,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["global_local_nce"] = args.global_local_nce
         config["model"]["buffered_nce"] = args.buffered_nce
         config["model"]["cosine_nce"] = args.cosine_nce
+        config["model"]["init"] = args.init
         config["model"]["byol"] = args.byol
         config["model"]["augmentation"] = args.augmentation
         config["model"]["no_rl_augmentation"] = args.no_rl_augmentation
@@ -270,6 +273,7 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
         config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
         config["model"]["classifier"] = args.classifier
+        config['model']['byol_tau'] = args.byol_tau
         config["algo"]["model_rl_weight"] = args.model_rl_weight
         config["algo"]["reward_loss_weight"] = args.reward_loss_weight
         config["algo"]["model_nce_weight"] = args.model_nce_weight
@@ -346,6 +350,7 @@ if __name__ == "__main__":
     parser.add_argument('--dqn-hidden-size', type=int, default=256)
     parser.add_argument('--target-update-interval', type=int, default=2000)
     parser.add_argument('--target-update-tau', type=float, default=1.)
+    parser.add_argument('--byol-tau', type=float, default=0.01)
     parser.add_argument('--batch-b', type=int, default=1)
     parser.add_argument('--batch-t', type=int, default=1)
     parser.add_argument('--eval-imagesize', type=int, default=100)
@@ -359,8 +364,11 @@ if __name__ == "__main__":
     parser.add_argument('--transition-model', type=str, default='standard', choices=["standard", "film", "effnet"], help='Type of transition model to use')
     parser.add_argument('--tag', type=str, default='', help='Tag for wandb run.')
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
-    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize", "nature", "effnet", "bignature", "deepnature"], help='Type of encoder to use')
+    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize",
+                                                                        "nature", "effnet", "bignature",
+                                                                        "deepnature", "impala"], help='Type of encoder to use')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
+    parser.add_argument('--init', type=str, default='pytorch', choices=["pytorch", "orthogonal"], help='Initialization type')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--frame-dropout', type=float, default=0., help='Probability to dropout frame in framestack.')
     parser.add_argument('--keep-last-frame', type=int, default=1, help='Always keep last frame in frame dropout.')
@@ -369,7 +377,8 @@ if __name__ == "__main__":
     parser.add_argument('--distributional', type=int, default=1)
     parser.add_argument('--prioritized-replay', type=int, default=1)
     parser.add_argument('--cosine-nce', type=int, default=0)
-    parser.add_argument('--byol', type=int, default=0)
+    parser.add_argument('--byol', type=str, default="0",
+                        choices=["0", "1", "both"])
     parser.add_argument('--buffered-nce', type=int, default=0)
     parser.add_argument('--momentum-encoder', type=int, default=0)
     parser.add_argument('--target-encoder-sn', type=int, default=0)
@@ -379,7 +388,7 @@ if __name__ == "__main__":
     parser.add_argument('--global-local-nce', type=int, default=0)
     parser.add_argument('--use-all-targets', type=str, default="0", help="Also use different timesteps in the same trajectory as negative samples."
                                                                          " Only applies if jumps>0, buffered-nce 0",
-                        choices=["0", "1", "both"])
+                        choices=["0", "1", "both", "only"])
     parser.add_argument('--hard-neg-factor', type=int, default=0, help="How many extra hard negatives to use for each example"
                                                                        " Only applies if buffered-nce 0")
     parser.add_argument('--noisy-nets', type=int, default=1)
