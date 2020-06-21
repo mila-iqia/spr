@@ -139,9 +139,10 @@ class AtariEnv(Env):
             lost_life = self._check_life()  # Advances from lost_life state.
             if lost_life and self._episodic_lives:
                 self._reset_obs()  # Internal reset.
-                break
             game_over = self.ale.game_over() or self._step_counter >= self.horizon
             done = game_over or (self._episodic_lives and lost_life)
+            if done:
+                break
             if t == self.frame_skip - 2:
                 self._get_screen(1)
             elif t == self.frame_skip - 1:
