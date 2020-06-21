@@ -34,7 +34,7 @@ search:
     name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --encoder nature --jumps {jumps} --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} {ncetype} --classifier {classifier} --batch-size 32 --target-update-interval 1 --n-step 10 --n-steps 100000 --final-eval-only 1 --distributional {distributional}
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --encoder nature --jumps {jumps} --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} {ncetype} --classifier {classifier} --batch-size 32 --target-update-interval 1 --n-step 10 --n-steps 100000 --final-eval-only 1 --distributional {distributional} --target-update-interval {tui} --eps-steps 5000
   type: grid
   max_trials: 500
   params:
@@ -48,13 +48,13 @@ search:
        --dynamics-blocks 1 --transition-model standard --detach-model 0']
     - name: jumps
       spec: discrete
-      values: [1, 5]
+      values: [1]
     - name: noisy
       spec: discrete
       values: [1]
     - name: replay-ratio
       spec: discrete
-      values: [32, 64]
+      values: [32]
     - name: mgn
       spec: discrete
       values: [10.]
@@ -72,5 +72,5 @@ search:
       values: ['bilinear']
     - name: distributional
       spec: discrete
-      values: [0, 1]
+      values: [1]
 
