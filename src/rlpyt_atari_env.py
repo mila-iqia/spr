@@ -127,6 +127,9 @@ class AtariEnv(Env):
         if self._max_start_noops > 0:
             for _ in range(self.np_random.randint(1, self._max_start_noops + 1)):
                 self.ale.act(0)
+                lost_life = self._check_life()
+                if lost_life or self.ale.game_over():
+                    self.reset()
         self._update_obs(0)  # (don't bother to populate any frame history)
         self._step_counter = 0
         return self.get_obs()
