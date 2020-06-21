@@ -66,8 +66,8 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['algo']['pri_beta_steps'] = int(10e4)
     config['optim']['eps'] = 0.00015
     config["sampler"]["eval_max_trajectories"] = 100
-    config["sampler"]["eval_n_envs"] = 100
-    config["sampler"]["eval_max_steps"] = 100*28000
+    config["sampler"]["eval_n_envs"] = 1
+    config["sampler"]["eval_max_steps"] = 28000
     config['sampler']['batch_B'] = args.batch_b
     config['sampler']['batch_T'] = args.batch_t
     if args.noisy_nets:
