@@ -375,6 +375,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             distributional=1,
             byol=0,
             dqn_hidden_size=256,
+            byol_tau=0.01,
+            init="standard",
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -462,11 +464,14 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.conv = Conv2dModel(
                 in_channels=f*c,
                 channels=[32, 64, 128, 128],
-                kernel_sizes=[8, 4, 3, 1],
+                kernel_sizes=[8, 4, 3, 3],
                 strides=[4, 2, 1, 1],
-                paddings=[0, 0, 0, 0],
+                paddings=[0, 0, 0, 1],
                 use_maxpool=False,
             )
+        elif encoder == "impala":
+            self.conv = ImpalaCNN(f*c, depths=[16, 32, 64],
+                                  norm_type=norm_type)
         elif encoder == "effnet":
             self.conv = RLEffNet(imagesize,
                                  in_channels=f*c,
@@ -541,7 +546,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.global_nce = global_nce
             self.global_local_nce = global_local_nce
             self.momentum_encoder = momentum_encoder
-            self.momentum_tau = 0.01
+            self.momentum_tau = byol_tau
             self.buffered_nce = buffered_nce
             self.shared_encoder = shared_encoder
             assert self.local_nce or self.global_nce or self.global_local_nce
@@ -558,11 +563,18 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                             int(bool(self.global_local_nce))
 
             if self.local_nce:
+                self.local_final_classifier = nn.Identity()
                 if self.classifier_type == "mlp":
                     self.local_classifier = nn.Sequential(nn.Linear(self.hidden_size,
                                                                     self.hidden_size),
+                                                          nn.BatchNorm1d(self.hidden_size),
                                                           nn.ReLU(),
                                                           nn.Linear(self.hidden_size,
+                                                                    self.hidden_size))
+                    self.local_final_classifier = nn.Sequential(nn.Linear(self.hidden_size, self.hidden_size),
+                                                                nn.BatchNorm1d(self.hidden_size),
+                                                                nn.ReLU(),
+                                                                nn.Linear(self.hidden_size,
                                                                     self.hidden_size))
                 elif self.classifier_type == "bilinear":
                     self.local_classifier = nn.Linear(self.hidden_size, self.hidden_size)
@@ -575,18 +587,26 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             else:
                 self.local_classifier = self.local_target_classifier = nn.Identity()
             if self.global_nce:
+                self.global_final_classifier = nn.Identity()
                 if self.classifier_type == "mlp":
-                    self.global_classifier = MLPHead(self.hidden_size,
-                                                     output_size=256,
-                                                     hidden_size=-1,
-                                                     pixels=self.pixels,
-                                                     noisy=0,
-                                                     )
+                    self.global_classifier = nn.Sequential(
+                                                nn.Flatten(-3, -1),
+                                                nn.Linear(self.pixels*self.hidden_size, 512),
+                                                nn.BatchNorm1d(512),
+                                                nn.ReLU(),
+                                                nn.Linear(512, 256)
+                                                )
+                    self.global_final_classifier = nn.Sequential(
+                        nn.Linear(256, 512),
+                        nn.BatchNorm1d(512),
+                        nn.ReLU(),
+                        nn.Linear(512, 256)
+                    )
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
                 elif self.classifier_type == "q_l1":
-                    self.global_classifier = nn.Sequential(*self.head.network[:2],
-                                                           nn.Linear(256, 256))
+                    self.global_classifier = nn.Sequential(*self.head.network[:2])
+                    self.global_final_classifier = nn.Linear(256, 256)
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
                 elif self.classifier_type == "bilinear":
@@ -630,10 +650,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 self.global_target_classifier = copy.deepcopy(self.global_target_classifier)
                 self.local_target_classifier = copy.deepcopy(self.local_target_classifier)
                 self.global_local_target_classifier = copy.deepcopy(self.global_local_target_classifier)
-                for param in list(self.local_target_classifier.parameters()) + \
-                             list(self.global_target_classifier.parameters()) + \
-                             list(self.global_local_target_classifier.parameters()) + \
-                             list(self.nce_target_encoder.parameters()):
+                for param in (list(self.nce_target_encoder.parameters())
+                            + list(self.global_target_classifier.parameters())
+                            + list(self.local_target_classifier.parameters())
+                            + list(self.global_local_target_classifier.parameters())):
                     param.requires_grad = False
 
             elif not self.shared_encoder:
@@ -713,6 +733,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             for param in self.target_head.parameters():
                 param.requires_grad = False
 
+        if init == "orthogonal":
+            self.apply(orthogonal_init)
+
         print("Initialized model with {} parameters".format(count_parameters(self)))
 
     def set_sampling(self, sampling):
@@ -721,6 +744,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
     def do_global_nce(self, latents, target_latents, observation):
         global_latents = self.global_classifier(latents)
+        global_latents = self.global_final_classifier(global_latents)
         with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
             global_targets = self.global_target_classifier(target_latents)
         if not self.buffered_nce:
@@ -740,6 +764,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
     def do_local_nce(self, latents, target_latents, observation):
         local_latents = latents.flatten(-2, -1).permute(2, 0, 1)
         local_latents = self.local_classifier(local_latents)
+        local_latents = self.local_final_classifier(local_latents)
         local_target_latents = target_latents.flatten(-2, -1).permute(2, 0, 1)
         with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
             local_targets = self.local_target_classifier(local_target_latents)
@@ -863,7 +888,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         nce_accs = (global_nce_accs + local_nce_accs + gl_nce_accs)/self.num_nces
 
         nce_loss = nce_loss.view(-1, observation.shape[1]) # split to batch, jumps
-        nce_accs = nce_accs.mean().item()
 
         if self.momentum_encoder:
             update_state_dict(self.nce_target_encoder,
@@ -874,16 +898,15 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 if self.local_nce and self.classifier_type != "q_l1":
                     update_state_dict(self.local_target_classifier,
                                       self.local_classifier.state_dict(),
-                                      0.001)
+                                      self.momentum_tau)
                 if self.global_nce:
                     update_state_dict(self.global_target_classifier,
                                       self.global_classifier.state_dict(),
-                                      0.001)
+                                      self.momentum_tau)
                 if self.global_local_nce:
                     update_state_dict(self.global_local_target_classifier,
                                       self.global_local_classifier.state_dict(),
-                                      0.001)
-
+                                      self.momentum_tau)
         return nce_loss, nce_accs
 
     def apply_transforms(self, transforms, eval_transforms, image):
@@ -1306,6 +1329,19 @@ def weights_init(m):
         torch.nn.init.kaiming_uniform_(m.weight, nonlinearity='linear')
         torch.nn.init.zeros_(m.bias)
 
+def orthogonal_init(m):
+    """Custom weight init for Conv2D and Linear layers."""
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(m.weight.data)
+        m.bias.data.fill_(0.0)
+    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+        # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
+        assert m.weight.size(2) == m.weight.size(3)
+        m.weight.data.fill_(0.0)
+        m.bias.data.fill_(0.0)
+        mid = m.weight.size(2) // 2
+        gain = nn.init.calculate_gain('relu')
+        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 class CurlEncoder(nn.Module):
     def __init__(self,
@@ -1480,6 +1516,38 @@ class Conv2dSame(nn.Module):
         return x_out
 
 
+class ImpalaCNN(nn.Module):
+    def __init__(self, input_channels,
+                 depths=(16, 32, 32, 32),
+                 norm_type="bn"):
+        super(ImpalaCNN, self).__init__()
+        self.depths = [input_channels] + depths
+        self.layers = []
+        self.norm_type = norm_type
+        for i in range(len(depths)):
+            self.layers.append(self._make_layer(self.depths[i],
+                                                self.depths[i+1]))
+        self.layers = nn.Sequential(*self.layers)
+        self.train()
+
+    def _make_layer(self, in_channels, depth):
+        return nn.Sequential(
+            Conv2dSame(in_channels, depth, 3),
+            nn.MaxPool2d(3, stride=2),
+            nn.ReLU(),
+            ResidualBlock(depth, depth, norm_type=self.norm_type),
+            nn.ReLU(),
+            ResidualBlock(depth, depth, norm_type=self.norm_type)
+        )
+
+    @property
+    def local_layer_depth(self):
+        return self.depths[-2]
+
+    def forward(self, inputs, fmaps=False):
+        return self.layers(inputs)
+
+
 def maybe_transform(image, transform, alt_transform, p=0.8):
     processed_images = transform(image)
     if p >= 1:
@@ -1501,3 +1569,4 @@ class Intensity(nn.Module):
         r = torch.randn((x.size(0), 1, 1, 1), device=x.device)
         noise = 1.0 + (self.scale * r.clamp(-2.0, 2.0))
         return x * noise
+
