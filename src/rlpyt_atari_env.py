@@ -127,10 +127,8 @@ class AtariEnv(Env):
         if self._max_start_noops > 0:
             for _ in range(self.np_random.randint(1, self._max_start_noops + 1)):
                 self.ale.act(0)
-                lost_life = self._check_life()
-                if lost_life or self.ale.game_over():
-                    self.reset()
-        self._get_screen(2)
+                if self.ale.game_over():
+                    self.ale.reset_game()
         self._update_obs(0)  # (don't bother to populate any frame history)
         self._step_counter = 0
         return self.get_obs()
@@ -140,18 +138,16 @@ class AtariEnv(Env):
         game_score = np.array(0., dtype="float32")
         for t in range(self._frame_skip):
             game_score += self.ale.act(a)
-            lost_life = self._check_life()  # Advances from lost_life state.
-            if lost_life and self._episodic_lives:
-                self._reset_obs()  # Internal reset.
-            game_over = self.ale.game_over() or self._step_counter >= self.horizon
-            done = game_over or (self._episodic_lives and lost_life)
-            if done:
-                break
             if t == self.frame_skip - 2:
                 self._get_screen(1)
-            elif t == self.frame_skip - 1:
-                self._get_screen(2)
+            if self.ale.game_over():
+                break
         self._update_obs(action)
+        lost_life = self._check_life()  # Advances from lost_life state.
+        if lost_life and self._episodic_lives:
+            self._reset_obs()  # Internal reset.
+        game_over = self.ale.game_over() or self._step_counter >= self.horizon
+        done = game_over or (self._episodic_lives and lost_life)
         reward = np.sign(game_score) if self._clip_reward else game_score
         info = EnvInfo(game_score=game_score, traj_done=game_over)
         self._step_counter += 1
@@ -183,6 +179,7 @@ class AtariEnv(Env):
 
     def _update_obs(self, action):
         """Max of last two frames; crop two rows; downsample by 2x."""
+        self._get_screen(2)
         np.maximum(self._raw_frame_1, self._raw_frame_2, self._max_frame)
         img = cv2.resize(self._max_frame, (self.imagesize, self.imagesize), cv2.INTER_LINEAR)
         if len(img.shape) == 2:
