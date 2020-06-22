@@ -130,6 +130,7 @@ class AtariEnv(Env):
                 lost_life = self._check_life()
                 if lost_life or self.ale.game_over():
                     self.reset()
+        self._get_screen(2)
         self._update_obs(0)  # (don't bother to populate any frame history)
         self._step_counter = 0
         return self.get_obs()
