@@ -75,9 +75,11 @@ class AtariEnv(Env):
                  grayscale=True,
                  imagesize=84,
                  seed=42,
+                 id=0,
                  ):
         save__init__args(locals(), underscore=True)
         # ALE
+        seed = seed*100 + id
         game_path = atari_py.get_game_path(game)
         if not os.path.exists(game_path):
             raise IOError("You asked for game {} but path {} does not "
