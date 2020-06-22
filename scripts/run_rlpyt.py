@@ -29,7 +29,7 @@ import psutil
 
 from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel, \
     SyncRlEvalWandb
-from src.sampler import OneToOneSerialEvalCollector, OneToOneGpuEvalCollector, SerialEvalCollector
+from src.sampler import OneToOneSerialEvalCollector, OneToOneGpuEvalCollector, SerialEvalCollector, SerialSampler
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
 from src.rlpyt_agents import DQNSearchAgent
 from src.rlpyt_atari_env import AtariEnv
@@ -67,12 +67,12 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['optim']['eps'] = 0.00015
     config["sampler"]["eval_max_trajectories"] = 100
     config["sampler"]["eval_n_envs"] = 100
-    config["sampler"]["eval_max_steps"] = 100*28000
+    config["sampler"]["eval_max_steps"] = 100*29000
     config['sampler']['batch_B'] = args.batch_b
     config['sampler']['batch_T'] = args.batch_t
     if args.noisy_nets:
-        config['agent']['eps_init'] = 0.
-        config['agent']['eps_final'] = 0.
+        config['agent']['eps_init'] = args.noisy_eps
+        config['agent']['eps_final'] = args.noisy_eps
         config['agent']['eps_eval'] = 0.001
     wandb.config.update(config)
     sampler = SerialSampler(
@@ -225,8 +225,8 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config['sampler']['batch_T'] = args.batch_t
     config["runner"]["log_interval_steps"] = 1e4
     if args.noisy_nets:
-        config['agent']['eps_init'] = 0.
-        config['agent']['eps_final'] = 0.
+        config['agent']['eps_init'] = args.noisy_eps
+        config['agent']['eps_final'] = args.noisy_eps
         config['agent']['eps_eval'] = 0.001
     wandb.config.update(config)
     sampler = samplerCls(
@@ -394,7 +394,7 @@ if __name__ == "__main__":
     parser.add_argument('--noisy-nets', type=int, default=1)
     parser.add_argument('--grad-scale-factor', type=float, default=0.5, help="Amount by which to scale gradients for trans. model")
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
-    parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1", "none"], help='Style of NCE classifier')
+    parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1", "q_l2", "none"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
                         choices=["none", "rrc", "affine", "crop", "blur", "shift", "intensity"],
                         help='Style of augmentation')
@@ -410,6 +410,7 @@ if __name__ == "__main__":
     parser.add_argument('--nce-loss-weight-final', type=float, default=-1.)
     parser.add_argument('--nce-loss-decay-steps', type=float, default=50000)
     parser.add_argument('--eps-steps', type=int, default=50000)
+    parser.add_argument('--noisy-eps', type=float, default=0.)
     parser.add_argument('--detach-model', type=int, default=1)
     parser.add_argument('--final-eval-only', type=int, default=0)
     parser.add_argument('--time-contrastive', type=int, default=0)

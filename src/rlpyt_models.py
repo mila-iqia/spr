@@ -471,7 +471,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             )
         elif encoder == "impala":
             self.conv = ImpalaCNN(f*c, depths=[16, 32, 64],
-                                  norm_type=norm_type)
+                                  norm_type="none")
         elif encoder == "effnet":
             self.conv = RLEffNet(imagesize,
                                  in_channels=f*c,
@@ -607,6 +607,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 elif self.classifier_type == "q_l1":
                     self.global_classifier = nn.Sequential(*self.head.network[:2])
                     self.global_final_classifier = nn.Linear(256, 256)
+                    self.global_target_classifier = self.global_classifier
+                    global_buffer_size = 256
+                elif self.classifier_type == "q_l2":
+                    self.global_classifier = nn.Sequential(self.head, nn.Flatten(-2, -1))
+                    self.global_final_classifier = nn.Linear(output_size*n_atoms, output_size*n_atoms)
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
                 elif self.classifier_type == "bilinear":
