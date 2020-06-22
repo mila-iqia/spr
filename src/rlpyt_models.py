@@ -419,7 +419,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 transformation = nn.Sequential(nn.ReplicationPad2d(4), RandomCrop((84, 84)))
                 eval_transformation = nn.Identity()
             elif aug == "intensity":
-                transformation = Intensity(scale=0.1)
+                transformation = Intensity(scale=0.05)
                 eval_transformation = nn.Identity()
             elif aug == "none":
                 transformation = eval_transformation = nn.Identity()
