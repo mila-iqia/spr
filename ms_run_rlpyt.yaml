@@ -31,16 +31,16 @@ storage:
 #   data upload is not required for this example
 search:
   job_template:
-    name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
+    name: rlpyt_byol_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
     sku: G1
     command:
-      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --encoder nature --jumps {jumps} --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} {ncetype} --classifier {classifier} --batch-size 32 --target-update-interval 1 --n-step 10 --n-steps 100000 --final-eval-only 1 --distributional {distributional} --target-update-interval {tui} --eps-steps 5000
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model --replay-ratio {replay-ratio} --n-gpu 1 --encoder nature --jumps {jumps} --noisy-nets {noisy} --max-grad-norm {mgn} --dueling {dueling} --seed {seed} {ncetype} --classifier {classifier} --batch-size 32 --n-step 10 --n-steps 100000 --final-eval-only 1 --distributional {distributional} --target-update-interval {tui} --eps-steps 5000
   type: grid
   max_trials: 500
   params:
     - name: game
       spec: discrete
-      values: ["bank_heist", "alien", "pong", "demon_attack", "qbert", "ms_pacman", "battle_zone", "kung_fu_master"]
+      values: ['ms_pacman', 'hero', 'boxing', 'frostbite', 'up_n_down', 'pong', 'bank_heist', 'breakout', 'battle_zone', 'kangaroo']
     - name: arguments
       spec: discrete
       values: ['--padding valid --imagesize 84 --eval-imagesize 84 --nce 1 --time-contrastive 0 --nce-loss-weight 0.
