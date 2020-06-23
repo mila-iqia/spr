@@ -67,7 +67,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['optim']['eps'] = 0.00015
     config["sampler"]["eval_max_trajectories"] = 1000
     config["sampler"]["eval_n_envs"] = 1
-    config["sampler"]["eval_max_steps"] = int(125e3)
+    config["sampler"]["eval_max_steps"] = int(500e3)
     config['sampler']['batch_B'] = args.batch_b
     config['sampler']['batch_T'] = args.batch_t
     if args.noisy_nets:
@@ -339,7 +339,7 @@ if __name__ == "__main__":
     parser.add_argument('--n-gpu', type=int, default=4)
     parser.add_argument('--der', action="store_true")
     parser.add_argument('--control', action="store_true")
-    parser.add_argument('--fasteval', type=int, default=1)
+    parser.add_argument('--fasteval', type=int, default=0)
     parser.add_argument('--async-sample', action="store_true")
     parser.add_argument('--learn-model', action="store_true")
     parser.add_argument('--stack-actions', type=int, default=0)
@@ -443,7 +443,7 @@ if __name__ == "__main__":
         args.momentum_encoder = 1
         args.buffered_nce = 0
 
-    wandb.init(project='rlpyt', entity='abs-world-models', config=args, tags=[args.tag])
+    wandb.init(project='envfix', entity='abs-world-models', config=args, tags=[args.tag])
     wandb.config.update(vars(args))
     if args.der:
         debug_build_and_train(game=args.game,
