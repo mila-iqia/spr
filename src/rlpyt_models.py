@@ -435,16 +435,17 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.eval_transforms.append(nn.Identity())
 
         self.dueling = dueling
-        f, c, h, w = image_shape
+        f, c = image_shape[:2]
+        in_channels = np.prod(image_shape[:2])
         if encoder == "repnet":
-            self.conv = RepNet(f*c, norm_type=norm_type)
+            self.conv = RepNet(in_channels, norm_type=norm_type)
         elif encoder == "curl":
-            self.conv = CurlEncoder(f*c, norm_type=norm_type, padding=padding)
+            self.conv = CurlEncoder(in_channels, norm_type=norm_type, padding=padding)
         elif encoder == "midsize":
-            self.conv = SmallEncoder(256, f*c, norm_type=norm_type)
+            self.conv = SmallEncoder(256, in_channels, norm_type=norm_type)
         elif encoder == "nature":
             self.conv = Conv2dModel(
-                in_channels=f*c,
+                in_channels=in_channels,
                 channels=[32, 64, 64],
                 kernel_sizes=[8, 4, 3],
                 strides=[4, 2, 1],
@@ -453,7 +454,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             )
         elif encoder == "deepnature":
             self.conv = Conv2dModel(
-                in_channels=f*c,
+                in_channels=in_channels,
                 channels=[32, 64, 64, 64, 64],
                 kernel_sizes=[8, 4, 3, 3, 3],
                 strides=[4, 2, 1, 1, 1],
@@ -462,15 +463,19 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             )
         elif encoder == "bignature":
             self.conv = Conv2dModel(
-                in_channels=f*c,
+                in_channels=in_channels,
                 channels=[32, 64, 128, 128],
                 kernel_sizes=[8, 4, 3, 3],
                 strides=[4, 2, 1, 1],
                 paddings=[0, 0, 0, 1],
                 use_maxpool=False,
             )
+        elif encoder == "mlp":
+            self.conv = MLPEncoder(image_shape,
+                                   hidden_sizes=[1024, 1024, 1024])
+
         elif encoder == "impala":
-            self.conv = ImpalaCNN(f*c, depths=[16, 32, 64],
+            self.conv = ImpalaCNN(in_channels, depths=[16, 32, 64],
                                   norm_type="none")
         elif encoder == "effnet":
             self.conv = RLEffNet(imagesize,
@@ -526,6 +531,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             dynamics_model = FiLMTransitionModel
         elif transition_model == "effnet":
             dynamics_model = EffnetTransitionModel
+        elif transition_model == "mlp":
+            dynamics_model = MLPTransitionModel
         else:
             dynamics_model = TransitionModel
 
@@ -611,7 +618,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     global_buffer_size = 256
                 elif self.classifier_type == "q_l2":
                     self.global_classifier = nn.Sequential(self.head, nn.Flatten(-2, -1))
-                    self.global_final_classifier = nn.Linear(output_size*n_atoms, output_size*n_atoms)
+                    self.global_final_classifier = nn.Identity()
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
                 elif self.classifier_type == "bilinear":
@@ -1575,3 +1582,100 @@ class Intensity(nn.Module):
         noise = 1.0 + (self.scale * r.clamp(-2.0, 2.0))
         return x * noise
 
+
+class MLPEncoder(nn.Module):
+    def __init__(self, input_shape, hidden_sizes):
+        super().__init__()
+        self.input_shape = input_shape
+        self.input_size = np.prod(input_shape)
+        self.layers = []
+        self.layers.append(nn.Linear(self.input_size, hidden_sizes[0]))
+        self.layers.append(nn.ReLU())
+
+        for i in range(len(hidden_sizes) - 1):
+            self.layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i+1]))
+            self.layers.append(nn.ReLU())
+
+        self.network = nn.Sequential(*self.layers)
+
+    def forward(self, x):
+        x = x.reshape(-1, self.input_size)
+        output = self.network(x)
+        output = output.unsqueeze(-1).unsqueeze(-1)
+
+        return output
+
+
+class MLPResidualBlock(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 norm_type="bn"):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(in_channels, out_channels),
+            nn.ReLU(),
+            init_normalization(out_channels, norm_type, one_d=True),
+            nn.Linear(out_channels, out_channels),
+            init_normalization(out_channels, norm_type, one_d=True),
+        )
+
+    def forward(self, x):
+        residual = x
+        out = self.block(x)
+        out += residual
+        out = F.relu(out)
+        return out
+
+
+class MLPTransitionModel(nn.Module):
+    def __init__(self,
+                 channels,
+                 num_actions,
+                 args=None,
+                 blocks=16,
+                 hidden_size=256,
+                 pixels=36,
+                 limit=300,
+                 action_dim=6,
+                 norm_type="bn",
+                 renormalize=True):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_actions = num_actions
+        self.args = args
+        self.renormalize = renormalize
+        layers = [nn.Linear(channels*pixels+num_actions, hidden_size),
+                  nn.ReLU(),
+                  init_normalization(hidden_size, norm_type, one_d=True)]
+        for _ in range(blocks):
+            layers.append(MLPResidualBlock(hidden_size,
+                                        hidden_size,
+                                        norm_type))
+        layers.extend([nn.Linear(hidden_size, channels*pixels),
+                      nn.ReLU()])
+
+        self.action_embedding = nn.Embedding(num_actions, pixels*action_dim)
+
+        self.network = nn.Sequential(*layers)
+        layers = [nn.Flatten(-3, -1),
+                  nn.Linear(pixels*channels, 128),
+                  nn.ReLU(),
+                  nn.Linear(128, limit*2 + 1)]
+        self.reward_predictor = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x, action):
+        flat_x = x.flatten(-3, -1)
+        batch_range = torch.arange(action.shape[0], device=action.device)
+        action_onehot = torch.zeros(action.shape[0],
+                                    self.num_actions,
+                                    device=action.device)
+        action_onehot[batch_range, action] = 1
+        stacked_x = torch.cat([flat_x, action_onehot], 1)
+        next_state = self.network(stacked_x)
+        if self.renormalize:
+            next_state = renormalize(next_state, 1)
+        next_state = next_state.view(*x.shape)
+        next_reward = self.reward_predictor(next_state)
+        return next_state, next_reward
