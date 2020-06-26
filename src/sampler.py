@@ -93,7 +93,6 @@ class OneToOneSerialEvalCollector(SerialEvalCollector):
         self.agent.eval_mode(itr)
         live_envs = list(range(len(self.envs)))
         for t in range(self.max_T):
-
             act_pyt, agent_info = self.agent.step(obs_pyt, act_pyt, rew_pyt)
             action = numpify_buffer(act_pyt)
 

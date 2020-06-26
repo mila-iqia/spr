@@ -788,12 +788,18 @@ class FiLMTransitionModel(nn.Module):
         return next_state, next_reward
 
 
-def init_normalization(channels, type="bn", affine=True):
+def init_normalization(channels, type="bn", affine=True, one_d=False):
     assert type in ["bn", "ln", "in", "none", None]
     if type == "bn":
-        return nn.BatchNorm2d(channels, affine=affine)
+        if one_d:
+            return nn.BatchNorm1d(channels, affine=affine)
+        else:
+            return nn.BatchNorm2d(channels, affine=affine)
     elif type == "ln":
-        return nn.GroupNorm(1, channels, affine=affine)
+        if one_d:
+            return nn.LayerNorm(channels, elementwise_affine=affine)
+        else:
+            return nn.GroupNorm(1, channels, affine=affine)
     elif type == "in":
         return nn.GroupNorm(channels, channels, affine=affine)
     elif type == "none" or type is None:
