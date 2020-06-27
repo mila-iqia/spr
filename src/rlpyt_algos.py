@@ -334,11 +334,11 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         delta = y - q
         losses = 0.5 * delta ** 2
         abs_delta = abs(delta)
-        if self.delta_clip is not None:  # Huber loss.
+        if self.delta_clip > 0:  # Huber loss.
             b = self.delta_clip * (abs_delta - self.delta_clip / 2)
             losses = torch.where(abs_delta <= self.delta_clip, losses, b)
         td_abs_errors = abs_delta.detach()
-        if self.delta_clip is not None:
+        if self.delta_clip > 0:
             td_abs_errors = torch.clamp(td_abs_errors, 0, self.delta_clip)
         return losses, td_abs_errors
 

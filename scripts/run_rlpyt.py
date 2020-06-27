@@ -52,9 +52,11 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['env']['game'] = game
     config["env"]["stack_actions"] = args.stack_actions
     config["env"]["grayscale"] = args.grayscale
+    config["env"]["num_img_obs"] = args.framestack
     config["eval_env"]["game"] = config["env"]["game"]
     config["eval_env"]["stack_actions"] = args.stack_actions
     config["eval_env"]["grayscale"] = args.grayscale
+    config["eval_env"]["num_img_obs"] = args.framestack
     config['env']['imagesize'] = args.imagesize
     config['eval_env']['imagesize'] = args.eval_imagesize
     config['env']['seed'] = args.seed
@@ -143,6 +145,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["algo"]["amortization_decay_constant"] = args.amortization_decay_constant
         config["algo"]["time_contrastive"] = args.time_contrastive
         config["algo"]["distributional"] = args.distributional
+        config["algo"]["delta_clip"] = args.delta_clip
         config["algo"]["prioritized_replay"] = args.prioritized_replay
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
@@ -352,6 +355,7 @@ if __name__ == "__main__":
     parser.add_argument('--stack-actions', type=int, default=0)
     parser.add_argument('--seed', type=int, default=69)
     parser.add_argument('--grayscale', type=int, default=1)
+    parser.add_argument('--framestack', type=int, default=4)
     parser.add_argument('--imagesize', type=int, default=100)
     parser.add_argument('--use-ram', type=int, default=0)
     parser.add_argument('--bits', type=int, default=0)
@@ -389,6 +393,7 @@ if __name__ == "__main__":
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
     parser.add_argument('--distributional', type=int, default=1)
+    parser.add_argument('--delta-clip', type=float, default=1., help="Huber Delta")
     parser.add_argument('--prioritized-replay', type=int, default=1)
     parser.add_argument('--cosine-nce', type=int, default=0)
     parser.add_argument('--byol', type=str, default="0",
