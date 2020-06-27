@@ -29,10 +29,11 @@ import psutil
 
 from src.rlpyt_models import MinibatchRlEvalWandb, AsyncRlEvalWandb, PizeroCatDqnModel, PizeroSearchCatDqnModel, \
     SyncRlEvalWandb
-from src.sampler import OneToOneSerialEvalCollector, OneToOneGpuEvalCollector, SerialEvalCollector
+from src.sampler import OneToOneSerialEvalCollector, OneToOneGpuEvalCollector, SerialEvalCollector, SerialSampler
 from src.rlpyt_algos import PizeroCategoricalDQN, PizeroModelCategoricalDQN
 from src.rlpyt_agents import DQNSearchAgent
 from src.rlpyt_atari_env import AtariEnv
+from src.rlpyt_atari_ram_env import AtariRAMEnv
 from src.rlpyt_control_model import AtariCatDqnModel, CategoricalDQN
 
 import torch
@@ -42,6 +43,12 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     config = configs['ernbw']
+    if args.use_ram:
+        env = AtariRAMEnv
+        config["env"]["bits"] = args.bits
+        config["eval_env"]["bits"] = args.bits
+    else:
+        env = AtariEnv
     config['env']['game'] = game
     config["env"]["stack_actions"] = args.stack_actions
     config["env"]["grayscale"] = args.grayscale
@@ -71,12 +78,12 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
     config['sampler']['batch_B'] = args.batch_b
     config['sampler']['batch_T'] = args.batch_t
     if args.noisy_nets:
-        config['agent']['eps_init'] = 0.
-        config['agent']['eps_final'] = 0.
+        config['agent']['eps_init'] = args.noisy_eps
+        config['agent']['eps_final'] = args.noisy_eps
         config['agent']['eps_eval'] = 0.001
     wandb.config.update(config)
     sampler = SerialSampler(
-        EnvCls=AtariEnv,
+        EnvCls=env,
         TrajInfoCls=AtariTrajInfo,  # default traj info + GameScore
         env_kwargs=config["env"],
         eval_env_kwargs=config["eval_env"],
@@ -225,8 +232,8 @@ def build_and_train(game="ms_pacman", run_ID=0, model=False,
     config['sampler']['batch_T'] = args.batch_t
     config["runner"]["log_interval_steps"] = 1e4
     if args.noisy_nets:
-        config['agent']['eps_init'] = 0.
-        config['agent']['eps_final'] = 0.
+        config['agent']['eps_init'] = args.noisy_eps
+        config['agent']['eps_final'] = args.noisy_eps
         config['agent']['eps_eval'] = 0.001
     wandb.config.update(config)
     sampler = samplerCls(
@@ -346,6 +353,8 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=69)
     parser.add_argument('--grayscale', type=int, default=1)
     parser.add_argument('--imagesize', type=int, default=100)
+    parser.add_argument('--use-ram', type=int, default=0)
+    parser.add_argument('--bits', type=int, default=0)
     parser.add_argument('--n-steps', type=int, default=100000)
     parser.add_argument('--dqn-hidden-size', type=int, default=256)
     parser.add_argument('--target-update-interval', type=int, default=2000)
@@ -361,12 +370,17 @@ if __name__ == "__main__":
     parser.add_argument('--dynamics-blocks', type=int, default=2)
     parser.add_argument('--n-step', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=64)
-    parser.add_argument('--transition-model', type=str, default='standard', choices=["standard", "film", "effnet"], help='Type of transition model to use')
+    parser.add_argument('--transition-model', type=str, default='standard',
+                        choices=["standard", "film", "effnet", "mlp"],
+                        help='Type of transition model to use')
     parser.add_argument('--tag', type=str, default='', help='Tag for wandb run.')
+    parser.add_argument('--wandb-dir', type=str, default='', help='Directory for wandb files.')
     parser.add_argument('--norm-type', type=str, default='in', choices=["bn", "ln", "in", "none"], help='Normalization')
-    parser.add_argument('--encoder', type=str, default='curl', choices=["repnet", "curl", "midsize",
-                                                                        "nature", "effnet", "bignature",
-                                                                        "deepnature", "impala"], help='Type of encoder to use')
+    parser.add_argument('--encoder', type=str, default='curl',
+                        choices=["repnet", "curl", "midsize", "nature",
+                                 "effnet", "bignature", "deepnature",
+                                 "impala", "mlp"],
+                        help='Type of encoder to use')
     parser.add_argument('--padding', type=str, default='same', choices=["same", "valid"], help='Padding choice for Curl Encoder')
     parser.add_argument('--init', type=str, default='pytorch', choices=["pytorch", "orthogonal"], help='Initialization type')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
@@ -378,7 +392,7 @@ if __name__ == "__main__":
     parser.add_argument('--prioritized-replay', type=int, default=1)
     parser.add_argument('--cosine-nce', type=int, default=0)
     parser.add_argument('--byol', type=str, default="0",
-                        choices=["0", "1", "both"])
+                        choices=["0", "1", "both", "with_norm", "squared"])
     parser.add_argument('--buffered-nce', type=int, default=0)
     parser.add_argument('--momentum-encoder', type=int, default=0)
     parser.add_argument('--target-encoder-sn', type=int, default=0)
@@ -394,7 +408,7 @@ if __name__ == "__main__":
     parser.add_argument('--noisy-nets', type=int, default=1)
     parser.add_argument('--grad-scale-factor', type=float, default=0.5, help="Amount by which to scale gradients for trans. model")
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
-    parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1", "none"], help='Style of NCE classifier')
+    parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1", "q_l2", "none"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
                         choices=["none", "rrc", "affine", "crop", "blur", "shift", "intensity"],
                         help='Style of augmentation')
@@ -410,6 +424,7 @@ if __name__ == "__main__":
     parser.add_argument('--nce-loss-weight-final', type=float, default=-1.)
     parser.add_argument('--nce-loss-decay-steps', type=float, default=50000)
     parser.add_argument('--eps-steps', type=int, default=50000)
+    parser.add_argument('--noisy-eps', type=float, default=0.)
     parser.add_argument('--detach-model', type=int, default=1)
     parser.add_argument('--final-eval-only', type=int, default=0)
     parser.add_argument('--time-contrastive', type=int, default=0)

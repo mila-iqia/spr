@@ -316,8 +316,8 @@ class BlockNCE:
         self.inv_temp = 1/temperature
         if use_self_targets != "both" and use_self_targets != "only":
             use_self_targets = int(use_self_targets)
-        if byol != "both":
-            byol = int(byol)
+        if byol == "0":
+            byol = False
         self.use_self_targets = use_self_targets
         self.normalize = normalize
         self.byol = byol
@@ -341,15 +341,19 @@ class BlockNCE:
         return loss.mean(0).transpose(0, 1), acc
 
     def byol_loss(self, f_x1s, f_x2s):
-        if not self.normalize:
-            f_x1s = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
-            f_x2s = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
+        f_x1 = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
+        f_x2 = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
 
-        f_x1 = f_x1s.flatten(1, 2)
-        f_x2 = f_x2s.flatten(1, 2)
-
-        loss = torch.norm(f_x1 - f_x2, p=2, dim=-1).mean(0)
-        loss = loss.view(f_x1s.shape[1], f_x1s.shape[2])
+        if "squared" in self.byol:
+            loss = F.mse_loss(f_x1, f_x2, reduction="none").sum(-1).mean(0)
+        elif "with_norm" in self.byol:
+            loss = F.mse_loss(f_x1, f_x2, reduction="none").sum(-1).mean(0)
+            norm_1 = torch.norm(f_x1s, dim=-1, keepdim=False)
+            norm_2 = torch.norm(f_x2s, dim=-1, keepdim=False)
+            norm_loss = F.mse_loss(norm_1, norm_2, reduction="none").mean(0)
+            loss = loss + norm_loss
+        else:
+            loss = torch.norm(f_x1 - f_x2, p=2, dim=-1).mean(0)
         return loss
 
     def forward(self, f_x1s, f_x2s):
@@ -372,15 +376,16 @@ class BlockNCE:
         """
         # reshaping for big matrix multiply
         # f_x1 = f_x1.permute(2, 0, 1)  # (n_locs, n_batch, n_rkhs)
-        if self.normalize:
-            f_x1s = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
-            f_x2s = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
 
         if self.byol:
             byol_loss = self.byol_loss(f_x1s, f_x2s)
             accs = 0
         else:
             byol_loss = 0
+
+        if self.normalize:
+            f_x1s = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
+            f_x2s = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
 
         if self.byol == "both" or not self.byol:
             if self.use_self_targets == "both":
