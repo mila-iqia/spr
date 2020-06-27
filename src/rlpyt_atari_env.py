@@ -75,6 +75,7 @@ class AtariEnv(Env):
                  grayscale=True,
                  imagesize=84,
                  seed=42,
+                 id=0,
                  ):
         save__init__args(locals(), underscore=True)
         # ALE
@@ -83,7 +84,7 @@ class AtariEnv(Env):
             raise IOError("You asked for game {} but path {} does not "
                 " exist".format(game, game_path))
         self.ale = atari_py.ALEInterface()
-        self.seed(seed)
+        self.seed(seed, id)
         self.ale.setFloat(b'repeat_action_probability', repeat_action_probability)
         self.ale.loadROM(game_path)
 
@@ -110,8 +111,11 @@ class AtariEnv(Env):
         self._horizon = int(horizon)
         self.reset()
 
-    def seed(self, seed=None):
-        self.np_random, seed1 = seeding.np_random(seed)
+    def seed(self, seed=None, id=0):
+        _, seed1 = seeding.np_random(seed)
+        if id > 0:
+            seed = seed*100 + id
+        self.np_random, _ = seeding.np_random(seed)
         # Derive a random seed. This gets passed as a uint, but gets
         # checked as an int elsewhere, so we need to keep it below
         # 2**31.
@@ -127,6 +131,8 @@ class AtariEnv(Env):
         if self._max_start_noops > 0:
             for _ in range(self.np_random.randint(1, self._max_start_noops + 1)):
                 self.ale.act(0)
+                if self._check_life():
+                    self.reset()
         self._update_obs(0)  # (don't bother to populate any frame history)
         self._step_counter = 0
         return self.get_obs()
