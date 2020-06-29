@@ -377,6 +377,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             dqn_hidden_size=256,
             byol_tau=0.01,
             init="standard",
+            renormalize=False,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -544,9 +545,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                  limit=1,
                                                  blocks=dynamics_blocks,
                                                  norm_type=norm_type,
-                                                 renormalize=encoder=="repnet")
+                                                 renormalize=renormalize)
         else:
             self.dynamics_model = nn.Identity()
+
+        self.renormalize = renormalize
 
         if self.use_nce:
             self.local_nce = local_nce
@@ -882,6 +885,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             target_images = target_images[..., -1:, :, :]
         with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
             target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
+            if self.renormalize:
+                target_latents = renormalize(target_latents, -3)
 
         if self.global_local_nce:
             gl_nce_loss, gl_nce_accs = self.do_global_local_nce(latents, target_latents, observation)
@@ -950,13 +955,15 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
     def stem_parameters(self):
         return list(self.conv.parameters()) + list(self.head.parameters())
 
-    def stem_forward(self, img, prev_action, prev_reward):
+    def stem_forward(self, img, prev_action=None, prev_reward=None):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
         for each state/observation, using softmax output nonlinearity."""
         # Infer (presence of) leading dimensions: [T,B], [B], or [].
         lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
 
         conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
+        if self.renormalize:
+            conv_out = renormalize(conv_out, -3)
         return conv_out
 
     def head_forward(self,
@@ -1054,6 +1061,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
 
             conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
+            if self.renormalize:
+                conv_out = renormalize(conv_out, -3)
             p = self.head(conv_out)
 
             p = p.view(observation.shape[0],
@@ -1075,6 +1084,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, self.eval_augmentation)
         hidden_state = self.conv(obs)
+        if self.renormalize:
+            hidden_state = renormalize(hidden_state, -3)
         value_logits = self.head(hidden_state)
 
         # reward_logits = self.dynamics_model.reward_predictor(hidden_state)
@@ -1581,6 +1592,35 @@ class Intensity(nn.Module):
         r = torch.randn((x.size(0), 1, 1, 1), device=x.device)
         noise = 1.0 + (self.scale * r.clamp(-2.0, 2.0))
         return x * noise
+
+
+class TCMLPEncoder(nn.Module):
+    def __init__(self, input_shape, hidden_sizes):
+        super().__init__()
+        self.input_shape = input_shape
+        self.framestack = self.input_shape[0]
+        self.channels = np.prod(self.input_shape[1:])
+        self.layers = [nn.Conv1d(self.framestack, self.framestack*4, self.framestack, stride=1, padding=0),
+                       nn.ReLU(),
+                       nn.Conv1d(self.framestack, self.framestack, self.framestack, stride=1, padding=0),
+                       nn.ReLU(),
+                       nn.Flatten(-2, -1)]
+
+        self.layers.append(nn.Linear(self.channels*self.framestack, hidden_sizes[0]))
+        self.layers.append(nn.ReLU())
+
+        for i in range(len(hidden_sizes) - 1):
+            self.layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i+1]))
+            self.layers.append(nn.ReLU())
+
+        self.network = nn.Sequential(*self.layers)
+
+    def forward(self, x):
+        x = x.reshape(-1, self.framestack, self.channels)
+        output = self.network(x)
+        output = output.unsqueeze(-1).unsqueeze(-1)
+
+        return output
 
 
 class MLPEncoder(nn.Module):

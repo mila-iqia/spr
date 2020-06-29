@@ -153,9 +153,11 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
                  amortization_decay_constant=0.,
                  time_contrastive=0,
                  distributional=1,
+                 separate_optimizer=0,
                  **kwargs):
         super().__init__(**kwargs)
         self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy
+        self.separate_optimizer = separate_optimizer
         self.nce_loss_weight = nce_loss_weight
         self.nce_loss_weight_initial = nce_loss_weight
         self.nce_loss_weight_final = nce_loss_weight_final
@@ -227,6 +229,10 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
         if self.prioritized_replay:
             self.pri_beta_itr = max(1, self.pri_beta_steps // self.sampler_bs)
 
+        if self.separate_optimizer:
+            self.nce_optimizer = self.OptimCls(self.model.parameters(),
+                lr=self.learning_rate, **self.optim_kwargs)
+
     def samples_to_buffer(self, samples):
         """Defines how to add data from sampler into the replay buffer. Called
         in optimize_agent() if samples are provided to that method.  In
@@ -258,13 +264,14 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
             loss, td_abs_errors, model_rl_loss, reward_loss,\
             nce_loss, model_nce_loss, nce_accs, amortization_loss = self.loss(samples_from_replay)
+            nce_loss = self.nce_loss_weight*nce_loss + self.model_nce_weight*model_nce_loss
             total_loss = loss + self.model_rl_weight*model_rl_loss \
-                              + self.nce_loss_weight*nce_loss \
-                              + self.model_nce_weight*model_nce_loss \
                               + self.reward_loss_weight*reward_loss \
                               + self.amortization_loss_weight*amortization_loss
+            if not self.separate_optimizer:
+                total_loss = total_loss + nce_loss
             self.optimizer.zero_grad()
-            total_loss.backward()
+            total_loss.backward(keep_graph=self.separate_optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.model.stem_parameters(), self.clip_grad_norm)
             if len(list(self.model.dynamics_model.parameters())) > 0:
@@ -273,6 +280,16 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             else:
                 model_grad_norm = 0
             self.optimizer.step()
+            if self.separate_optimizer:
+                self.nce_optimizer.zero_grad()
+                nce_loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.stem_parameters(), self.clip_grad_norm)
+                if len(list(self.model.dynamics_model.parameters())) > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                    self.model.dynamics_model.parameters(), self.clip_grad_norm)
+                self.nce_optimizer.step()
+
 
             if self.prioritized_replay:
                 self.replay_buffer.update_batch_priorities(td_abs_errors)
