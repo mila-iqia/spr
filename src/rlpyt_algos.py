@@ -271,7 +271,7 @@ class PizeroModelCategoricalDQN(PizeroCategoricalDQN):
             if not self.separate_optimizer:
                 total_loss = total_loss + nce_loss
             self.optimizer.zero_grad()
-            total_loss.backward(keep_graph=self.separate_optimizer)
+            total_loss.backward(retain_graph=bool(self.separate_optimizer))
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.model.stem_parameters(), self.clip_grad_norm)
             if len(list(self.model.dynamics_model.parameters())) > 0:
