@@ -733,6 +733,8 @@ class ConvFiLM(nn.Module):
 
 
 def renormalize(tensor, first_dim=1):
+    if first_dim < 0:
+        first_dim = len(tensor.shape) + first_dim
     flat_tensor = tensor.view(*tensor.shape[:first_dim], -1)
     max = torch.max(flat_tensor, first_dim, keepdim=True).values
     min = torch.min(flat_tensor, first_dim, keepdim=True).values

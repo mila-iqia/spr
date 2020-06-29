@@ -123,6 +123,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["cosine_nce"] = args.cosine_nce
         config["model"]["init"] = args.init
         config["model"]["byol"] = args.byol
+        config["model"]["renormalize"] = args.renormalize
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
         config["model"]["frame_dropout"] = args.frame_dropout
@@ -146,6 +147,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["algo"]["time_contrastive"] = args.time_contrastive
         config["algo"]["distributional"] = args.distributional
         config["algo"]["delta_clip"] = args.delta_clip
+        config["algo"]["separate_optimizer"] = args.separate_optimizer
         config["algo"]["prioritized_replay"] = args.prioritized_replay
         algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
         agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
@@ -162,7 +164,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         sampler=sampler,
         n_steps=args.n_steps,
         affinity=dict(cuda_idx=cuda_idx),
-        log_interval_steps=args.n_steps//10,
+        log_interval_steps=args.n_steps//args.num_logs,
         seed=args.seed,
         final_eval_only=args.final_eval_only,
     )
@@ -359,6 +361,7 @@ if __name__ == "__main__":
     parser.add_argument('--imagesize', type=int, default=100)
     parser.add_argument('--use-ram', type=int, default=0)
     parser.add_argument('--bits', type=int, default=0)
+    parser.add_argument('--separate-optimizer', type=int, default=0)
     parser.add_argument('--n-steps', type=int, default=100000)
     parser.add_argument('--dqn-hidden-size', type=int, default=256)
     parser.add_argument('--target-update-interval', type=int, default=2000)
@@ -369,6 +372,8 @@ if __name__ == "__main__":
     parser.add_argument('--eval-imagesize', type=int, default=100)
     parser.add_argument('--beluga', action="store_true")
     parser.add_argument('--jumps', type=int, default=0)
+    parser.add_argument('--num-logs', type=int, default=10)
+    parser.add_argument('--renormalize', type=int, default=0)
     parser.add_argument('--dueling', type=int, default=1)
     parser.add_argument('--replay-ratio', type=int, default=2)
     parser.add_argument('--dynamics-blocks', type=int, default=2)
