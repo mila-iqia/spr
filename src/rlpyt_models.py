@@ -378,6 +378,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             byol_tau=0.01,
             init="standard",
             renormalize=False,
+            q_l1_type="noisy advantage"
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -615,10 +616,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
                 elif self.classifier_type == "q_l1":
-                    self.global_classifier = nn.Sequential(*self.head.network[:2])
-                    self.global_final_classifier = nn.Linear(256, 256)
+                    self.global_classifier = QL1Head(self.head, dueling=dueling, type=q_l1_type)
+                    global_buffer_size = self.global_classifier.out_features
+                    self.global_final_classifier = nn.Linear(global_buffer_size,
+                                                             global_buffer_size)
                     self.global_target_classifier = self.global_classifier
-                    global_buffer_size = 256
                 elif self.classifier_type == "q_l2":
                     self.global_classifier = nn.Sequential(self.head, nn.Flatten(-2, -1))
                     self.global_final_classifier = nn.Identity()
@@ -1288,6 +1290,40 @@ class PizeroDistributionalHeadModel(torch.nn.Module):
             module.sampling = sampling
 
 
+class QL1Head(nn.Module):
+    def __init__(self, head, dueling=False, type="noisy advantage"):
+        super().__init__()
+        self.head = head
+        self.noisy = "noisy" in type
+        self.dueling = dueling
+        self.encoders = nn.ModuleList()
+        self.relu = "relu" in type
+        value = "value" in type
+        advantage = "advantage" in type
+        if self.dueling:
+            if value:
+                self.encoders.append(self.head.value[1])
+            if advantage:
+                self.encoders.append(self.head.advantage_hidden[1])
+        else:
+            self.encoders.append(self.head.network[1])
+
+        self.out_features = sum([e.out_features for e in self.encoders])
+
+    def forward(self, x):
+        x = x.flatten(-3, -1)
+        representations = []
+        for encoder in self.encoders:
+            encoder.noise_override = self.noisy
+            representations.append(encoder(x))
+            encoder.noise_override = None
+        representation = torch.cat(representations, -1)
+        if self.relu:
+            representation = F.relu(representation)
+
+        return representation
+
+
 class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
     """An MLP head which reshapes output to [B, output_size, n_atoms]."""
 
@@ -1400,6 +1436,7 @@ class NoisyLinear(nn.Module):
         self.out_features = out_features
         self.std_init = std_init
         self.sampling = True
+        self.noise_override = None
         self.weight_mu = nn.Parameter(torch.empty(out_features, in_features))
         self.weight_sigma = nn.Parameter(torch.empty(out_features, in_features))
         self.register_buffer('weight_epsilon', torch.empty(out_features, in_features))
@@ -1436,7 +1473,11 @@ class NoisyLinear(nn.Module):
         # (due to batchnorm, dropout, or similar).
         # The extra "sampling" flag serves to override this behavior and causes
         # noise to be used even when .eval() has been called.
-        if self.training or self.sampling:
+        if self.noise_override is None:
+            use_noise = self.training or self.sampling
+        else:
+            use_noise = self.noise_override
+        if use_noise:
             return F.linear(input, self.weight_mu + self.weight_sigma * self.weight_epsilon,
                             self.bias_mu + self.bias_sigma * self.bias_epsilon)
         else:
