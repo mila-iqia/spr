@@ -126,6 +126,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["renormalize"] = args.renormalize
         config["model"]["norm_type"] = args.norm_type
         config["model"]["augmentation"] = args.augmentation
+        config["model"]["q_l1_type"] = args.q_l1_type
         config["model"]["frame_dropout"] = args.frame_dropout
         config["model"]["keep_last_frame"] = args.keep_last_frame
         config["model"]["time_contrastive"] = args.time_contrastive
@@ -136,6 +137,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["stack_actions"] = args.stack_actions
         config["model"]["classifier"] = args.classifier
         config['model']['byol_tau'] = args.byol_tau
+        config["model"]["dqn_hidden_size"] = args.dqn_hidden_size
         config["algo"]["model_rl_weight"] = args.model_rl_weight
         config["algo"]["reward_loss_weight"] = args.reward_loss_weight
         config["algo"]["model_nce_weight"] = args.model_nce_weight
@@ -422,6 +424,9 @@ if __name__ == "__main__":
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
                         choices=["none", "rrc", "affine", "crop", "blur", "shift", "intensity"],
                         help='Style of augmentation')
+    parser.add_argument('--q-l1-type', type=str, default=['noisy', 'advantage'], nargs="+",
+                        choices=["noisy", "value", "advantage", "relu"],
+                        help='Style of q_l1 projection')
     parser.add_argument('--no-rl-augmentation', type=int, default=0, help='Do a separate RL update without aug')
     parser.add_argument('--target-augmentation', type=int, default=0, help='Use augmentation on inputs to target networks')
     parser.add_argument('--eval-augmentation', type=int, default=0, help='Use augmentation on inputs at evaluation time')
