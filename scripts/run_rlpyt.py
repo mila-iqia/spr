@@ -83,7 +83,6 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config['agent']['eps_init'] = args.noisy_eps
         config['agent']['eps_final'] = args.noisy_eps
         config['agent']['eps_eval'] = 0.001
-    wandb.config.update(config)
     sampler = SerialSampler(
         EnvCls=env,
         TrajInfoCls=AtariTrajInfo,  # default traj info + GameScore
@@ -160,6 +159,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         algo = PizeroCategoricalDQN(optim_kwargs=config["optim"], **config["algo"])  # Run with defaults.
         agent = AtariCatDqnAgent(ModelCls=PizeroCatDqnModel, model_kwargs=config["model"], **config["agent"])
 
+    wandb.config.update(config)
     runner = MinibatchRlEvalWandb(
         algo=algo,
         agent=agent,
@@ -473,7 +473,10 @@ if __name__ == "__main__":
         args.momentum_encoder = 1
         args.buffered_nce = 0
 
-    wandb.init(project='rlpyt', entity='abs-world-models', config=args, tags=[args.tag])
+    if args.beluga:
+        os.environ["WANDB_MODE"] = "dryrun"
+
+    wandb.init(project='rlpyt', entity='abs-world-models', config=args, tags=[args.tag], dir=args.wandb_dir)
     wandb.config.update(vars(args))
     if args.der:
         debug_build_and_train(game=args.game,
