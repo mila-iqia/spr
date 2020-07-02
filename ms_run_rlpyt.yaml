@@ -5,7 +5,7 @@ target:
   vc: msrlabs
 
 environment:
-  image: philly/jobs/custom/pytorch:pytorch1.3.1-py36-cuda10.0
+  image: philly/jobs/custom/pytorch:pytorch1.4-py37-cuda10.0
   registry: phillyregistry.azurecr.io
   setup:
     - export PATH=$$PATH:~/.local/bin
@@ -13,7 +13,7 @@ environment:
     - export LANG=C.UTF-8
     - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill kornia==0.2.2
     - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
-    - pip install --user git+git://github.com/astooke/rlpyt
+    - pip install --user git+git://github.com/ankeshanand/rlpyt
     - pip install --user pillow==6.2.1 scikit-image
     - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
 
@@ -48,13 +48,13 @@ search:
        --dynamics-blocks 1 --transition-model standard --detach-model 0']
     - name: jumps
       spec: discrete
-      values: [1, 5]
+      values: [5]
     - name: noisy
       spec: discrete
       values: [1]
     - name: replay-ratio
       spec: discrete
-      values: [32, 64]
+      values: [64]
     - name: mgn
       spec: discrete
       values: [10.]
@@ -72,5 +72,5 @@ search:
       values: ['bilinear']
     - name: distributional
       spec: discrete
-      values: [0, 1]
+      values: [1]
 
