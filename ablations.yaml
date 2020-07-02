@@ -1,0 +1,71 @@
+description: AWM
+
+target:
+  cluster: eu2
+  vc: msrlabs
+
+environment:
+  image: philly/jobs/custom/pytorch:pytorch1.3.1-py36-cuda10.0
+  registry: phillyregistry.azurecr.io
+  setup:
+    - export PATH=$$PATH:~/.local/bin
+    - export LC_ALL=C.UTF-8
+    - export LANG=C.UTF-8
+    - pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill kornia==0.2.2
+    - pip install --user git+git://github.com/mila-iqia/atari-representation-learning.git
+    - pip install --user git+git://github.com/astooke/rlpyt
+    - pip install --user pillow==6.2.1 scikit-image
+    - wandb login fa235c4236ea0bd894bc3f26e87054a6ed6af293
+
+# azure storage configuration
+storage:
+  my_storage:
+    # Replace with the name of the Azure Storage Account you created.
+    #   If you followed the tutorial, this should be your_username
+    storage_account_name: ankdefault
+    # Specify a name of the container on your blob (ex. phillytools),
+    #   to store data, results and code. It will be created if it does not exist.
+    container_name: awmcontainer
+
+# data
+#   data upload is not required for this example
+search:
+  job_template:
+    name: rlpyt_nce84_{game:s}_{replay-ratio:d}_{arguments:s}_{random_string:s}
+    sku: G1
+    command:
+      - NCCL_DEBUG=INFO python -m scripts.run_rlpyt --der --game {game} {arguments} --learn-model \
+        --replay-ratio 64 --n-gpu 1 --encoder nature --noisy-nets 1\
+        --max-grad-norm 10. --dueling 1 --seed {seed} --global-nce 1 --classifier q_l1 \
+        --batch-size 32 --target-update-interval 1 --n-step 10 --n-steps 100000 --final-eval-only 1 \
+        --distributional 1 --q-l1-type value advantage --nce 1 --padding valid \
+        --imagesize 84 --eval-imagesize 84 --nce 1 --time-contrastive 0 --nce-loss-weight 0. \
+        --model-nce-weight 5. --cosine-nce 1 --reward-loss-weight 0.\
+        --model-rl-weight 0. --norm-type bn --transition-model standard --detach-model 0 --grad-scale-factor 1 --renormalize 1
+  type: grid
+  max_trials: 5000
+  params:
+    - name: game
+      spec: discrete
+      values: ["pong", "breakout", "up_n_down",
+               "kangaroo", "bank_heist", "assault",
+               "boxing", "battle_zone", "frostbite",
+               "crazy_climber", "chopper_command",
+               "demon_attack", "alien", "kung_fu_master",
+               "qbert", "ms_pacman", "hero", "seaquest",
+               "jamesbond", "amidar", "asterix",
+               "private_eye", "gopher", "krull",
+               "freeway", "road_runner"]
+    - name: seed
+        spec: discrete
+        values: [101, 120, 420, 88, 444]
+    - name: arguments
+      spec: discrete
+      values: [' --byol squared --momentum-encoder 1 --byol-tau 1. --jumps 5 --augmentation shift intensity --target-augmentation 1 --dynamics-blocks 0 --nce-loss-weight 0. --tag pbl_control',
+               ' --byol squared --shared-encoder 1   --byol-tau .01 --jumps 5 --augmentation shift intensity --target-augmentation 1 --dynamics-blocks 0 --nce-loss-weight 0. --tag deepmdp_control',
+               ' --byol squared --momentum-encoder 1 --byol-tau .01 --jumps 0 --augmentation shift intensity --target-augmentation 1 --dynamics-blocks 0 --nce-loss-weight 1. --tag j0_control',
+               ' --byol squared --momentum-encoder 1 --byol-tau .01 --jumps 1 --augmentation shift intensity --target-augmentation 1 --dynamics-blocks 0 --nce-loss-weight 0. --tag j1_control',
+               ' --byol squared --momentum-encoder 1 --byol-tau .01 --jumps 2 --augmentation shift intensity --target-augmentation 1 --dynamics-blocks 0 --nce-loss-weight 0. --tag j2_control',
+               ' --byol squared --momentum-encoder 1 --byol-tau .01 --jumps 5 --augmentation shift intensity --target-augmentation 1 --dynamics-blocks 2 --nce-loss-weight 0. --tag big_model_control',
+              ]
+
