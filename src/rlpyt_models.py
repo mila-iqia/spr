@@ -6,7 +6,6 @@ from torch.nn.utils import spectral_norm
 from rlpyt.models.dqn.atari_catdqn_model import DistributionalHeadModel
 from rlpyt.models.dqn.dueling import DistributionalDuelingHeadModel
 from rlpyt.models.utils import scale_grad, update_state_dict
-from rlpyt.models.conv2d import Conv2dModel
 from rlpyt.runners.async_rl import AsyncRlEval
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
 from rlpyt.runners.sync_rl import SyncRlMixin, SyncWorkerEval
@@ -85,6 +84,13 @@ def channel_dropout(images, drop_prob, keep_last=True):
     images = images * mask[:, :, None, None]
     return images
 
+def channel_dropout_rescale(images, drop_prob, keep_last=True):
+    scale_factor = (1 - drop_prob)
+    if keep_last:
+        images[:-1] = images[:-1]*scale_factor
+    else:
+        images = images*scale_factor
+    return images
 
 def maybe_update_summary(key, value):
     if key not in wandb.run.summary:
@@ -378,7 +384,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             byol_tau=0.01,
             init="standard",
             renormalize=False,
-            q_l1_type="noisy advantage"
+            q_l1_type="noisy advantage",
+            dropout=0.0,
+            final_classifier="linear"
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
@@ -423,6 +431,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             elif aug == "intensity":
                 transformation = Intensity(scale=0.05)
                 eval_transformation = nn.Identity()
+            elif aug == "dropout":
+                transformation = lambda x: F.dropout(x, 0.2)
+                eval_transformation = lambda x: x*(1 - 0.2)
             elif aug == "none":
                 transformation = eval_transformation = nn.Identity()
             else:
@@ -432,9 +443,12 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
 
         frame_dropout_fn = nn.Identity() if frame_dropout <= 0 else \
             lambda x: channel_dropout(x, frame_dropout, keep_last_frame)
+        frame_dropout_eval_fn = nn.Identity() if frame_dropout <= 0 else \
+            lambda x: channel_dropout_rescale(x, frame_dropout, keep_last_frame)
+
         self.uses_augmentation = self.uses_augmentation or frame_dropout > 0
         self.transforms.append(frame_dropout_fn)
-        self.eval_transforms.append(nn.Identity())
+        self.eval_transforms.append(frame_dropout_eval_fn)
 
         self.dueling = dueling
         f, c = image_shape[:2]
@@ -453,6 +467,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 strides=[4, 2, 1],
                 paddings=[0, 0, 0],
                 use_maxpool=False,
+                dropout=dropout,
             )
         elif encoder == "deepnature":
             self.conv = Conv2dModel(
@@ -462,6 +477,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 strides=[4, 2, 1, 1, 1],
                 paddings=[0, 0, 0, 1, 1],
                 use_maxpool=False,
+                dropout=dropout,
             )
         elif encoder == "bignature":
             self.conv = Conv2dModel(
@@ -471,6 +487,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 strides=[4, 2, 1, 1],
                 paddings=[0, 0, 0, 1],
                 use_maxpool=False,
+                dropout=dropout,
             )
         elif encoder == "mlp":
             self.conv = MLPEncoder(image_shape,
@@ -582,15 +599,20 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                           nn.ReLU(),
                                                           nn.Linear(self.hidden_size,
                                                                     self.hidden_size))
+                elif self.classifier_type == "bilinear":
+                    self.local_classifier = nn.Linear(self.hidden_size, self.hidden_size)
+                elif self.classifier_type == "none":
+                    self.local_classifier = nn.Identity()
+                if final_classifier == "mlp":
                     self.local_final_classifier = nn.Sequential(nn.Linear(self.hidden_size, self.hidden_size),
                                                                 nn.BatchNorm1d(self.hidden_size),
                                                                 nn.ReLU(),
                                                                 nn.Linear(self.hidden_size,
                                                                     self.hidden_size))
-                elif self.classifier_type == "bilinear":
-                    self.local_classifier = nn.Linear(self.hidden_size, self.hidden_size)
-                elif self.classifier_type == "none":
-                    self.local_classifier = nn.Identity()
+                elif final_classifier == "linear":
+                    self.local_final_classifier = nn.Linear(self.hidden_size, self.hidden_size)
+                else:
+                    self.local_final_classifier = nn.Identity()
 
                 self.local_target_classifier = self.local_classifier
                 local_buffer_size = self.hidden_size
@@ -607,23 +629,14 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                 nn.ReLU(),
                                                 nn.Linear(512, 256)
                                                 )
-                    self.global_final_classifier = nn.Sequential(
-                        nn.Linear(256, 512),
-                        nn.BatchNorm1d(512),
-                        nn.ReLU(),
-                        nn.Linear(512, 256)
-                    )
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
                 elif self.classifier_type == "q_l1":
                     self.global_classifier = QL1Head(self.head, dueling=dueling, type=q_l1_type)
                     global_buffer_size = self.global_classifier.out_features
-                    self.global_final_classifier = nn.Linear(global_buffer_size,
-                                                             global_buffer_size)
                     self.global_target_classifier = self.global_classifier
                 elif self.classifier_type == "q_l2":
                     self.global_classifier = nn.Sequential(self.head, nn.Flatten(-2, -1))
-                    self.global_final_classifier = nn.Identity()
                     self.global_target_classifier = self.global_classifier
                     global_buffer_size = 256
                 elif self.classifier_type == "bilinear":
@@ -636,6 +649,19 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     self.global_target_classifier = nn.Flatten(-3, -1)
 
                     global_buffer_size = self.hidden_size*self.pixels
+                if final_classifier == "mlp":
+                    self.global_final_classifier = nn.Sequential(
+                        nn.Linear(global_buffer_size, global_buffer_size*2),
+                        nn.BatchNorm1d(global_buffer_size*2),
+                        nn.ReLU(),
+                        nn.Linear(global_buffer_size*2, global_buffer_size)
+                    )
+                elif final_classifier == "linear":
+                    self.global_final_classifier = nn.Sequential(
+                        nn.Linear(global_buffer_size, global_buffer_size),
+                    )
+                elif final_classifier == "none":
+                    self.global_final_classifier = nn.Identity()
                 self.global_classifier.apply(weights_init)
             else:
                 self.global_classifier = self.global_target_classifier = nn.Identity()
@@ -1760,3 +1786,50 @@ class MLPTransitionModel(nn.Module):
         next_state = next_state.view(*x.shape)
         next_reward = self.reward_predictor(next_state)
         return next_state, next_reward
+
+
+class Conv2dModel(torch.nn.Module):
+    """2-D Convolutional model component, with option for max-pooling vs
+    downsampling for strides > 1.  Requires number of input channels, but
+    not input shape.  Uses ``torch.nn.Conv2d``.
+    """
+
+    def __init__(
+            self,
+            in_channels,
+            channels,
+            kernel_sizes,
+            strides,
+            paddings=None,
+            nonlinearity=torch.nn.ReLU,  # Module, not Functional.
+            use_maxpool=False,  # if True: convs use stride 1, maxpool downsample.
+            head_sizes=None,  # Put an MLP head on top.
+            dropout=0,
+            ):
+        super().__init__()
+        if paddings is None:
+            paddings = [0 for _ in range(len(channels))]
+        assert len(channels) == len(kernel_sizes) == len(strides) == len(paddings)
+        in_channels = [in_channels] + channels[:-1]
+        ones = [1 for _ in range(len(strides))]
+        if use_maxpool:
+            maxp_strides = strides
+            strides = ones
+        else:
+            maxp_strides = ones
+        conv_layers = [torch.nn.Conv2d(in_channels=ic, out_channels=oc,
+            kernel_size=k, stride=s, padding=p) for (ic, oc, k, s, p) in
+            zip(in_channels, channels, kernel_sizes, strides, paddings)]
+        sequence = list()
+        for conv_layer, maxp_stride in zip(conv_layers, maxp_strides):
+            sequence.extend([conv_layer, nonlinearity()])
+            if dropout > 0:
+                sequence.append(nn.Dropout(dropout))
+            if maxp_stride > 1:
+                sequence.append(torch.nn.MaxPool2d(maxp_stride))  # No padding.
+        self.conv = torch.nn.Sequential(*sequence)
+
+    def forward(self, input):
+        """Computes the convolution stack on the input; assumes correct shape
+        already: [B,C,H,W]."""
+        return self.conv(input)

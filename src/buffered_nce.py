@@ -389,14 +389,14 @@ class BlockNCE:
 
         if self.byol == "both" or not self.byol:
             if self.use_self_targets == "both":
-                losses1, accs1 = self.calculate_block_losses(f_x1s, f_x2s, True)
-                losses2, accs2 = self.calculate_block_losses(f_x1s, f_x2s, False)
+                losses1, accs1 = self.do_block_nce(f_x1s, f_x2s, True)
+                losses2, accs2 = self.do_block_nce(f_x1s, f_x2s, False)
                 losses = (losses1 + losses2)*0.5
                 accs = (accs1 + accs2)*0.5
             elif self.use_self_targets == "only":
                 losses, accs = self.self_nce(f_x1s, f_x1s)
             else:
-                losses, accs = self.calculate_block_losses(f_x1s, f_x2s, self.use_self_targets)
+                losses, accs = self.do_block_nce(f_x1s, f_x2s, self.use_self_targets)
         else:
             losses = 0.
 
