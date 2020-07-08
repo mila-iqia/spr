@@ -127,6 +127,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["augmentation"] = args.augmentation
         config["model"]["q_l1_type"] = args.q_l1_type
         config["model"]["frame_dropout"] = args.frame_dropout
+        config["model"]["dropout"] = args.dropout
         config["model"]["keep_last_frame"] = args.keep_last_frame
         config["model"]["time_contrastive"] = args.time_contrastive
         config["model"]["aug_prob"] = args.aug_prob
@@ -135,6 +136,7 @@ def debug_build_and_train(game="pong", run_ID=0, cuda_idx=0, model=False, detach
         config["model"]["eval_augmentation"] = args.eval_augmentation
         config["model"]["stack_actions"] = args.stack_actions
         config["model"]["classifier"] = args.classifier
+        config["model"]["final_classifier"] = args.final_classifier
         config['model']['byol_tau'] = args.byol_tau
         config["model"]["dqn_hidden_size"] = args.dqn_hidden_size
         config["algo"]["model_rl_weight"] = args.model_rl_weight
@@ -396,6 +398,7 @@ if __name__ == "__main__":
     parser.add_argument('--init', type=str, default='pytorch', choices=["pytorch", "orthogonal"], help='Initialization type')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--frame-dropout', type=float, default=0., help='Probability to dropout frame in framestack.')
+    parser.add_argument('--dropout', type=float, default=0., help='Dropout probability in convnet.')
     parser.add_argument('--keep-last-frame', type=int, default=1, help='Always keep last frame in frame dropout.')
     parser.add_argument('--film', type=int, default=0)
     parser.add_argument('--nce', type=int, default=0)
@@ -421,8 +424,9 @@ if __name__ == "__main__":
     parser.add_argument('--grad-scale-factor', type=float, default=0.5, help="Amount by which to scale gradients for trans. model")
     parser.add_argument('--nce-type', type=str, default='custom', choices=["stdim", "moco", "curl", "custom"], help='Style of NCE')
     parser.add_argument('--classifier', type=str, default='bilinear', choices=["mlp", "bilinear", "q_l1", "q_l2", "none"], help='Style of NCE classifier')
+    parser.add_argument('--final-classifier', type=str, default='linear', choices=["mlp", "linear", "none"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=['none'], nargs="+",
-                        choices=["none", "rrc", "affine", "crop", "blur", "shift", "intensity"],
+                        choices=["none", "rrc", "affine", "crop", "blur", "shift", "intensity", "dropout"],
                         help='Style of augmentation')
     parser.add_argument('--q-l1-type', type=str, default=['noisy', 'advantage'], nargs="+",
                         choices=["noisy", "value", "advantage", "relu"],
