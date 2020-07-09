@@ -340,20 +340,7 @@ class BlockNCE:
         loss = loss.view(f_x1s.shape[0], f_x1s.shape[2], f_x1s.shape[1]) # loc, batch, time
         return loss.mean(0).transpose(0, 1), acc
 
-    def byol_loss(self, f_x1s, f_x2s):
-        f_x1 = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
-        f_x2 = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
 
-        if "squared" in self.byol:
-            loss = F.mse_loss(f_x1, f_x2, reduction="none").sum(-1).mean(0)
-        elif "with_norm" in self.byol:
-            loss = F.mse_loss(f_x1, f_x2, reduction="none").sum(-1).mean(0)
-            norm_1 = torch.norm(f_x1s, dim=-1, keepdim=False)
-            norm_2 = torch.norm(f_x2s, dim=-1, keepdim=False)
-            norm_loss = F.mse_loss(norm_1, norm_2, reduction="none").mean(0)
-            loss = loss + norm_loss
-        else:
-            loss = torch.norm(f_x1 - f_x2, p=2, dim=-1).mean(0)
         return loss
 
     def forward(self, f_x1s, f_x2s):

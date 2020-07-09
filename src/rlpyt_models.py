@@ -72,26 +72,6 @@ atari_random_scores = dict(
     qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
 )
 
-def channel_dropout(images, drop_prob, keep_last=True):
-    mask = torch.rand(images.shape[:2], device=images.device)
-    mask = (mask > drop_prob).float()
-    if keep_last:
-        mask[:, -1] = 1.
-    else:
-        present_frames = mask.sum(-1)
-        correction = torch.clamp(1 - present_frames, 0., 1.)
-        mask[:, -1] = mask[:, -1] + correction
-    images = images * mask[:, :, None, None]
-    return images
-
-def channel_dropout_rescale(images, drop_prob, keep_last=True):
-    scale_factor = (1 - drop_prob)
-    if keep_last:
-        images[:-1] = images[:-1]*scale_factor
-    else:
-        images = images*scale_factor
-    return images
-
 def maybe_update_summary(key, value):
     if key not in wandb.run.summary:
         wandb.run.summary[key] = value
@@ -254,7 +234,6 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
                     eval_traj_infos, eval_time = self.evaluate_agent(itr)
                     self.log_diagnostics(itr, eval_traj_infos, eval_time)
         self.shutdown()
-
 
 
 class SyncRlEvalWandb(SyncRlMixin, MinibatchRlEvalWandb):
@@ -441,65 +420,18 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.transforms.append(transformation)
             self.eval_transforms.append(eval_transformation)
 
-        frame_dropout_fn = nn.Identity() if frame_dropout <= 0 else \
-            lambda x: channel_dropout(x, frame_dropout, keep_last_frame)
-        frame_dropout_eval_fn = nn.Identity() if frame_dropout <= 0 else \
-            lambda x: channel_dropout_rescale(x, frame_dropout, keep_last_frame)
-
-        self.uses_augmentation = self.uses_augmentation or frame_dropout > 0
-        self.transforms.append(frame_dropout_fn)
-        self.eval_transforms.append(frame_dropout_eval_fn)
-
         self.dueling = dueling
         f, c = image_shape[:2]
         in_channels = np.prod(image_shape[:2])
-        if encoder == "repnet":
-            self.conv = RepNet(in_channels, norm_type=norm_type)
-        elif encoder == "curl":
-            self.conv = CurlEncoder(in_channels, norm_type=norm_type, padding=padding)
-        elif encoder == "midsize":
-            self.conv = SmallEncoder(256, in_channels, norm_type=norm_type)
-        elif encoder == "nature":
-            self.conv = Conv2dModel(
-                in_channels=in_channels,
-                channels=[32, 64, 64],
-                kernel_sizes=[8, 4, 3],
-                strides=[4, 2, 1],
-                paddings=[0, 0, 0],
-                use_maxpool=False,
-                dropout=dropout,
-            )
-        elif encoder == "deepnature":
-            self.conv = Conv2dModel(
-                in_channels=in_channels,
-                channels=[32, 64, 64, 64, 64],
-                kernel_sizes=[8, 4, 3, 3, 3],
-                strides=[4, 2, 1, 1, 1],
-                paddings=[0, 0, 0, 1, 1],
-                use_maxpool=False,
-                dropout=dropout,
-            )
-        elif encoder == "bignature":
-            self.conv = Conv2dModel(
-                in_channels=in_channels,
-                channels=[32, 64, 128, 128],
-                kernel_sizes=[8, 4, 3, 3],
-                strides=[4, 2, 1, 1],
-                paddings=[0, 0, 0, 1],
-                use_maxpool=False,
-                dropout=dropout,
-            )
-        elif encoder == "mlp":
-            self.conv = MLPEncoder(image_shape,
-                                   hidden_sizes=[1024, 1024, 1024])
-
-        elif encoder == "impala":
-            self.conv = ImpalaCNN(in_channels, depths=[16, 32, 64],
-                                  norm_type="none")
-        elif encoder == "effnet":
-            self.conv = RLEffNet(imagesize,
-                                 in_channels=f*c,
-                                 norm_type=norm_type,)
+        self.conv = Conv2dModel(
+            in_channels=in_channels,
+            channels=[32, 64, 64],
+            kernel_sizes=[8, 4, 3],
+            strides=[4, 2, 1],
+            paddings=[0, 0, 0],
+            use_maxpool=False,
+            dropout=dropout,
+        )
 
         fake_input = torch.zeros(1, f*c, imagesize, imagesize)
         fake_output = self.conv(fake_input)
@@ -517,80 +449,51 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.num_actions = output_size
         self.hard_neg_factor = hard_neg_factor
 
-        if encoder in ["repnet", "midsize"]:
-            if dueling:
-                self.head = PizeroDistributionalDuelingHeadModel(self.hidden_size, output_size,
-                                                                 pixels=self.pixels,
-                                                                 norm_type=norm_type,
-                                                                 noisy=self.noisy,
-                                                                 n_atoms=n_atoms)
-            else:
-                self.head = PizeroDistributionalHeadModel(self.hidden_size, output_size,
+        if dueling:
+            self.head = DQNDistributionalDuelingHeadModel(self.hidden_size,
+                                                          output_size,
+                                                          hidden_size=self.dqn_hidden_size,
                                                           pixels=self.pixels,
-                                                          norm_type=norm_type,
                                                           noisy=self.noisy,
                                                           n_atoms=n_atoms)
         else:
-            if dueling:
-                self.head = DQNDistributionalDuelingHeadModel(self.hidden_size,
-                                                              output_size,
-                                                              hidden_size=self.dqn_hidden_size,
-                                                              pixels=self.pixels,
-                                                              noisy=self.noisy,
-                                                              n_atoms=n_atoms)
-            else:
-                self.head = DQNDistributionalHeadModel(self.hidden_size,
-                                                       output_size,
-                                                       hidden_size=self.dqn_hidden_size,
-                                                       pixels=self.pixels,
-                                                       noisy=self.noisy,
-                                                       n_atoms=n_atoms)
+            self.head = DQNDistributionalHeadModel(self.hidden_size,
+                                                   output_size,
+                                                   hidden_size=self.dqn_hidden_size,
+                                                   pixels=self.pixels,
+                                                   noisy=self.noisy,
+                                                   n_atoms=n_atoms)
 
-        if transition_model == "film":
-            dynamics_model = FiLMTransitionModel
-        elif transition_model == "effnet":
-            dynamics_model = EffnetTransitionModel
-        elif transition_model == "mlp":
-            dynamics_model = MLPTransitionModel
-        else:
-            dynamics_model = TransitionModel
-
-        if self.jumps > 0 or not self.detach_model:
-            self.dynamics_model = dynamics_model(channels=self.hidden_size,
-                                                 num_actions=output_size,
-                                                 pixels=self.pixels,
-                                                 hidden_size=self.hidden_size,
-                                                 limit=1,
-                                                 blocks=dynamics_blocks,
-                                                 norm_type=norm_type,
-                                                 renormalize=renormalize)
+        if self.jumps > 0:
+            self.dynamics_model = TransitionModel(channels=self.hidden_size,
+                                                  num_actions=output_size,
+                                                  pixels=self.pixels,
+                                                  hidden_size=self.hidden_size,
+                                                  limit=1,
+                                                  blocks=dynamics_blocks,
+                                                  norm_type=norm_type,
+                                                  renormalize=renormalize)
         else:
             self.dynamics_model = nn.Identity()
 
         self.renormalize = renormalize
 
         if self.use_nce:
-            self.local_nce = local_nce
-            self.global_nce = global_nce
-            self.global_local_nce = global_local_nce
+            self.local_mpr = local_mpr
+            self.global_mpr = global_mpr
             self.momentum_encoder = momentum_encoder
-            self.momentum_tau = byol_tau
+            self.momentum_tau = momentum_tau
             self.buffered_nce = buffered_nce
             self.shared_encoder = shared_encoder
             assert self.local_nce or self.global_nce or self.global_local_nce
             assert not (self.shared_encoder and self.momentum_encoder)
             assert not (target_encoder_sn and self.momentum_encoder)
 
-            assert hard_neg_factor == 0 or buffered_nce == 0
-            assert hard_neg_factor == 0 or self.use_nce
-            assert hard_neg_factor == 0 or self.jumps == 0 or use_all_targets
+            # in case someone tries something silly like --local-mpr 2
+            self.num_mprs = int(bool(self.local_mpr)) + \
+                            int(bool(self.global_mpr))
 
-            # in case someone tries something silly like --local-nce 2
-            self.num_nces = int(bool(self.local_nce)) + \
-                            int(bool(self.global_nce)) +\
-                            int(bool(self.global_local_nce))
-
-            if self.local_nce:
+            if self.local_mpr:
                 self.local_final_classifier = nn.Identity()
                 if self.classifier_type == "mlp":
                     self.local_classifier = nn.Sequential(nn.Linear(self.hidden_size,
@@ -665,28 +568,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 self.global_classifier.apply(weights_init)
             else:
                 self.global_classifier = self.global_target_classifier = nn.Identity()
-            if self.global_local_nce:
-                if self.classifier_type == "mlp":
-                    self.global_local_classifier = MLPHead(self.hidden_size,
-                                                           output_size=self.hidden_size,
-                                                           hidden_size=-1,
-                                                           pixels=self.pixels,
-                                                           noisy=0,
-                                                           )
-                elif self.classifier_type == "q_l1":
-                    self.global_local_classifier = nn.Sequential(*self.head.network[:2],
-                                                                 nn.Linear(256, self.hidden_size))
-                    global_local_buffer_size = self.hidden_size
-                else:
-                    # Bilinear's size is different, since only comparing to one
-                    # patch at a time.
-                    self.global_local_classifier = nn.Sequential(nn.Flatten(-3, -1),
-                                                                 nn.Linear(self.hidden_size*self.pixels,
-                                                                           self.hidden_size))
-
-                self.global_local_target_classifier = self.global_local_classifier
-            else:
-                self.global_local_classifier = self.global_local_target_classifier = nn.Identity()
 
             if self.momentum_encoder:
                 self.nce_target_encoder = copy.deepcopy(self.conv)
@@ -708,33 +589,13 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     input_size = c - 1
                 else:
                     input_size = c
-                if encoder == "curl":
-                    self.nce_target_encoder = CurlEncoder(input_size,
-                                                          norm_type=norm_type,
-                                                          padding=padding)
-                elif encoder == "nature" or encoder == "deepnature":
-                    self.nce_target_encoder = Conv2dModel(in_channels=input_size,
-                                                          channels=[32, 64, 64],
-                                                          kernel_sizes=[8, 4, 3],
-                                                          strides=[4, 2, 1],
-                                                          paddings=[0, 0, 0],
-                                                          use_maxpool=False,
+                self.mpr_target_encoder = Conv2dModel(in_channels=input_size,
+                                                      channels=[32, 64, 64],
+                                                      kernel_sizes=[8, 4, 3],
+                                                      strides=[4, 2, 1],
+                                                      paddings=[0, 0, 0],
+                                                      use_maxpool=False,
                                                       )
-                elif encoder == "bignature":
-                    self.nce_target_encoder = Conv2dModel(in_channels=input_size,
-                                                          channels=[32, 64, 128, 128],
-                                                          kernel_sizes=[8, 4, 3, 1],
-                                                          strides=[4, 2, 1, 1],
-                                                          paddings=[0, 0, 0, 0],
-                                                          use_maxpool=False,
-                                                         )
-                elif encoder == "effnet":
-                    self.nce_target_encoder = RLEffNet(imagesize,
-                                                       in_channels=input_size,
-                                                       norm_type=norm_type,)
-                else:
-                    self.nce_target_encoder = SmallEncoder(self.hidden_size, input_size,
-                                                           norm_type=norm_type)
 
             elif self.shared_encoder:
                 self.nce_target_encoder = self.conv
@@ -759,12 +620,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 if self.global_nce:
                     self.global_nce = BufferedNCE(global_buffer_size, 2**10,
                                                   buffer_names=["main"])
-                if self.global_local_nce:
-                    self.global_local_nce = LocBufferedNCE(global_local_buffer_size,
-                                                           2**10,
-                                                           buffer_names=["main"],
-                                                           n_locs=self.pixels)
-            else:
                 # This style of NCE can also be used for global-local with expand()
                 self.nce = BlockNCE(normalize=cosine_nce,
                                     use_self_targets=use_all_targets
@@ -785,26 +640,27 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         if self.noisy:
             self.head.set_sampling(sampling)
 
-    def do_global_nce(self, latents, target_latents, observation):
+    def mpr_loss(self, f_x1s, f_x2s):
+        f_x1 = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
+        f_x2 = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
+        loss = F.mse_loss(f_x1, f_x2, reduction="none").sum(-1).mean(0)
+        return loss
+
+    def global_mpr_loss(self, latents, target_latents, observation):
         global_latents = self.global_classifier(latents)
         global_latents = self.global_final_classifier(global_latents)
         with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
             global_targets = self.global_target_classifier(target_latents)
-        if not self.buffered_nce:
-            # Need (locs, times, batch_size, rkhs) for the non-buffered nce
-            # to mask out negatives from the same trajectory if desired.
-            global_targets = global_targets.view(-1, observation.shape[1],
-                                                 self.jumps+1, global_targets.shape[-1]).transpose(1, 2)
-            global_latents = global_latents.view(-1, observation.shape[1]*(self.hard_neg_factor + 1),
-                                                 self.jumps+1, global_latents.shape[-1]).transpose(1, 2)
-            global_nce_loss, global_nce_accs = self.nce.forward(global_latents, global_targets)
-        else:
-            global_nce_loss, global_nce_accs = self.global_nce.forward(global_latents, global_targets)
-            self.global_nce.update_buffer(global_targets)
+        # Need (locs, times, batch_size, rkhs)
+        # to mask out negatives from the same trajectory if desired.
+        targets = global_targets.view(-1, observation.shape[1],
+                                             self.jumps+1, global_targets.shape[-1]).transpose(1, 2)
+        latents = global_latents.view(-1, observation.shape[1],
+                                             self.jumps+1, global_latents.shape[-1]).transpose(1, 2)
+        loss = self.mpm_loss(latents, targets)
+        return loss
 
-        return global_nce_loss, global_nce_accs
-
-    def do_local_nce(self, latents, target_latents, observation):
+    def local_mpr_loss(self, latents, target_latents, observation):
         local_latents = latents.flatten(-2, -1).permute(2, 0, 1)
         local_latents = self.local_classifier(local_latents)
         local_latents = self.local_final_classifier(local_latents)
@@ -812,96 +668,18 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
             local_targets = self.local_target_classifier(local_target_latents)
 
-        if not self.buffered_nce:
-            if self.local_nce or self.global_local_nce:
-                local_latents = local_latents.view(-1,
-                                                   observation.shape[1]*(self.hard_neg_factor + 1),
-                                                   self.jumps+1,
-                                                   local_latents.shape[-1]).transpose(1, 2)
-                local_targets = local_targets.view(-1,
-                                                   observation.shape[1],
-                                                   self.jumps+1,
-                                                   local_targets.shape[-1]).transpose(1, 2)
-                local_nce_loss, local_nce_accs = self.nce.forward(local_latents, local_targets)
-        else:
-            local_nce_loss, local_nce_accs = self.local_nce.forward(local_latents, local_targets)
+        local_latents = local_latents.view(-1,
+                                           observation.shape[1],
+                                           self.jumps+1,
+                                           local_latents.shape[-1]).transpose(1, 2)
+        local_targets = local_targets.view(-1,
+                                           observation.shape[1],
+                                           self.jumps+1,
+                                           local_targets.shape[-1]).transpose(1, 2)
+        local_loss = self.mpr_loss(local_latents, local_targets)
+        return local_loss
 
-        return local_nce_loss, local_nce_accs
-
-    def do_global_local_nce(self, latents, target_latents, observation):
-        local_latents = latents.flatten(-2, -1).permute(2, 0, 1)
-        local_target_latents = target_latents.flatten(-2, -1).permute(2, 0, 1)
-        global_latents = self.global_local_classifier(latents)
-
-        if not self.buffered_nce:
-            with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
-                global_targets = self.global_local_target_classifier(target_latents)
-            global_latents = global_latents.view(-1,
-                                                 observation.shape[1]*(1+self.hard_neg_factor),
-                                                 self.jumps + 1,
-                                                 global_latents.shape[-1]).transpose(1, 2)
-            global_targets = global_targets.view(-1,
-                                                 observation.shape[1],
-                                                 self.jumps + 1,
-                                                 global_targets.shape[-1]).transpose(1, 2)
-            local_latents = local_latents.view(local_latents.shape[0],
-                                               observation.shape[1]*(1+self.hard_neg_factor),
-                                               self.jumps+1,
-                                               local_latents.shape[-1],
-                                               ).transpose(1, 2)
-            local_target_latents = local_target_latents.view(local_latents.shape[0],
-                                                             observation.shape[1],
-                                                             self.jumps+1,
-                                                             local_latents.shape[-1],
-                                                             ).transpose(1, 2)
-
-            global_targets = global_targets.expand(local_latents.shape[0], -1, -1, -1)
-            global_latents = global_latents.expand(local_latents.shape[0], -1, -1, -1)
-            gl_nce_loss_1, gl_nce_accs_1 = self.nce.forward(local_latents, global_targets)
-            gl_nce_loss_2, gl_nce_accs_2 = self.nce.forward(global_latents, local_target_latents)
-            gl_nce_loss = 0.5 * (gl_nce_loss_1 + gl_nce_loss_2)
-            gl_nce_accs = 0.5 * (gl_nce_accs_1 + gl_nce_accs_2)
-        else:
-            global_latents = global_latents.view(-1,
-                                                 observation.shape[1]*(self.jumps + 1),
-                                                 global_latents.shape[-1])
-            global_latents = global_latents.expand(local_latents.shape[0], -1, -1)
-            gl_nce_loss, gl_nce_accs = self.global_local_nce.forward(global_latents, local_target_latents)
-            self.global_local_nce.update_buffer(local_target_latents)
-        return gl_nce_loss, gl_nce_accs
-
-    def add_hard_negatives(self, latents, actions, pred_qs=None):
-        if self.hard_neg_factor <= 0:
-            return latents, actions
-        else:
-            if pred_qs is None:
-                hard_negs = torch.randint(0, self.num_actions, (self.hard_neg_factor*actions.shape[0],), dtype=torch.long, device=actions.device)
-                neg_actions = actions[hard_negs]
-            else:
-                with torch.no_grad():
-                    censored_qs = pred_qs.copy()
-                    censored_qs[torch.arange(0, actions.shape[0], dtype=torch.long, device=actions.device), actions] = -10000.
-                    best_actions = torch.argsort(censored_qs, -1, descending=True)
-                    neg_actions = best_actions[:, :self.hard_neg_factor].transpose(0, 1).flatten()
-
-            latents = torch.cat((self.hard_neg_factor+1)*[latents], 0)
-            actions = torch.cat([actions, neg_actions], 0)
-            return latents, actions
-
-    def add_observation_negatives(self, observation):
-        base_observation = observation[0]
-        if self.hard_neg_factor <= 0:
-            return base_observation
-
-        hard_negs = torch.randint(1, observation.shape[0],
-                                  (self.hard_neg_factor*observation.shape[1],),
-                                  dtype=torch.long, device=observation.device)
-        range = torch.arange(0, observation.shape[1], 1, dtype=torch.long, device=observation.device)
-        range = range.repeat(self.hard_neg_factor)
-        hard_negs = observation[hard_negs, range]
-        return torch.cat([base_observation, hard_negs], 0)
-
-    def do_nce(self, pred_latents, observation):
+    def do_mpr_loss(self, pred_latents, observation):
         pred_latents = torch.stack(pred_latents, 1)
         latents = pred_latents[:observation.shape[1]].flatten(0, 1)  # batch*jumps, *
         neg_latents = pred_latents[observation.shape[1]:].flatten(0, 1)
