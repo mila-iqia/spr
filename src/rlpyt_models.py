@@ -78,180 +78,8 @@ def maybe_update_summary(key, value):
     else:
         wandb.run.summary[key] = max(value, wandb.run.summary[key])
 
-class AsyncRlEvalWandb(AsyncRlEval):
-    def log_diagnostics(self, itr, sampler_itr, throttle_time):
-        cum_steps = sampler_itr * self.sampler.batch_size
-        self.wandb_info = {'cum_steps': cum_steps}
-        super().log_diagnostics(itr, sampler_itr, throttle_time)
-        wandb.log(self.wandb_info)
 
-    def _log_infos(self, traj_infos=None):
-        """
-        Writes trajectory info and optimizer info into csv via the logger.
-        Resets stored optimizer info.
-        """
-        if traj_infos is None:
-            traj_infos = self._traj_infos
-        if traj_infos:
-            for k in traj_infos[0]:
-                if not k.startswith("_"):
-                    values = [info[k] for info in traj_infos]
-                    logger.record_tabular_misc_stat(k,
-                                                    values)
-                    self.wandb_info[k + "Average"] = np.average(values)
-                    self.wandb_info[k + "Std"] = np.std(values)
-                    self.wandb_info[k + "Min"] = np.min(values)
-                    self.wandb_info[k + "Max"] = np.max(values)
-                    self.wandb_info[k + "Median"] = np.median(values)
-                    if k == 'GameScore':
-                        game = self.sampler.env_kwargs['game']
-                        random_score = atari_random_scores[game]
-                        der_score = atari_der_scores[game]
-                        nature_score = atari_nature_scores[game]
-                        human_score = atari_human_scores[game]
-                        normalized_score = (np.average(values) - random_score) / (human_score - random_score)
-                        der_normalized_score = (np.average(values) - random_score) / (der_score - random_score)
-                        nature_normalized_score = (np.average(values) - random_score) / (nature_score - random_score)
-                        self.wandb_info[k + "Normalized"] = normalized_score
-                        self.wandb_info[k + "DERNormalized"] = der_normalized_score
-                        self.wandb_info[k + "NatureNormalized"] = nature_normalized_score
-
-                        maybe_update_summary(k+"Best", np.average(values))
-                        maybe_update_summary(k+"NormalizedBest", normalized_score)
-                        maybe_update_summary(k+"DERNormalizedBest", der_normalized_score)
-                        maybe_update_summary(k+"NatureNormalizedBest", nature_normalized_score)
-
-
-        if self._opt_infos:
-            for k, v in self._opt_infos.items():
-                logger.record_tabular_misc_stat(k, v)
-                self.wandb_info[k] = np.average(v)
-                wandb.run.summary[k] = np.average(v)
-        self._opt_infos = {k: list() for k in self._opt_infos}  # (reset)
-
-
-class MinibatchRlEvalWandb(MinibatchRlEval):
-
-    def __init__(self, final_eval_only=False, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.final_eval_only = final_eval_only
-
-    def log_diagnostics(self, itr, eval_traj_infos, eval_time):
-        cum_steps = (itr + 1) * self.sampler.batch_size * self.world_size
-        self.wandb_info = {'cum_steps': cum_steps}
-        super().log_diagnostics(itr, eval_traj_infos, eval_time)
-        wandb.log(self.wandb_info)
-
-    def _log_infos(self, traj_infos=None):
-        """
-        Writes trajectory info and optimizer info into csv via the logger.
-        Resets stored optimizer info.
-        """
-        if traj_infos is None:
-            traj_infos = self._traj_infos
-        if traj_infos:
-            for k in traj_infos[0]:
-                if not k.startswith("_"):
-                    values = [info[k] for info in traj_infos]
-                    logger.record_tabular_misc_stat(k,
-                                                    values)
-
-                    wandb.run.summary[k] = np.average(values)
-                    self.wandb_info[k + "Average"] = np.average(values)
-                    self.wandb_info[k + "Std"] = np.std(values)
-                    self.wandb_info[k + "Min"] = np.min(values)
-                    self.wandb_info[k + "Max"] = np.max(values)
-                    self.wandb_info[k + "Median"] = np.median(values)
-                    if k == 'GameScore':
-                        game = self.sampler.env_kwargs['game']
-                        random_score = atari_random_scores[game]
-                        der_score = atari_der_scores[game]
-                        nature_score = atari_nature_scores[game]
-                        human_score = atari_human_scores[game]
-                        normalized_score = (np.average(values) - random_score) / (human_score - random_score)
-                        der_normalized_score = (np.average(values) - random_score) / (der_score - random_score)
-                        nature_normalized_score = (np.average(values) - random_score) / (nature_score - random_score)
-                        self.wandb_info[k + "Normalized"] = normalized_score
-                        self.wandb_info[k + "DERNormalized"] = der_normalized_score
-                        self.wandb_info[k + "NatureNormalized"] = nature_normalized_score
-
-                        maybe_update_summary(k+"Best", np.average(values))
-                        maybe_update_summary(k+"NormalizedBest", normalized_score)
-                        maybe_update_summary(k+"DERNormalizedBest", der_normalized_score)
-                        maybe_update_summary(k+"NatureNormalizedBest", nature_normalized_score)
-
-        if self._opt_infos:
-            for k, v in self._opt_infos.items():
-                logger.record_tabular_misc_stat(k, v)
-                self.wandb_info[k] = np.average(v)
-                wandb.run.summary[k] = np.average(v)
-        self._opt_infos = {k: list() for k in self._opt_infos}  # (reset)
-
-    def evaluate_agent(self, itr):
-        """
-        Record offline evaluation of agent performance, by ``sampler.evaluate_agent()``.
-        """
-        if itr > 0:
-            self.pbar.stop()
-
-        if self.final_eval_only:
-            eval = itr == 0 or itr >= self.n_itr - 1
-        else:
-            eval = itr == 0 or itr >= self.min_itr_learn - 1
-        if eval:
-            logger.log("Evaluating agent...")
-            self.agent.eval_mode(itr)  # Might be agent in sampler.
-            eval_time = -time.time()
-            traj_infos = self.sampler.evaluate_agent(itr)
-            eval_time += time.time()
-        else:
-            traj_infos = []
-            eval_time = 0.0
-        logger.log("Evaluation runs complete.")
-        return traj_infos, eval_time
-
-    def train(self):
-        """
-        Performs startup, evaluates the initial agent, then loops by
-        alternating between ``sampler.obtain_samples()`` and
-        ``algo.optimize_agent()``.  Pauses to evaluate the agent at the
-        specified log interval.
-        """
-        n_itr = self.startup()
-        self.n_itr = n_itr
-        with logger.prefix(f"itr #0 "):
-            eval_traj_infos, eval_time = self.evaluate_agent(0)
-            self.log_diagnostics(0, eval_traj_infos, eval_time)
-        for itr in range(n_itr):
-            logger.set_iteration(itr)
-            with logger.prefix(f"itr #{itr} "):
-                self.agent.sample_mode(itr)
-                samples, traj_infos = self.sampler.obtain_samples(itr)
-                self.agent.train_mode(itr)
-                opt_info = self.algo.optimize_agent(itr, samples)
-                self.store_diagnostics(itr, traj_infos, opt_info)
-                if (itr + 1) % self.log_interval_itrs == 0:
-                    eval_traj_infos, eval_time = self.evaluate_agent(itr)
-                    self.log_diagnostics(itr, eval_traj_infos, eval_time)
-        self.shutdown()
-
-
-class SyncRlEvalWandb(SyncRlMixin, MinibatchRlEvalWandb):
-    """
-    Multi-process RL with offline agent performance evaluation.  Only the
-    master process runs agent evaluation.
-    """
-
-    @property
-    def WorkerCls(self):
-        return SyncWorkerEval
-
-    def log_diagnostics(self, *args, **kwargs):
-        super().log_diagnostics(*args, **kwargs)
-        self.par.barrier.wait()
-
-
-class PizeroCatDqnModel(torch.nn.Module):
+class MPRCatDqnModel(torch.nn.Module):
     """2D conlutional network feeding into MLP with ``n_atoms`` outputs
     per action, representing a discrete probability distribution of Q-values."""
 
@@ -268,111 +96,37 @@ class PizeroCatDqnModel(torch.nn.Module):
             strides=None,
             paddings=None,
             framestack=4,
-            grayscale=True,
-            actions=False,
-    ):
-        """Instantiates the neural network according to arguments; network defaults
-        stored within this method."""
-        super().__init__()
-        self.dueling = dueling
-        f, c, h, w = image_shape
-        self.conv = RepNet(f*c)
-        # conv_out_size = self.conv.conv_out_size(h, w)
-        # self.dyamics_network = TransitionModel(conv_out_size, num_actions)
-        # self.reward_network = ValueNetwork(conv_out_size)
-        if dueling:
-            self.head = PizeroDistributionalDuelingHeadModel(256, output_size, hidden_size=1, pixels=36)
-        else:
-            self.head = PizeroDistributionalHeadModel(256, output_size, hidden_size=1, pixels=36)
-
-    def forward(self, observation, prev_action, prev_reward):
-        """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
-        for each state/observation, using softmax output nonlinearity."""
-        while len(observation.shape) <= 4:
-            observation = observation.unsqueeze(0)
-        observation = observation.flatten(-4, -3)
-        img = observation.type(torch.float)  # Expect torch.uint8 inputs
-        img = img.mul_(1. / 255)  # From [0-255] to [0-1], in place.
-
-        # Infer (presence of) leading dimensions: [T,B], [B], or [].
-        lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
-
-        conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
-        p = self.head(conv_out)
-        p = F.softmax(p, dim=-1)
-
-        # Restore leading dimensions: [T,B], [B], or [], as input.
-        p = restore_leading_dims(p, lead_dim, T, B)
-        return p.squeeze()
-
-
-class PizeroSearchCatDqnModel(torch.nn.Module):
-    """2D conlutional network feeding into MLP with ``n_atoms`` outputs
-    per action, representing a discrete probability distribution of Q-values."""
-
-    def __init__(
-            self,
-            image_shape,
-            output_size,
-            n_atoms=51,
-            fc_sizes=512,
-            dueling=False,
-            use_maxpool=False,
-            channels=None,  # None uses default.
-            kernel_sizes=None,
-            strides=None,
-            paddings=None,
-            framestack=4,
-            grayscale=True,
-            actions=False,
             jumps=0,
-            detach_model=True,
-            nce=False,
+            mpr=False,
             augmentation="none",
             target_augmentation=0,
             eval_augmentation=0,
-            stack_actions=False,
             dynamics_blocks=16,
-            film=False,
             norm_type="bn",
-            encoder="repnet",
             noisy_nets=0,
             aug_prob=0.8,
             classifier="mlp",
             imagesize=84,
-            time_contrastive=0,
-            local_nce=False,
-            global_nce=False,
-            global_local_nce=False,
-            buffered_nce=False,
+            time_offset=0,
+            local_mpr=False,
+            global_mpr=False,
             momentum_encoder=False,
             shared_encoder=False,
-            padding='same',
-            frame_dropout=0,
-            keep_last_frame=True,
-            cosine_nce=False,
-            no_rl_augmentation=False,
-            transition_model="standard",
-            target_encoder_sn=False,
-            use_all_targets=False,
-            grad_scale_factor=0.5,
-            hard_neg_factor=0,
             distributional=1,
-            byol=0,
             dqn_hidden_size=256,
-            byol_tau=0.01,
-            init="standard",
+            momentum_tau=0.01,
             renormalize=False,
             q_l1_type="noisy advantage",
             dropout=0.0,
-            final_classifier="linear"
+            final_classifier="linear",
+            model_rl=0,
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
         super().__init__()
 
         self.noisy = noisy_nets
-        self.time_contrastive = time_contrastive
+        self.time_offset = time_offset
         self.aug_prob = aug_prob
         self.classifier_type = classifier
 
@@ -384,7 +138,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         self.eval_transforms = []
 
         self.uses_augmentation = False
-        self.no_rl_augmentation = no_rl_augmentation
         for aug in augmentation:
             if aug == "affine":
                 transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
@@ -410,9 +163,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             elif aug == "intensity":
                 transformation = Intensity(scale=0.05)
                 eval_transformation = nn.Identity()
-            elif aug == "dropout":
-                transformation = lambda x: F.dropout(x, 0.2)
-                eval_transformation = lambda x: x*(1 - 0.2)
             elif aug == "none":
                 transformation = eval_transformation = nn.Identity()
             else:
@@ -440,14 +190,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         print("Spatial latent size is {}".format(fake_output.shape[1:]))
 
         self.jumps = jumps
-        self.grad_scale_factor = grad_scale_factor
-        self.detach_model = detach_model
-        self.use_nce = nce
+        self.model_rl = model_rl
+        self.use_mpr = mpr
         self.target_augmentation = target_augmentation
         self.eval_augmentation = eval_augmentation
-        self.stack_actions = stack_actions
         self.num_actions = output_size
-        self.hard_neg_factor = hard_neg_factor
 
         if dueling:
             self.head = DQNDistributionalDuelingHeadModel(self.hidden_size,
@@ -483,11 +230,8 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             self.global_mpr = global_mpr
             self.momentum_encoder = momentum_encoder
             self.momentum_tau = momentum_tau
-            self.buffered_nce = buffered_nce
             self.shared_encoder = shared_encoder
-            assert self.local_nce or self.global_nce or self.global_local_nce
             assert not (self.shared_encoder and self.momentum_encoder)
-            assert not (target_encoder_sn and self.momentum_encoder)
 
             # in case someone tries something silly like --local-mpr 2
             self.num_mprs = int(bool(self.local_mpr)) + \
@@ -507,10 +251,10 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 elif self.classifier_type == "none":
                     self.local_classifier = nn.Identity()
                 if final_classifier == "mlp":
-                    self.local_final_classifier = nn.Sequential(nn.Linear(self.hidden_size, self.hidden_size),
-                                                                nn.BatchNorm1d(self.hidden_size),
+                    self.local_final_classifier = nn.Sequential(nn.Linear(self.hidden_size, 2*self.hidden_size),
+                                                                nn.BatchNorm1d(2*self.hidden_size),
                                                                 nn.ReLU(),
-                                                                nn.Linear(self.hidden_size,
+                                                                nn.Linear(2*self.hidden_size,
                                                                     self.hidden_size))
                 elif final_classifier == "linear":
                     self.local_final_classifier = nn.Linear(self.hidden_size, self.hidden_size)
@@ -518,8 +262,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     self.local_final_classifier = nn.Identity()
 
                 self.local_target_classifier = self.local_classifier
-                local_buffer_size = self.hidden_size
-                self.local_classifier.apply(weights_init)
             else:
                 self.local_classifier = self.local_target_classifier = nn.Identity()
             if self.global_nce:
@@ -533,15 +275,15 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                                                 nn.Linear(512, 256)
                                                 )
                     self.global_target_classifier = self.global_classifier
-                    global_buffer_size = 256
+                    global_mpr_size = 256
                 elif self.classifier_type == "q_l1":
                     self.global_classifier = QL1Head(self.head, dueling=dueling, type=q_l1_type)
-                    global_buffer_size = self.global_classifier.out_features
+                    global_mpr_size = self.global_classifier.out_features
                     self.global_target_classifier = self.global_classifier
                 elif self.classifier_type == "q_l2":
                     self.global_classifier = nn.Sequential(self.head, nn.Flatten(-2, -1))
                     self.global_target_classifier = self.global_classifier
-                    global_buffer_size = 256
+                    global_mpr_size = 256
                 elif self.classifier_type == "bilinear":
                     self.global_classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                            nn.Linear(self.hidden_size*self.pixels,
@@ -551,88 +293,50 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     self.global_classifier = nn.Flatten(-3, -1)
                     self.global_target_classifier = nn.Flatten(-3, -1)
 
-                    global_buffer_size = self.hidden_size*self.pixels
+                    global_mpr_size = self.hidden_size*self.pixels
                 if final_classifier == "mlp":
                     self.global_final_classifier = nn.Sequential(
-                        nn.Linear(global_buffer_size, global_buffer_size*2),
-                        nn.BatchNorm1d(global_buffer_size*2),
+                        nn.Linear(global_mpr_size, global_mpr_size*2),
+                        nn.BatchNorm1d(global_mpr_size*2),
                         nn.ReLU(),
-                        nn.Linear(global_buffer_size*2, global_buffer_size)
+                        nn.Linear(global_mpr_size*2, global_mpr_size)
                     )
                 elif final_classifier == "linear":
                     self.global_final_classifier = nn.Sequential(
-                        nn.Linear(global_buffer_size, global_buffer_size),
+                        nn.Linear(global_mpr_size, global_mpr_size),
                     )
                 elif final_classifier == "none":
                     self.global_final_classifier = nn.Identity()
-                self.global_classifier.apply(weights_init)
             else:
                 self.global_classifier = self.global_target_classifier = nn.Identity()
 
             if self.momentum_encoder:
-                self.nce_target_encoder = copy.deepcopy(self.conv)
+                self.target_encoder = copy.deepcopy(self.conv)
                 self.global_target_classifier = copy.deepcopy(self.global_target_classifier)
                 self.local_target_classifier = copy.deepcopy(self.local_target_classifier)
-                self.global_local_target_classifier = copy.deepcopy(self.global_local_target_classifier)
                 for param in (list(self.nce_target_encoder.parameters())
                             + list(self.global_target_classifier.parameters())
-                            + list(self.local_target_classifier.parameters())
-                            + list(self.global_local_target_classifier.parameters())):
+                            + list(self.local_target_classifier.parameters())):
                     param.requires_grad = False
 
             elif not self.shared_encoder:
                 # Use a separate target encoder on the last frame only.
                 self.global_target_classifier = copy.deepcopy(self.global_target_classifier)
                 self.local_target_classifier = copy.deepcopy(self.local_target_classifier)
-                self.global_local_target_classifier = copy.deepcopy(self.global_local_target_classifier)
                 if self.stack_actions:
                     input_size = c - 1
                 else:
                     input_size = c
-                self.mpr_target_encoder = Conv2dModel(in_channels=input_size,
-                                                      channels=[32, 64, 64],
-                                                      kernel_sizes=[8, 4, 3],
-                                                      strides=[4, 2, 1],
-                                                      paddings=[0, 0, 0],
-                                                      use_maxpool=False,
-                                                      )
+                self.target_encoder = Conv2dModel(in_channels=input_size,
+                                                  channels=[32, 64, 64],
+                                                  kernel_sizes=[8, 4, 3],
+                                                  strides=[4, 2, 1],
+                                                  paddings=[0, 0, 0],
+                                                  use_maxpool=False,
+                                                  )
 
             elif self.shared_encoder:
-                self.nce_target_encoder = self.conv
-
-            if target_encoder_sn:
-                for module in (list(self.nce_target_encoder.modules())
-                             + list(self.global_classifier.modules())
-                             + list(self.global_target_classifier.modules())
-                             + list(self.global_local_classifier.modules())
-                             + list(self.global_local_target_classifier.modules())
-                             + list(self.local_classifier.modules())
-                             + list(self.local_target_classifier.modules())
-                              ):
-                    if hasattr(module, "weight"):
-                        spectral_norm(module)
-
-            if self.buffered_nce:
-                if self.local_nce or self.global_local_nce:
-                    self.local_nce = LocBufferedNCE(local_buffer_size, 2**10,
-                                                    buffer_names=["main"],
-                                                    n_locs=self.pixels)
-                if self.global_nce:
-                    self.global_nce = BufferedNCE(global_buffer_size, 2**10,
-                                                  buffer_names=["main"])
-                # This style of NCE can also be used for global-local with expand()
-                self.nce = BlockNCE(normalize=cosine_nce,
-                                    use_self_targets=use_all_targets
-                                                     or self.jumps == 0,
-                                    byol=byol)
-
-        if self.detach_model:
-            self.target_head = copy.deepcopy(self.head)
-            for param in self.target_head.parameters():
-                param.requires_grad = False
-
-        if init == "orthogonal":
-            self.apply(orthogonal_init)
+                self.target_encoder = self.conv
 
         print("Initialized model with {} parameters".format(count_parameters(self)))
 
@@ -684,7 +388,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         latents = pred_latents[:observation.shape[1]].flatten(0, 1)  # batch*jumps, *
         neg_latents = pred_latents[observation.shape[1]:].flatten(0, 1)
         latents = torch.cat([latents, neg_latents], 0)
-        target_images = observation[self.time_contrastive:self.jumps + self.time_contrastive+1].transpose(0, 1).flatten(2, 3)
+        target_images = observation[self.time_offset:self.jumps + self.time_offset+1].transpose(0, 1).flatten(2, 3)
         target_images = self.transform(target_images, True)
 
         if not self.momentum_encoder and not self.shared_encoder:
@@ -694,23 +398,17 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             if self.renormalize:
                 target_latents = renormalize(target_latents, -3)
 
-        if self.global_local_nce:
-            gl_nce_loss, gl_nce_accs = self.do_global_local_nce(latents, target_latents, observation)
+        if self.local_mpr:
+            local_loss = self.local_mpr_loss(latents, target_latents, observation)
         else:
-            gl_nce_loss = gl_nce_accs = 0
-        if self.local_nce:
-            local_nce_loss, local_nce_accs = self.do_local_nce(latents, target_latents, observation)
+            local_loss = 0
+        if self.global_mpr:
+            global_loss = self.global_mpr_loss(latents, target_latents, observation)
         else:
-            local_nce_loss = local_nce_accs = 0
-        if self.global_nce:
-            global_nce_loss, global_nce_accs = self.do_global_nce(latents, target_latents, observation)
-        else:
-            global_nce_loss = global_nce_accs = 0
+            global_loss = 0
 
-        nce_loss = (global_nce_loss + local_nce_loss + gl_nce_loss)/self.num_nces
-        nce_accs = (global_nce_accs + local_nce_accs + gl_nce_accs)/self.num_nces
-
-        nce_loss = nce_loss.view(-1, observation.shape[1]) # split to batch, jumps
+        mpr_loss = (global_loss + local_loss)/self.num_mprs
+        mpr_loss = mpr_loss.view(-1, observation.shape[1]) # split to batch, jumps
 
         if self.momentum_encoder:
             update_state_dict(self.nce_target_encoder,
@@ -726,11 +424,7 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                     update_state_dict(self.global_target_classifier,
                                       self.global_classifier.state_dict(),
                                       self.momentum_tau)
-                if self.global_local_nce:
-                    update_state_dict(self.global_local_target_classifier,
-                                      self.global_local_classifier.state_dict(),
-                                      self.momentum_tau)
-        return nce_loss, nce_accs
+        return mpr_loss
 
     def apply_transforms(self, transforms, eval_transforms, image):
         if eval_transforms is None:
@@ -776,13 +470,9 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                      conv_out,
                      prev_action,
                      prev_reward,
-                     target=False,
                      logits=False):
         lead_dim, T, B, img_shape = infer_leading_dims(conv_out, 3)
-        if target:
-            p = self.target_head(conv_out)
-        else:
-            p = self.head(conv_out)
+        p = self.head(conv_out)
 
         if self.distributional:
             if logits:
@@ -796,72 +486,62 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         p = restore_leading_dims(p, lead_dim, T, B)
         return p
 
-    def forward(self, observation, prev_action, prev_reward, train=False):
+    def forward(self, observation,
+                prev_action, prev_reward,
+                train=False, eval=False):
         """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
-        for each state/observation, using softmax output nonlinearity."""
+        for each state/observation, using softmax output nonlinearity.
+
+        For convenience reasons with DistributedDataParallel the forward method
+        has been split into two cases, one for training and one for eval.
+        """
         if train:
             log_pred_ps = []
             pred_reward = []
             pred_latents = []
-            pred_nce_latents = []
-            input_obs = self.add_observation_negatives(observation).flatten(1, 2)
-            input_obs = self.transform(input_obs, not self.no_rl_augmentation)
+            input_obs = observation.flatten(1, 2)
+            input_obs = self.transform(input_obs, augment=True)
             latent = self.stem_forward(input_obs,
                                        prev_action[0],
                                        prev_reward[0])
-            pred_latents.append(latent[:observation.shape[1]])
-            pred_nce_latents.append(latent)
-            if self.jumps > 0 or not self.detach_model:
-                if self.detach_model:
-                    self.target_head.load_state_dict(self.head.state_dict())
-                    latent = latent.detach()
+            log_pred_ps.append(self.head_forward(latent,
+                                                 prev_action[0],
+                                                 prev_reward[0],
+                                                 logits=True))
+            pred_latents.append(latent)
+            if self.jumps > 0:
                 pred_rew = self.dynamics_model.reward_predictor(pred_latents[0])
                 pred_reward.append(F.log_softmax(pred_rew, -1))
 
                 for j in range(1, self.jumps + 1):
-                    latent, action = self.add_hard_negatives(latent[:observation.shape[1]], prev_action[j])
-                    latent, pred_rew = self.step(latent, action)
+                    latent, pred_rew = self.step(latent, prev_action[j])
                     pred_rew = pred_rew[:observation.shape[1]]
-                    latent = ScaleGradient.apply(latent, self.grad_scale_factor)
-                    pred_latents.append(latent[:observation.shape[1]])
-                    pred_nce_latents.append(latent)
+                    pred_latents.append(latent)
                     pred_reward.append(F.log_softmax(pred_rew, -1))
 
-            for i in range(len(pred_latents)):
-                log_pred_ps.append(self.head_forward(pred_latents[i],
-                                                     prev_action[i],
-                                                     prev_reward[i],
-                                                     target=self.detach_model and i > 0,
-                                                     logits=True))
+            if self.model_rl > 0:
+                for i in range(1, len(pred_latents)):
+                    log_pred_ps.append(self.head_forward(pred_latents[i],
+                                                         prev_action[i],
+                                                         prev_reward[i],
+                                                         logits=True))
 
-            if self.use_nce:
-                if self.no_rl_augmentation and self.uses_augmentation:
-                    pred_nce_latents = []
-                    input_obs = self.transform(input_obs, True)
-                    nce_latent = self.stem_forward(input_obs,
-                                                   prev_action[0],
-                                                   prev_reward[0])
-                    pred_nce_latents.append(nce_latent)
-                    for j in range(1, self.jumps + 1):
-                        nce_latent, _ = self.dynamics_model(nce_latent, prev_action[j])
-                        nce_latent = ScaleGradient.apply(nce_latent, self.grad_scale_factor)
-                        pred_nce_latents.append(nce_latent)
-                nce_loss, nce_accs = self.do_nce(pred_nce_latents, observation)
+            if self.use_mpr:
+                mpr_loss = self.do_mpr_loss(pred_latents, observation)
             else:
-                nce_loss = torch.zeros((self.jumps + 1, observation.shape[1]), device=latent.device)
-                nce_accs = torch.zeros(1,)
+                mpr_loss = torch.zeros((self.jumps + 1, observation.shape[1]), device=latent.device)
 
             return log_pred_ps,\
                    pred_reward,\
-                   nce_loss,\
-                   nce_accs
+                   mpr_loss
 
         else:
+            aug_factor = self.target_augmentation if not eval else self.eval_augmentation
             observation = observation.flatten(-4, -3)
-            stacked_observation = observation.unsqueeze(1).repeat(1, max(1, self.target_augmentation), 1, 1, 1)
+            stacked_observation = observation.unsqueeze(1).repeat(1, max(1, aug_factor), 1, 1, 1)
             stacked_observation = stacked_observation.view(-1, *observation.shape[1:])
 
-            img = self.transform(stacked_observation, self.target_augmentation)
+            img = self.transform(stacked_observation, aug_factor)
 
             # Infer (presence of) leading dimensions: [T,B], [B], or [].
             lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
@@ -871,21 +551,21 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
                 conv_out = renormalize(conv_out, -3)
             p = self.head(conv_out)
 
-            p = p.view(observation.shape[0],
-                       max(1, self.target_augmentation),
-                       *p.shape[1:]).mean(1)
-
             if self.distributional:
                 p = F.softmax(p, dim=-1)
             else:
                 p = p.squeeze(-1)
+
+            p = p.view(observation.shape[0],
+                       max(1, aug_factor),
+                       *p.shape[1:]).mean(1)
 
             # Restore leading dimensions: [T,B], [B], or [], as input.
             p = restore_leading_dims(p, lead_dim, T, B)
 
             return p
 
-    def initial_inference(self, obs, actions=None, logits=False):
+    def select_action(self, obs):
         if len(obs.shape) == 5:
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, self.eval_augmentation)
@@ -894,27 +574,11 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
             hidden_state = renormalize(hidden_state, -3)
         value_logits = self.head(hidden_state)
 
-        # reward_logits = self.dynamics_model.reward_predictor(hidden_state)
-
-        if logits:
-            return hidden_state, value_logits
-
         if self.distributional:
-            value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
+            value = from_categorical(value_logits, logits=True, limit=10)
         else:
             value = value_logits.squeeze(-1)
         return hidden_state, value
-
-    def inference(self, state, action):
-        next_state, reward_logits, value_logits = self.step(state, action)
-        value_logits = self.head(next_state)
-        if self.distributional:
-            value = from_categorical(value_logits, logits=True, limit=10) #TODO Make these configurable
-        else:
-            value = value_logits.squeeze(-1)
-        reward = from_categorical(reward_logits, logits=True, limit=1)
-
-        return next_state, reward, value
 
     def step(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)
@@ -1052,48 +716,6 @@ class DQNDistributionalDuelingHeadModel(torch.nn.Module):
             module.sampling = sampling
 
 
-class PizeroDistributionalHeadModel(torch.nn.Module):
-    """An MLP head which reshapes output to [B, output_size, n_atoms]."""
-
-    def __init__(self,
-                 input_channels,
-                 output_size,
-                 hidden_size=128,
-                 pixels=30,
-                 n_atoms=51,
-                 norm_type="bn",
-                 noisy=False):
-        super().__init__()
-        if noisy:
-            linear = NoisyLinear
-        else:
-            linear = nn.Linear
-        self.hidden_size = hidden_size
-        self.linears = [linear(pixels*hidden_size, 256),
-                        linear(256, output_size * n_atoms)]
-        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
-                  nn.ReLU(),
-                  init_normalization(hidden_size, norm_type),
-                  nn.Flatten(-3, -1),
-                  self.linears[0],
-                  nn.ReLU(),
-                  self.linears[1]]
-        self.network = nn.Sequential(*layers)
-        self._output_size = output_size
-        self._n_atoms = n_atoms
-
-    def forward(self, input):
-        return self.network(input).view(-1, self._output_size, self._n_atoms)
-
-    def reset_noise(self):
-        for module in self.linears:
-            module.reset_noise()
-
-    def set_sampling(self, sampling):
-        for module in self.linears:
-            module.sampling = sampling
-
-
 class QL1Head(nn.Module):
     def __init__(self, head, dueling=False, type="noisy advantage"):
         super().__init__()
@@ -1128,62 +750,6 @@ class QL1Head(nn.Module):
         return representation
 
 
-class PizeroDistributionalDuelingHeadModel(torch.nn.Module):
-    """An MLP head which reshapes output to [B, output_size, n_atoms]."""
-
-    def __init__(self,
-                 input_channels,
-                 output_size,
-                 hidden_size=128,
-                 pixels=30,
-                 n_atoms=51,
-                 grad_scale=2 ** (-1 / 2),
-                 norm_type="bn",
-                 noisy=False):
-        super().__init__()
-        self.hidden_size = hidden_size
-        linear = NoisyLinear if noisy else nn.Linear
-        self.linears = [linear(pixels*hidden_size, 256),
-                        linear(256, n_atoms),
-                        linear(pixels * hidden_size,
-                               output_size * n_atoms, bias=False)
-                        ]
-        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
-                  nn.ReLU(),
-                  init_normalization(hidden_size, norm_type),
-                  nn.Flatten(-3, -1),
-                  self.linears[0],
-                  nn.ReLU(),
-                  self.linears[1]]
-        self.advantage_hidden = nn.Sequential(
-            nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
-            nn.ReLU(),
-            init_normalization(hidden_size, norm_type),
-            nn.Flatten(-3, -1))
-        self.advantage_out = self.linears[2]
-        self.advantage_bias = torch.nn.Parameter(torch.zeros(n_atoms), requires_grad=True)
-        self.value = nn.Sequential(*layers)
-        self._grad_scale = grad_scale
-        self._output_size = output_size
-        self._n_atoms = n_atoms
-
-    def forward(self, input):
-        x = scale_grad(input, self._grad_scale)
-        advantage = self.advantage(x)
-        value = self.value(x).view(-1, 1, self._n_atoms)
-        return value + (advantage - advantage.mean(dim=1, keepdim=True))
-
-    def advantage(self, input):
-        x = self.advantage_hidden(input)
-        x = self.advantage_out(x)
-        x = x.view(-1, self._output_size, self._n_atoms)
-        return x + self.advantage_bias
-
-    def reset_noise(self):
-        for module in self.linears:
-            module.reset_noise()
-
-
 def weights_init(m):
     if isinstance(m, Conv2dSame):
         torch.nn.init.kaiming_uniform_(m.layer.weight, nonlinearity='linear')
@@ -1191,45 +757,6 @@ def weights_init(m):
     elif isinstance(m, (nn.Conv2d, nn.Linear)):
         torch.nn.init.kaiming_uniform_(m.weight, nonlinearity='linear')
         torch.nn.init.zeros_(m.bias)
-
-def orthogonal_init(m):
-    """Custom weight init for Conv2D and Linear layers."""
-    if isinstance(m, nn.Linear):
-        nn.init.orthogonal_(m.weight.data)
-        m.bias.data.fill_(0.0)
-    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-        # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
-        assert m.weight.size(2) == m.weight.size(3)
-        m.weight.data.fill_(0.0)
-        m.bias.data.fill_(0.0)
-        mid = m.weight.size(2) // 2
-        gain = nn.init.calculate_gain('relu')
-        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
-
-class CurlEncoder(nn.Module):
-    def __init__(self,
-                 input_channels,
-                 norm_type="bn", padding='same'):
-        super().__init__()
-        self.input_channels = input_channels
-        if padding == 'same':
-            self.main = nn.Sequential(
-                Conv2dSame(self.input_channels, 32, 5, stride=5),  # 20x20
-                nn.ReLU(),
-                Conv2dSame(32, 64, 5, stride=5),  #4x4
-                nn.ReLU())
-        elif padding == 'valid':
-            self.main = nn.Sequential(
-                nn.Conv2d(self.input_channels, 32, 5, stride=5, padding=0),  # 20x20
-                nn.ReLU(),
-                nn.Conv2d(32, 64, 5, stride=5, padding=0),  #4x4
-                nn.ReLU())
-        self.main.apply(weights_init)
-        self.train()
-
-    def forward(self, inputs):
-        fmaps = self.main(inputs)
-        return fmaps
 
 
 class NoisyLinear(nn.Module):
@@ -1288,83 +815,6 @@ class NoisyLinear(nn.Module):
             return F.linear(input, self.weight_mu, self.bias_mu)
 
 
-class SmallEncoder(nn.Module):
-    def __init__(self,
-                 feature_size=256,
-                 input_channels=4,
-                 norm_type="bn"):
-        super().__init__()
-        self.feature_size = feature_size
-        self.input_channels = input_channels
-        init_ = lambda m: init(m,
-                               nn.init.orthogonal_,
-                               lambda x: nn.init.constant_(x, 0),
-                               nn.init.calculate_gain('relu'))
-
-        self.main = nn.Sequential(
-            init_(nn.Conv2d(self.input_channels, 32, 8, stride=2, padding=4)),  # 50x50
-            nn.ReLU(),
-            init_normalization(32, norm_type),
-            init_(nn.Conv2d(32, 64, 4, stride=2, padding=1)),  # 25x25
-            nn.ReLU(),
-            init_normalization(64, norm_type),
-            init_(nn.Conv2d(64, 128, 4, stride=2, padding=1)),  # 12 x 12
-            nn.ReLU(),
-            init_normalization(128, norm_type),
-            init_(nn.Conv2d(128, self.feature_size, 4, stride=2, padding=1)),  # 6 x 6
-            nn.ReLU(),
-            init_(nn.Conv2d(self.feature_size, self.feature_size,
-                            1, stride=1, padding=0)),
-            nn.ReLU())
-        self.train()
-
-    def forward(self, inputs):
-        fmaps = self.main(inputs)
-        return fmaps
-
-
-class RepNet(nn.Module):
-    def __init__(self, channels=3, norm_type="bn"):
-        super().__init__()
-        self.input_channels = channels
-        layers = nn.ModuleList()
-        hidden_channels = 128
-        layers.append(nn.Conv2d(self.input_channels, hidden_channels,
-                                kernel_size=3, stride=2, padding=1))
-        layers.append(nn.ReLU())
-        layers.append(init_normalization(hidden_channels, norm_type))
-        for _ in range(2):
-            layers.append(ResidualBlock(hidden_channels,
-                                        hidden_channels,
-                                        norm_type))
-        layers.append(nn.Conv2d(hidden_channels, hidden_channels * 2,
-                                kernel_size=3, stride=2, padding=1))
-        hidden_channels = hidden_channels * 2
-        layers.append(nn.ReLU())
-        layers.append(init_normalization(hidden_channels, norm_type))
-        for _ in range(3):
-            layers.append(ResidualBlock(hidden_channels,
-                                        hidden_channels,
-                                        norm_type))
-        layers.append(nn.AvgPool2d(2))
-        for _ in range(3):
-            layers.append(ResidualBlock(hidden_channels,
-                                        hidden_channels,
-                                        norm_type))
-        layers.append(nn.AvgPool2d(2))
-        self.network = nn.Sequential(*layers)
-        self.train()
-
-    def forward(self, x):
-        if x.shape[-3] < self.input_channels:
-            # We need to consolidate the framestack.
-            x = x.flatten(-4, -3)
-        if len(x.shape) == 3:
-            x = x.unsqueeze(0)
-        latent = self.network(x)
-        return renormalize(latent, 1)
-
-
 class Conv2dSame(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1):
         super(Conv2dSame, self).__init__()
@@ -1384,38 +834,6 @@ class Conv2dSame(nn.Module):
         return x_out
 
 
-class ImpalaCNN(nn.Module):
-    def __init__(self, input_channels,
-                 depths=(16, 32, 32, 32),
-                 norm_type="bn"):
-        super(ImpalaCNN, self).__init__()
-        self.depths = [input_channels] + depths
-        self.layers = []
-        self.norm_type = norm_type
-        for i in range(len(depths)):
-            self.layers.append(self._make_layer(self.depths[i],
-                                                self.depths[i+1]))
-        self.layers = nn.Sequential(*self.layers)
-        self.train()
-
-    def _make_layer(self, in_channels, depth):
-        return nn.Sequential(
-            Conv2dSame(in_channels, depth, 3),
-            nn.MaxPool2d(3, stride=2),
-            nn.ReLU(),
-            ResidualBlock(depth, depth, norm_type=self.norm_type),
-            nn.ReLU(),
-            ResidualBlock(depth, depth, norm_type=self.norm_type)
-        )
-
-    @property
-    def local_layer_depth(self):
-        return self.depths[-2]
-
-    def forward(self, inputs, fmaps=False):
-        return self.layers(inputs)
-
-
 def maybe_transform(image, transform, alt_transform, p=0.8):
     processed_images = transform(image)
     if p >= 1:
@@ -1428,6 +846,7 @@ def maybe_transform(image, transform, alt_transform, p=0.8):
         processed_images = mask * processed_images + (1 - mask) * base_images
         return processed_images
 
+
 class Intensity(nn.Module):
     def __init__(self, scale):
         super().__init__()
@@ -1437,133 +856,6 @@ class Intensity(nn.Module):
         r = torch.randn((x.size(0), 1, 1, 1), device=x.device)
         noise = 1.0 + (self.scale * r.clamp(-2.0, 2.0))
         return x * noise
-
-
-class TCMLPEncoder(nn.Module):
-    def __init__(self, input_shape, hidden_sizes):
-        super().__init__()
-        self.input_shape = input_shape
-        self.framestack = self.input_shape[0]
-        self.channels = np.prod(self.input_shape[1:])
-        self.layers = [nn.Conv1d(self.framestack, self.framestack*4, self.framestack, stride=1, padding=0),
-                       nn.ReLU(),
-                       nn.Conv1d(self.framestack, self.framestack, self.framestack, stride=1, padding=0),
-                       nn.ReLU(),
-                       nn.Flatten(-2, -1)]
-
-        self.layers.append(nn.Linear(self.channels*self.framestack, hidden_sizes[0]))
-        self.layers.append(nn.ReLU())
-
-        for i in range(len(hidden_sizes) - 1):
-            self.layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i+1]))
-            self.layers.append(nn.ReLU())
-
-        self.network = nn.Sequential(*self.layers)
-
-    def forward(self, x):
-        x = x.reshape(-1, self.framestack, self.channels)
-        output = self.network(x)
-        output = output.unsqueeze(-1).unsqueeze(-1)
-
-        return output
-
-
-class MLPEncoder(nn.Module):
-    def __init__(self, input_shape, hidden_sizes):
-        super().__init__()
-        self.input_shape = input_shape
-        self.input_size = np.prod(input_shape)
-        self.layers = []
-        self.layers.append(nn.Linear(self.input_size, hidden_sizes[0]))
-        self.layers.append(nn.ReLU())
-
-        for i in range(len(hidden_sizes) - 1):
-            self.layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i+1]))
-            self.layers.append(nn.ReLU())
-
-        self.network = nn.Sequential(*self.layers)
-
-    def forward(self, x):
-        x = x.reshape(-1, self.input_size)
-        output = self.network(x)
-        output = output.unsqueeze(-1).unsqueeze(-1)
-
-        return output
-
-
-class MLPResidualBlock(nn.Module):
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 norm_type="bn"):
-        super().__init__()
-        self.block = nn.Sequential(
-            nn.Linear(in_channels, out_channels),
-            nn.ReLU(),
-            init_normalization(out_channels, norm_type, one_d=True),
-            nn.Linear(out_channels, out_channels),
-            init_normalization(out_channels, norm_type, one_d=True),
-        )
-
-    def forward(self, x):
-        residual = x
-        out = self.block(x)
-        out += residual
-        out = F.relu(out)
-        return out
-
-
-class MLPTransitionModel(nn.Module):
-    def __init__(self,
-                 channels,
-                 num_actions,
-                 args=None,
-                 blocks=16,
-                 hidden_size=256,
-                 pixels=36,
-                 limit=300,
-                 action_dim=6,
-                 norm_type="bn",
-                 renormalize=True):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.num_actions = num_actions
-        self.args = args
-        self.renormalize = renormalize
-        layers = [nn.Linear(channels*pixels+num_actions, hidden_size),
-                  nn.ReLU(),
-                  init_normalization(hidden_size, norm_type, one_d=True)]
-        for _ in range(blocks):
-            layers.append(MLPResidualBlock(hidden_size,
-                                        hidden_size,
-                                        norm_type))
-        layers.extend([nn.Linear(hidden_size, channels*pixels),
-                      nn.ReLU()])
-
-        self.action_embedding = nn.Embedding(num_actions, pixels*action_dim)
-
-        self.network = nn.Sequential(*layers)
-        layers = [nn.Flatten(-3, -1),
-                  nn.Linear(pixels*channels, 128),
-                  nn.ReLU(),
-                  nn.Linear(128, limit*2 + 1)]
-        self.reward_predictor = nn.Sequential(*layers)
-        self.train()
-
-    def forward(self, x, action):
-        flat_x = x.flatten(-3, -1)
-        batch_range = torch.arange(action.shape[0], device=action.device)
-        action_onehot = torch.zeros(action.shape[0],
-                                    self.num_actions,
-                                    device=action.device)
-        action_onehot[batch_range, action] = 1
-        stacked_x = torch.cat([flat_x, action_onehot], 1)
-        next_state = self.network(stacked_x)
-        if self.renormalize:
-            next_state = renormalize(next_state, 1)
-        next_state = next_state.view(*x.shape)
-        next_reward = self.reward_predictor(next_state)
-        return next_state, next_reward
 
 
 class Conv2dModel(torch.nn.Module):
@@ -1582,7 +874,7 @@ class Conv2dModel(torch.nn.Module):
             nonlinearity=torch.nn.ReLU,  # Module, not Functional.
             use_maxpool=False,  # if True: convs use stride 1, maxpool downsample.
             head_sizes=None,  # Put an MLP head on top.
-            dropout=0,
+            dropout=0.,
             ):
         super().__init__()
         if paddings is None:
