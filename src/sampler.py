@@ -23,6 +23,127 @@ import torch
 import numpy as np
 
 
+class MinibatchRlEvalWandb(MinibatchRlEval):
+
+    def __init__(self, final_eval_only=False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.final_eval_only = final_eval_only
+
+    def log_diagnostics(self, itr, eval_traj_infos, eval_time):
+        cum_steps = (itr + 1) * self.sampler.batch_size * self.world_size
+        self.wandb_info = {'cum_steps': cum_steps}
+        super().log_diagnostics(itr, eval_traj_infos, eval_time)
+        wandb.log(self.wandb_info)
+
+    def _log_infos(self, traj_infos=None):
+        """
+        Writes trajectory info and optimizer info into csv via the logger.
+        Resets stored optimizer info.
+        """
+        if traj_infos is None:
+            traj_infos = self._traj_infos
+        if traj_infos:
+            for k in traj_infos[0]:
+                if not k.startswith("_"):
+                    values = [info[k] for info in traj_infos]
+                    logger.record_tabular_misc_stat(k,
+                                                    values)
+
+                    wandb.run.summary[k] = np.average(values)
+                    self.wandb_info[k + "Average"] = np.average(values)
+                    self.wandb_info[k + "Std"] = np.std(values)
+                    self.wandb_info[k + "Min"] = np.min(values)
+                    self.wandb_info[k + "Max"] = np.max(values)
+                    self.wandb_info[k + "Median"] = np.median(values)
+                    if k == 'GameScore':
+                        game = self.sampler.env_kwargs['game']
+                        random_score = atari_random_scores[game]
+                        der_score = atari_der_scores[game]
+                        nature_score = atari_nature_scores[game]
+                        human_score = atari_human_scores[game]
+                        normalized_score = (np.average(values) - random_score) / (human_score - random_score)
+                        der_normalized_score = (np.average(values) - random_score) / (der_score - random_score)
+                        nature_normalized_score = (np.average(values) - random_score) / (nature_score - random_score)
+                        self.wandb_info[k + "Normalized"] = normalized_score
+                        self.wandb_info[k + "DERNormalized"] = der_normalized_score
+                        self.wandb_info[k + "NatureNormalized"] = nature_normalized_score
+
+                        maybe_update_summary(k+"Best", np.average(values))
+                        maybe_update_summary(k+"NormalizedBest", normalized_score)
+                        maybe_update_summary(k+"DERNormalizedBest", der_normalized_score)
+                        maybe_update_summary(k+"NatureNormalizedBest", nature_normalized_score)
+
+        if self._opt_infos:
+            for k, v in self._opt_infos.items():
+                logger.record_tabular_misc_stat(k, v)
+                self.wandb_info[k] = np.average(v)
+                wandb.run.summary[k] = np.average(v)
+        self._opt_infos = {k: list() for k in self._opt_infos}  # (reset)
+
+    def evaluate_agent(self, itr):
+        """
+        Record offline evaluation of agent performance, by ``sampler.evaluate_agent()``.
+        """
+        if itr > 0:
+            self.pbar.stop()
+
+        if self.final_eval_only:
+            eval = itr == 0 or itr >= self.n_itr - 1
+        else:
+            eval = itr == 0 or itr >= self.min_itr_learn - 1
+        if eval:
+            logger.log("Evaluating agent...")
+            self.agent.eval_mode(itr)  # Might be agent in sampler.
+            eval_time = -time.time()
+            traj_infos = self.sampler.evaluate_agent(itr)
+            eval_time += time.time()
+        else:
+            traj_infos = []
+            eval_time = 0.0
+        logger.log("Evaluation runs complete.")
+        return traj_infos, eval_time
+
+    def train(self):
+        """
+        Performs startup, evaluates the initial agent, then loops by
+        alternating between ``sampler.obtain_samples()`` and
+        ``algo.optimize_agent()``.  Pauses to evaluate the agent at the
+        specified log interval.
+        """
+        n_itr = self.startup()
+        self.n_itr = n_itr
+        with logger.prefix(f"itr #0 "):
+            eval_traj_infos, eval_time = self.evaluate_agent(0)
+            self.log_diagnostics(0, eval_traj_infos, eval_time)
+        for itr in range(n_itr):
+            logger.set_iteration(itr)
+            with logger.prefix(f"itr #{itr} "):
+                self.agent.sample_mode(itr)
+                samples, traj_infos = self.sampler.obtain_samples(itr)
+                self.agent.train_mode(itr)
+                opt_info = self.algo.optimize_agent(itr, samples)
+                self.store_diagnostics(itr, traj_infos, opt_info)
+                if (itr + 1) % self.log_interval_itrs == 0:
+                    eval_traj_infos, eval_time = self.evaluate_agent(itr)
+                    self.log_diagnostics(itr, eval_traj_infos, eval_time)
+        self.shutdown()
+
+
+class SyncRlEvalWandb(SyncRlMixin, MinibatchRlEvalWandb):
+    """
+    Multi-process RL with offline agent performance evaluation.  Only the
+    master process runs agent evaluation.
+    """
+
+    @property
+    def WorkerCls(self):
+        return SyncWorkerEval
+
+    def log_diagnostics(self, *args, **kwargs):
+        super().log_diagnostics(*args, **kwargs)
+        self.par.barrier.wait()
+
+
 class OneToOneGpuEvalCollector(BaseEvalCollector):
     """Offline agent evaluation collector which communicates observations
     to an action-server, which in turn provides the agent's actions.
