@@ -6,6 +6,8 @@ from rlpyt.utils.buffer import buffer_from_example, torchify_buffer, numpify_buf
 from rlpyt.utils.logging import logger
 from rlpyt.utils.quick_args import save__init__args
 
+from rlpyt.runners.minibatch_rl import MinibatchRlEval
+from rlpyt.runners.sync_rl import SyncRlMixin, SyncWorkerEval
 from rlpyt.agents.base import AgentInputs
 from rlpyt.samplers.parallel.base import ParallelSamplerBase
 from rlpyt.samplers.parallel.gpu.action_server import ActionServer
@@ -19,8 +21,63 @@ from rlpyt.agents.base import AgentInputs
 from rlpyt.samplers.collections import (Samples, AgentSamples, AgentSamplesBsv,
     EnvSamples)
 
+import wandb
+
 import torch
 import numpy as np
+import time
+
+
+atari_human_scores = dict(
+    alien=7127.7, amidar=1719.5, assault=742.0, asterix=8503.3,
+    bank_heist=753.1, battle_zone=37187.5, boxing=12.1,
+    breakout=30.5, chopper_command=7387.8, crazy_climber=35829.4,
+    demon_attack=1971.0, freeway=29.6, frostbite=4334.7,
+    gopher=2412.5, hero=30826.4, jamesbond=302.8, kangaroo=3035.0,
+    krull=2665.5, kung_fu_master=22736.3, ms_pacman=6951.6, pong=14.6,
+    private_eye=69571.3, qbert=13455.0, road_runner=7845.0,
+    seaquest=42054.7, up_n_down=11693.2
+)
+
+atari_der_scores = dict(
+    alien=739.9, amidar=188.6, assault=431.2, asterix=470.8,
+    bank_heist=51.0, battle_zone=10124.6, boxing=0.2,
+    breakout=1.9, chopper_command=861.8, crazy_climber=16185.3,
+    demon_attack=508, freeway=27.9, frostbite=866.8,
+    gopher=349.5, hero=6857.0, jamesbond=301.6,
+    kangaroo=779.3, krull=2851.5, kung_fu_master=14346.1,
+    ms_pacman=1204.1, pong=-19.3, private_eye=97.8, qbert=1152.9,
+    road_runner=9600.0, seaquest=354.1, up_n_down=2877.4,
+)
+
+atari_nature_scores = dict(
+    alien=3069, amidar=739.5, assault=3359,
+    asterix=6012, bank_heist=429.7, battle_zone=26300.,
+    boxing=71.8, breakout=401.2, chopper_command=6687.,
+    crazy_climber=114103, demon_attack=9711., freeway=30.3,
+    frostbite=328.3, gopher=8520., hero=19950., jamesbond=576.7,
+    kangaroo=6740., krull=3805., kung_fu_master=23270.,
+    ms_pacman=2311., pong=18.9, private_eye=1788.,
+    qbert=10596., road_runner=18257., seaquest=5286., up_n_down=8456.
+)
+
+atari_random_scores = dict(
+    alien=227.8, amidar=5.8, assault=222.4,
+    asterix=210.0, bank_heist=14.2, battle_zone=2360.0,
+    boxing=0.1, breakout=1.7, chopper_command=811.0,
+    crazy_climber=10780.5, demon_attack=152.1, freeway=0.0,
+    frostbite=65.2, gopher=257.6, hero=1027.0, jamesbond=29.0,
+    kangaroo=52.0, krull=1598.0, kung_fu_master=258.5,
+    ms_pacman=307.3, pong=-20.7, private_eye=24.9,
+    qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
+)
+
+
+def maybe_update_summary(key, value):
+    if key not in wandb.run.summary:
+        wandb.run.summary[key] = value
+    else:
+        wandb.run.summary[key] = max(value, wandb.run.summary[key])
 
 
 class MinibatchRlEvalWandb(MinibatchRlEval):
@@ -127,62 +184,6 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
                     eval_traj_infos, eval_time = self.evaluate_agent(itr)
                     self.log_diagnostics(itr, eval_traj_infos, eval_time)
         self.shutdown()
-
-
-class SyncRlEvalWandb(SyncRlMixin, MinibatchRlEvalWandb):
-    """
-    Multi-process RL with offline agent performance evaluation.  Only the
-    master process runs agent evaluation.
-    """
-
-    @property
-    def WorkerCls(self):
-        return SyncWorkerEval
-
-    def log_diagnostics(self, *args, **kwargs):
-        super().log_diagnostics(*args, **kwargs)
-        self.par.barrier.wait()
-
-
-class OneToOneGpuEvalCollector(BaseEvalCollector):
-    """Offline agent evaluation collector which communicates observations
-    to an action-server, which in turn provides the agent's actions.
-    Note that the number of eval environments must be the same as the number
-    of eval trajectories.  Environments that have terminated will not be
-    step()ed and their traj_infos will not be updated, but action selection
-    will still be carried out for them.
-    """
-
-    def collect_evaluation(self, itr):
-        """Param itr unused."""
-        traj_infos = [self.TrajInfoCls() for _ in range(len(self.envs))]
-        act_ready, obs_ready = self.sync.act_ready, self.sync.obs_ready
-        step = self.step_buffer_np
-        for b, env in enumerate(self.envs):
-            step.observation[b] = env.reset()
-        step.done[:] = False
-        obs_ready.release()
-        live_envs = set(range(len(self.envs)))
-        for t in range(self.max_T):
-            act_ready.acquire()
-            if self.sync.stop_eval.value or len(live_envs) == 0:
-                obs_ready.release()  # Always release at end of loop.
-                break
-            for b, env in enumerate(self.envs):
-                if b in live_envs:
-                    o, r, d, env_info = env.step(step.action[b])
-                    traj_infos[b].step(step.observation[b], step.action[b], r, d,
-                                       step.agent_info[b], env_info)
-                    if getattr(env_info, "traj_done", d):
-                        self.traj_infos_queue.put(traj_infos[b].terminate(o))
-                        traj_infos[b] = self.TrajInfoCls()
-                        o = env.reset()
-                        live_envs.remove(b)  # This env is done, stop updating it
-                    step.observation[b] = o
-                    step.reward[b] = r
-                    step.done[b] = d
-            obs_ready.release()
-        self.traj_infos_queue.put(None)  # End sentinel.
 
 
 def delete_ind_from_tensor(tensor, ind):

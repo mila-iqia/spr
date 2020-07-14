@@ -15,17 +15,15 @@ AgentInputs = namedarraytuple("AgentInputs",
 AgentInfo = namedarraytuple("AgentInfo", "p")
 AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 
-from src.model_trainer import from_categorical
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.parallel import DistributedDataParallelCPU as DDPC
 
 class MPRAgent(AtariCatDqnAgent):
     """Agent for Categorical DQN algorithm with search."""
 
-    def __init__(self, args=None, eval=False, **kwargs):
+    def __init__(self, eval=False, **kwargs):
         """Standard init, and set the number of probability atoms (bins)."""
         super().__init__(**kwargs)
-        self.args = args
         self.eval = eval
 
     def __call__(self, observation, prev_action, prev_reward, train=False):
@@ -90,7 +88,6 @@ class MPRAgent(AtariCatDqnAgent):
         """Extend method to set epsilon for evaluation, using 1 for
         pre-training eval."""
         super().eval_mode(itr)
-        self.search.set_eval()
         self.search.epsilon = self.distribution.epsilon
         self.search.network.head.set_sampling(False)
         self.itr = itr
@@ -98,7 +95,6 @@ class MPRAgent(AtariCatDqnAgent):
     def sample_mode(self, itr):
         """Extend method to set epsilon for sampling (including annealing)."""
         super().sample_mode(itr)
-        self.search.set_train()
         self.search.epsilon = self.distribution.epsilon
         self.search.network.head.set_sampling(True)
         self.itr = itr
@@ -122,10 +118,11 @@ class MPRAgent(AtariCatDqnAgent):
 
 
 class MPRActionSelection(torch.nn.Module):
-    def __init__(self, network, distribution):
+    def __init__(self, network, distribution, device="cpu"):
         super().__init__()
         self.network = network
-        self.distribution = distribution
+        self.epsilon = distribution._epsilon
+        self.device = device
 
     def to_device(self, idx):
         self.device = idx
@@ -136,7 +133,7 @@ class MPRActionSelection(torch.nn.Module):
             obs.unsqueeze_(0)
         obs = obs.to(self.device).float() / 255.
 
-        value = self.network.forward(obs, eval=True)
+        value = self.network.select_action(obs)
         action = self.select_action(value)
         return action, value.squeeze()
 
@@ -144,7 +141,7 @@ class MPRActionSelection(torch.nn.Module):
         """Input can be shaped [T,B,Q] or [B,Q], and vector epsilon of length
         B will apply across the Batch dimension (same epsilon for all T)."""
         arg_select = torch.argmax(value, dim=-1)
-        mask = torch.rand(arg_select.shape, device=value.device) < self.distribution._epsilon
+        mask = torch.rand(arg_select.shape, device=value.device) < self.epsilon
         arg_rand = torch.randint(low=0, high=value.shape[-1], size=(mask.sum(),), device=value.device)
         arg_select[mask] = arg_rand
         return arg_select
