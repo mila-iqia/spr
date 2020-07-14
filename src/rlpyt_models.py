@@ -1,20 +1,9 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-from torch.nn.utils import spectral_norm
 
-from rlpyt.models.dqn.atari_catdqn_model import DistributionalHeadModel
-from rlpyt.models.dqn.dueling import DistributionalDuelingHeadModel
 from rlpyt.models.utils import scale_grad, update_state_dict
-from rlpyt.runners.async_rl import AsyncRlEval
-from rlpyt.runners.minibatch_rl import MinibatchRlEval
-from rlpyt.runners.sync_rl import SyncRlMixin, SyncWorkerEval
 from rlpyt.utils.tensor import infer_leading_dims, restore_leading_dims
-from src.model_trainer import ValueNetwork, TransitionModel, \
-    NetworkOutput, from_categorical, ScaleGradient, init, \
-    ResidualBlock, renormalize, FiLMTransitionModel, init_normalization
-from src.buffered_nce import BufferedNCE, LocBufferedNCE, BlockNCE
-from src.rlpyt_effnet import RLEffNet, EffnetTransitionModel
 from src.utils import count_parameters, dummy_context_mgr
 import numpy as np
 from kornia.augmentation import RandomAffine,\
@@ -22,62 +11,8 @@ from kornia.augmentation import RandomAffine,\
     CenterCrop, \
     RandomResizedCrop
 from kornia.filters import GaussianBlur2d
-from kornia.geometry.transform import Resize
-from rlpyt.utils.logging import logger
 import copy
 import wandb
-import time
-
-atari_human_scores = dict(
-    alien=7127.7, amidar=1719.5, assault=742.0, asterix=8503.3,
-    bank_heist=753.1, battle_zone=37187.5, boxing=12.1,
-    breakout=30.5, chopper_command=7387.8, crazy_climber=35829.4,
-    demon_attack=1971.0, freeway=29.6, frostbite=4334.7,
-    gopher=2412.5, hero=30826.4, jamesbond=302.8, kangaroo=3035.0,
-    krull=2665.5, kung_fu_master=22736.3, ms_pacman=6951.6, pong=14.6,
-    private_eye=69571.3, qbert=13455.0, road_runner=7845.0,
-    seaquest=42054.7, up_n_down=11693.2
-)
-
-atari_der_scores = dict(
-    alien=739.9, amidar=188.6, assault=431.2, asterix=470.8,
-    bank_heist=51.0, battle_zone=10124.6, boxing=0.2,
-    breakout=1.9, chopper_command=861.8, crazy_climber=16185.3,
-    demon_attack=508, freeway=27.9, frostbite=866.8,
-    gopher=349.5, hero=6857.0, jamesbond=301.6,
-    kangaroo=779.3, krull=2851.5, kung_fu_master=14346.1,
-    ms_pacman=1204.1, pong=-19.3, private_eye=97.8, qbert=1152.9,
-    road_runner=9600.0, seaquest=354.1, up_n_down=2877.4,
-)
-
-atari_nature_scores = dict(
-    alien=3069, amidar=739.5, assault=3359,
-    asterix=6012, bank_heist=429.7, battle_zone=26300.,
-    boxing=71.8, breakout=401.2, chopper_command=6687.,
-    crazy_climber=114103, demon_attack=9711., freeway=30.3,
-    frostbite=328.3, gopher=8520., hero=19950., jamesbond=576.7,
-    kangaroo=6740., krull=3805., kung_fu_master=23270.,
-    ms_pacman=2311., pong=18.9, private_eye=1788.,
-    qbert=10596., road_runner=18257., seaquest=5286., up_n_down=8456.
-)
-
-atari_random_scores = dict(
-    alien=227.8, amidar=5.8, assault=222.4,
-    asterix=210.0, bank_heist=14.2, battle_zone=2360.0,
-    boxing=0.1, breakout=1.7, chopper_command=811.0,
-    crazy_climber=10780.5, demon_attack=152.1, freeway=0.0,
-    frostbite=65.2, gopher=257.6, hero=1027.0, jamesbond=29.0,
-    kangaroo=52.0, krull=1598.0, kung_fu_master=258.5,
-    ms_pacman=307.3, pong=-20.7, private_eye=24.9,
-    qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
-)
-
-def maybe_update_summary(key, value):
-    if key not in wandb.run.summary:
-        wandb.run.summary[key] = value
-    else:
-        wandb.run.summary[key] = max(value, wandb.run.summary[key])
-
 
 class MPRCatDqnModel(torch.nn.Module):
     """2D conlutional network feeding into MLP with ``n_atoms`` outputs
@@ -225,7 +160,7 @@ class MPRCatDqnModel(torch.nn.Module):
 
         self.renormalize = renormalize
 
-        if self.use_nce:
+        if self.use_mpr:
             self.local_mpr = local_mpr
             self.global_mpr = global_mpr
             self.momentum_encoder = momentum_encoder
@@ -264,7 +199,7 @@ class MPRCatDqnModel(torch.nn.Module):
                 self.local_target_classifier = self.local_classifier
             else:
                 self.local_classifier = self.local_target_classifier = nn.Identity()
-            if self.global_nce:
+            if self.global_mpr:
                 self.global_final_classifier = nn.Identity()
                 if self.classifier_type == "mlp":
                     self.global_classifier = nn.Sequential(
@@ -314,7 +249,7 @@ class MPRCatDqnModel(torch.nn.Module):
                 self.target_encoder = copy.deepcopy(self.conv)
                 self.global_target_classifier = copy.deepcopy(self.global_target_classifier)
                 self.local_target_classifier = copy.deepcopy(self.local_target_classifier)
-                for param in (list(self.nce_target_encoder.parameters())
+                for param in (list(self.target_encoder.parameters())
                             + list(self.global_target_classifier.parameters())
                             + list(self.local_target_classifier.parameters())):
                     param.requires_grad = False
@@ -361,7 +296,7 @@ class MPRCatDqnModel(torch.nn.Module):
                                              self.jumps+1, global_targets.shape[-1]).transpose(1, 2)
         latents = global_latents.view(-1, observation.shape[1],
                                              self.jumps+1, global_latents.shape[-1]).transpose(1, 2)
-        loss = self.mpm_loss(latents, targets)
+        loss = self.mpr_loss(latents, targets)
         return loss
 
     def local_mpr_loss(self, latents, target_latents, observation):
@@ -394,7 +329,7 @@ class MPRCatDqnModel(torch.nn.Module):
         if not self.momentum_encoder and not self.shared_encoder:
             target_images = target_images[..., -1:, :, :]
         with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
-            target_latents = self.nce_target_encoder(target_images.flatten(0, 1))
+            target_latents = self.target_encoder(target_images.flatten(0, 1))
             if self.renormalize:
                 target_latents = renormalize(target_latents, -3)
 
@@ -411,16 +346,16 @@ class MPRCatDqnModel(torch.nn.Module):
         mpr_loss = mpr_loss.view(-1, observation.shape[1]) # split to batch, jumps
 
         if self.momentum_encoder:
-            update_state_dict(self.nce_target_encoder,
+            update_state_dict(self.target_encoder,
                               self.conv.state_dict(),
                               self.momentum_tau)
             if self.classifier_type != "bilinear":
                 # q_l1 is also bilinear for local
-                if self.local_nce and self.classifier_type != "q_l1":
+                if self.local_mpr and self.classifier_type != "q_l1":
                     update_state_dict(self.local_target_classifier,
                                       self.local_classifier.state_dict(),
                                       self.momentum_tau)
-                if self.global_nce:
+                if self.global_mpr:
                     update_state_dict(self.global_target_classifier,
                                       self.global_classifier.state_dict(),
                                       self.momentum_tau)
@@ -499,7 +434,7 @@ class MPRCatDqnModel(torch.nn.Module):
             log_pred_ps = []
             pred_reward = []
             pred_latents = []
-            input_obs = observation.flatten(1, 2)
+            input_obs = observation[0].flatten(1, 2)
             input_obs = self.transform(input_obs, augment=True)
             latent = self.stem_forward(input_obs,
                                        prev_action[0],
@@ -566,19 +501,13 @@ class MPRCatDqnModel(torch.nn.Module):
             return p
 
     def select_action(self, obs):
-        if len(obs.shape) == 5:
-            obs = obs.flatten(1, 2)
-        obs = self.transform(obs, self.eval_augmentation)
-        hidden_state = self.conv(obs)
-        if self.renormalize:
-            hidden_state = renormalize(hidden_state, -3)
-        value_logits = self.head(hidden_state)
+        value_logits = self.forward(obs, None, None, train=False, eval=True)
 
         if self.distributional:
             value = from_categorical(value_logits, logits=True, limit=10)
         else:
             value = value_logits.squeeze(-1)
-        return hidden_state, value
+        return value
 
     def step(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)
@@ -903,3 +832,169 @@ class Conv2dModel(torch.nn.Module):
         """Computes the convolution stack on the input; assumes correct shape
         already: [B,C,H,W]."""
         return self.conv(input)
+
+def init_normalization(channels, type="bn", affine=True, one_d=False):
+    assert type in ["bn", "ln", "in", "none", None]
+    if type == "bn":
+        if one_d:
+            return nn.BatchNorm1d(channels, affine=affine)
+        else:
+            return nn.BatchNorm2d(channels, affine=affine)
+    elif type == "ln":
+        if one_d:
+            return nn.LayerNorm(channels, elementwise_affine=affine)
+        else:
+            return nn.GroupNorm(1, channels, affine=affine)
+    elif type == "in":
+        return nn.GroupNorm(channels, channels, affine=affine)
+    elif type == "none" or type is None:
+        return nn.Identity()
+
+class ResidualBlock(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 norm_type="bn"):
+        super().__init__()
+        self.block = nn.Sequential(
+            Conv2dSame(in_channels, out_channels, 3),
+            nn.ReLU(),
+            init_normalization(out_channels, norm_type),
+            Conv2dSame(out_channels, out_channels, 3),
+            init_normalization(out_channels, norm_type),
+        )
+
+    def forward(self, x):
+        residual = x
+        out = self.block(x)
+        out += residual
+        out = F.relu(out)
+        return out
+
+
+class Conv2dSame(torch.nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 bias=True,
+                 stride=1,
+                 padding_layer=nn.ReflectionPad2d):
+        super().__init__()
+        ka = kernel_size // 2
+        kb = ka - 1 if kernel_size % 2 == 0 else ka
+        self.net = torch.nn.Sequential(
+            padding_layer((ka, kb, ka, kb)),
+            torch.nn.Conv2d(in_channels, out_channels, kernel_size, bias=bias,
+                            stride=stride)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+def to_categorical(value, limit=300):
+    value = value.float()  # Avoid any fp16 shenanigans
+    value = value.clamp(-limit, limit)
+    distribution = torch.zeros(value.shape[0], (limit*2+1), device=value.device)
+    lower = value.floor().long() + limit
+    upper = value.ceil().long() + limit
+    upper_weight = value % 1
+    lower_weight = 1 - upper_weight
+    distribution.scatter_add_(-1, lower.unsqueeze(-1), lower_weight.unsqueeze(-1))
+    distribution.scatter_add_(-1, upper.unsqueeze(-1), upper_weight.unsqueeze(-1))
+    return distribution
+
+
+def from_categorical(distribution, limit=300, logits=True):
+    distribution = distribution.float()  # Avoid any fp16 shenanigans
+    if logits:
+        distribution = torch.softmax(distribution, -1)
+    num_atoms = distribution.shape[-1]
+    weights = torch.linspace(-limit, limit, num_atoms, device=distribution.device).float()
+    return distribution @ weights
+
+
+class TransitionModel(nn.Module):
+    def __init__(self,
+                 channels,
+                 num_actions,
+                 args=None,
+                 blocks=16,
+                 hidden_size=256,
+                 pixels=36,
+                 limit=300,
+                 action_dim=6,
+                 norm_type="bn",
+                 renormalize=True):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_actions = num_actions
+        self.args = args
+        self.renormalize = renormalize
+        layers = [Conv2dSame(channels+num_actions, hidden_size, 3),
+                  nn.ReLU(),
+                  init_normalization(hidden_size, norm_type)]
+        for _ in range(blocks):
+            layers.append(ResidualBlock(hidden_size,
+                                        hidden_size,
+                                        norm_type))
+        layers.extend([Conv2dSame(hidden_size, channels, 3),
+                      nn.ReLU()])
+
+        self.action_embedding = nn.Embedding(num_actions, pixels*action_dim)
+
+        self.network = nn.Sequential(*layers)
+        self.reward_predictor = RewardPredictor(channels,
+                                                pixels=pixels,
+                                                limit=limit,
+                                                norm_type=norm_type)
+        self.train()
+
+    def forward(self, x, action):
+        batch_range = torch.arange(action.shape[0], device=action.device)
+        action_onehot = torch.zeros(action.shape[0],
+                                    self.num_actions,
+                                    x.shape[-2],
+                                    x.shape[-1],
+                                    device=action.device)
+        action_onehot[batch_range, action, :, :] = 1
+        stacked_image = torch.cat([x, action_onehot], 1)
+        next_state = self.network(stacked_image)
+        if self.renormalize:
+            next_state = renormalize(next_state, 1)
+        next_reward = self.reward_predictor(next_state)
+        return next_state, next_reward
+
+
+class RewardPredictor(nn.Module):
+    def __init__(self,
+                 input_channels,
+                 hidden_size=1,
+                 pixels=36,
+                 limit=300,
+                 norm_type="bn"):
+        super().__init__()
+        self.hidden_size = hidden_size
+        layers = [nn.Conv2d(input_channels, hidden_size, kernel_size=1, stride=1),
+                  nn.ReLU(),
+                  init_normalization(hidden_size, norm_type),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*hidden_size, 256),
+                  nn.ReLU(),
+                  nn.Linear(256, limit*2 + 1)]
+        self.network = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x):
+        return self.network(x)
+
+
+def renormalize(tensor, first_dim=1):
+    if first_dim < 0:
+        first_dim = len(tensor.shape) + first_dim
+    flat_tensor = tensor.view(*tensor.shape[:first_dim], -1)
+    max = torch.max(flat_tensor, first_dim, keepdim=True).values
+    min = torch.min(flat_tensor, first_dim, keepdim=True).values
+    flat_tensor = (flat_tensor - min)/(max - min)
+
+    return flat_tensor.view(*tensor.shape)

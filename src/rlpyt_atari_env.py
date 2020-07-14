@@ -135,7 +135,6 @@ class AtariEnv(Env):
                     self.reset()
         self._update_obs(0)  # (don't bother to populate any frame history)
         self._step_counter = 0
-        import ipdb; ipdb.set_trace()
         return self.get_obs()
 
     def step(self, action):

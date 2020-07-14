@@ -14,7 +14,7 @@ from rlpyt.utils.logging.context import logger_context
 import wandb
 
 from src.rlpyt_models import MPRCatDqnModel
-from src.sampler import OneToOneSerialEvalCollector, SerialEvalCollector, SerialSampler, MinibatchRlEvalWandb
+from src.rlpyt_framework import OneToOneSerialEvalCollector, SerialEvalCollector, SerialSampler, MinibatchRlEvalWandb
 from src.rlpyt_algos import MPRCategoricalDQN
 from src.rlpyt_agents import MPRAgent
 from src.rlpyt_atari_env import AtariEnv
@@ -28,15 +28,13 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     config = configs['ernbw']
     env = AtariEnv
     config['env']['game'] = game
-    config["env"]["stack_actions"] = args.stack_actions
     config["env"]["grayscale"] = args.grayscale
     config["env"]["num_img_obs"] = args.framestack
     config["eval_env"]["game"] = config["env"]["game"]
-    config["eval_env"]["stack_actions"] = args.stack_actions
     config["eval_env"]["grayscale"] = args.grayscale
     config["eval_env"]["num_img_obs"] = args.framestack
     config['env']['imagesize'] = args.imagesize
-    config['eval_env']['imagesize'] = args.eval_imagesize
+    config['eval_env']['imagesize'] = args.imagesize
     config['env']['seed'] = args.seed
     config['eval_env']['seed'] = args.seed
     config["model"]["dueling"] = bool(args.dueling)
@@ -69,7 +67,6 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     config["model"]["local_mpr"] = args.local_mpr
     config["model"]["global_mpr"] = args.global_mpr
     config["model"]["distributional"] = args.distributional
-    config["model"]["init"] = args.init
     config["model"]["renormalize"] = args.renormalize
     config["model"]["norm_type"] = args.norm_type
     config["model"]["augmentation"] = args.augmentation
@@ -86,7 +83,7 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     config["model"]["model_rl"] = args.model_rl_weight
     config["algo"]["model_rl_weight"] = args.model_rl_weight
     config["algo"]["reward_loss_weight"] = args.reward_loss_weight
-    config["algo"]["model_mpr_weight"] = args.model_nce_weight
+    config["algo"]["model_mpr_weight"] = args.model_mpr_weight
     config["algo"]["t0_mpr_loss_weight"] = args.t0_mpr_loss_weight
     config["algo"]["time_offset"] = args.time_offset
     config["algo"]["distributional"] = args.distributional
@@ -94,8 +91,8 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     config["algo"]["prioritized_replay"] = args.prioritized_replay
 
     if args.noisy_nets:
-        config['agent']['eps_init'] = args.noisy_eps
-        config['agent']['eps_final'] = args.noisy_eps
+        config['agent']['eps_init'] = 0
+        config['agent']['eps_final'] = 0
         config['agent']['eps_eval'] = 0.001
 
     sampler = SerialSampler(
@@ -112,8 +109,8 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
         eval_max_trajectories=config["sampler"]["eval_max_trajectories"],
     )
     args.discount = config["algo"]["discount"]
-    algo = MPRCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"], detach_model=detach_model)  # Run with defaults.
-    agent = MPRAgent(ModelCls=MPRCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
+    algo = MPRCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"])  # Run with defaults.
+    agent = MPRAgent(ModelCls=MPRCatDqnModel, model_kwargs=config["model"], **config["agent"])
 
     wandb.config.update(config)
     runner = MinibatchRlEvalWandb(
@@ -227,6 +224,6 @@ if __name__ == "__main__":
                dir=args.wandb_dir)
     wandb.config.update(vars(args))
     build_and_train(game=args.game,
-                    cuda_idx=args.debug_cuda_idx,
+                    cuda_idx=args.cuda_idx,
                     args=args)
 

@@ -9,7 +9,7 @@ from rlpyt.algos.utils import valid_from_done
 from rlpyt.utils.logging import logger
 from src.rlpyt_buffer import AsyncPrioritizedSequenceReplayFrameBufferExtended, \
     AsyncUniformSequenceReplayFrameBufferExtended
-from src.model_trainer import from_categorical, to_categorical
+from src.rlpyt_models import from_categorical, to_categorical
 SamplesToBuffer = namedarraytuple("SamplesToBuffer",
     ["observation", "action", "reward", "done"])
 ModelSamplesToBuffer = namedarraytuple("SamplesToBuffer",
@@ -22,10 +22,8 @@ ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
                                       "modelRLLoss",
                                       "RewardLoss",
                                       "modelGradNorm",
-                                      "NCELoss",
-                                      "ModelNCELoss",
-                                      "AmortizationLoss",
-                                      "NCEAcc"])
+                                      "MPRLoss",
+                                      "ModelMPRLoss"])
 
 EPS = 1e-6  # (NaN-guard)
 
