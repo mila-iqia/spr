@@ -219,7 +219,7 @@ class OneToOneSerialEvalCollector(SerialEvalCollector):
             action = numpify_buffer(act_pyt)
 
             b = 0
-            while b < len(live_envs):  # don't want to do a for loop on live envs, since we change it during the process.
+            while b < len(live_envs):  # don't want to do a for loop since live envs changes over time
                 env_id = live_envs[b]
                 o, r, d, env_info = self.envs[env_id].step(action[b])
                 traj_infos[env_id].step(observation[b],
