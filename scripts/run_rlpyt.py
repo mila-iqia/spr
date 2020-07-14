@@ -14,7 +14,7 @@ from rlpyt.utils.logging.context import logger_context
 import wandb
 
 from src.rlpyt_models import MPRCatDqnModel
-from src.rlpyt_framework import OneToOneSerialEvalCollector, SerialEvalCollector, SerialSampler, MinibatchRlEvalWandb
+from src.rlpyt_framework import OneToOneSerialEvalCollector, SerialSampler, MinibatchRlEvalWandb
 from src.rlpyt_algos import MPRCategoricalDQN
 from src.rlpyt_agents import MPRAgent
 from src.rlpyt_atari_env import AtariEnv
@@ -103,7 +103,7 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
         batch_T=config['sampler']['batch_T'],
         batch_B=config['sampler']['batch_B'],
         max_decorrelation_steps=0,
-        eval_CollectorCls=OneToOneSerialEvalCollector if args.fasteval else SerialEvalCollector,
+        eval_CollectorCls=OneToOneSerialEvalCollector,
         eval_n_envs=config["sampler"]["eval_n_envs"],
         eval_max_steps=config['sampler']['eval_max_steps'],
         eval_max_trajectories=config["sampler"]["eval_max_trajectories"],
@@ -159,7 +159,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='ms_pacman')
-    parser.add_argument('--fasteval', type=int, default=1)
     parser.add_argument('--seed', type=int, default=69)
     parser.add_argument('--grayscale', type=int, default=1)
     parser.add_argument('--framestack', type=int, default=4)
