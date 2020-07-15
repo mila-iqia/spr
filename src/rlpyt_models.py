@@ -31,27 +31,27 @@ class MPRCatDqnModel(torch.nn.Module):
             strides=None,
             paddings=None,
             framestack=4,
-            jumps=0,
-            mpr=False,
-            augmentation="none",
-            target_augmentation=0,
+            jumps=1,
+            mpr=True,
+            augmentation=("shift", "intensity"),
+            target_augmentation=1,
             eval_augmentation=0,
-            dynamics_blocks=16,
+            dynamics_blocks=0,
             norm_type="bn",
             noisy_nets=0,
             aug_prob=0.8,
-            classifier="mlp",
+            classifier="q_l1",
             imagesize=84,
             time_offset=0,
             local_mpr=False,
-            global_mpr=False,
-            momentum_encoder=False,
+            global_mpr=True,
+            momentum_encoder=True,
             shared_encoder=False,
             distributional=1,
             dqn_hidden_size=256,
             momentum_tau=0.01,
             renormalize=False,
-            q_l1_type="noisy advantage",
+            q_l1_type="value advantage",
             dropout=0.0,
             final_classifier="linear",
             model_rl=0,
@@ -290,8 +290,6 @@ class MPRCatDqnModel(torch.nn.Module):
         global_latents = self.global_final_classifier(global_latents)
         with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
             global_targets = self.global_target_classifier(target_latents)
-        # Need (locs, times, batch_size, rkhs)
-        # to mask out negatives from the same trajectory if desired.
         targets = global_targets.view(-1, observation.shape[1],
                                              self.jumps+1, global_targets.shape[-1]).transpose(1, 2)
         latents = global_latents.view(-1, observation.shape[1],
@@ -833,6 +831,7 @@ class Conv2dModel(torch.nn.Module):
         already: [B,C,H,W]."""
         return self.conv(input)
 
+
 def init_normalization(channels, type="bn", affine=True, one_d=False):
     assert type in ["bn", "ln", "in", "none", None]
     if type == "bn":
@@ -849,6 +848,7 @@ def init_normalization(channels, type="bn", affine=True, one_d=False):
         return nn.GroupNorm(channels, channels, affine=affine)
     elif type == "none" or type is None:
         return nn.Identity()
+
 
 class ResidualBlock(nn.Module):
     def __init__(self,
@@ -891,6 +891,7 @@ class Conv2dSame(torch.nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
 
 def to_categorical(value, limit=300):
     value = value.float()  # Avoid any fp16 shenanigans
