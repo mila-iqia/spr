@@ -6,7 +6,6 @@ import torch
 from recordclass import recordclass
 
 from rlpyt.replays.sequence.prioritized import SamplesFromReplayPri
-from src.envs import get_example_outputs
 
 from rlpyt.replays.non_sequence.frame import AsyncPrioritizedReplayFrameBuffer
 from rlpyt.replays.sequence.n_step import SamplesFromReplay
