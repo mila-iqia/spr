@@ -22,6 +22,7 @@ from src.rlpyt_atari_env import AtariEnv
 import torch
 import numpy as np
 
+
 def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
