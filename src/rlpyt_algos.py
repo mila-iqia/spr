@@ -39,12 +39,10 @@ class MPRCategoricalDQN(CategoricalDQN):
                  model_mpr_weight=1.,
                  time_offset=0,
                  distributional=1,
-                 separate_optimizer=0,
                  jumps=0,
                  **kwargs):
         super().__init__(**kwargs)
         self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy
-        self.separate_optimizer = separate_optimizer
         self.t0_mpr_loss_weight = t0_mpr_loss_weight
         self.model_mpr_weight = model_mpr_weight
 

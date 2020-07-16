@@ -498,12 +498,10 @@ class MPRCatDqnModel(torch.nn.Module):
             return p
 
     def select_action(self, obs):
-        value_logits = self.forward(obs, None, None, train=False, eval=True)
+        value = self.forward(obs, None, None, train=False, eval=True)
 
         if self.distributional:
-            value = from_categorical(value_logits, logits=True, limit=10)
-        else:
-            value = value_logits.squeeze(-1)
+            value = from_categorical(value, logits=False, limit=10)
         return value
 
     def step(self, state, action):
