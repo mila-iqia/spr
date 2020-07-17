@@ -391,7 +391,6 @@ class PizeroSearchCatDqnModel(torch.nn.Module):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
         super().__init__()
-
         self.noisy = noisy_nets
         self.time_contrastive = time_contrastive
         self.aug_prob = aug_prob
