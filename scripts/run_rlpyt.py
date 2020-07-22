@@ -22,9 +22,6 @@ from src.rlpyt_atari_env import AtariEnv
 import torch
 import numpy as np
 
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-
 def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -157,7 +154,6 @@ def convert_affinity(affinity, cpus):
 
     return affinity
 
-
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -169,12 +165,12 @@ if __name__ == "__main__":
     parser.add_argument('--n-steps', type=int, default=100000)
     parser.add_argument('--dqn-hidden-size', type=int, default=256)
     parser.add_argument('--target-update-interval', type=int, default=1)
-    parser.add_argument('--target-update-tau', type=float, default=0.01)
+    parser.add_argument('--target-update-tau', type=float, default=1.)
     parser.add_argument('--momentum-tau', type=float, default=0.01)
     parser.add_argument('--batch-b', type=int, default=1)
     parser.add_argument('--batch-t', type=int, default=1)
     parser.add_argument('--beluga', action="store_true")
-    parser.add_argument('--jumps', type=int, default=1)
+    parser.add_argument('--jumps', type=int, default=5)
     parser.add_argument('--num-logs', type=int, default=10)
     parser.add_argument('--renormalize', type=int, default=1)
     parser.add_argument('--dueling', type=int, default=1)
