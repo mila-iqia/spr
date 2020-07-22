@@ -136,7 +136,6 @@ class MPRCategoricalDQN(CategoricalDQN):
             total_loss = loss + self.model_rl_weight*model_rl_loss \
                               + self.reward_loss_weight*reward_loss
             total_loss = total_loss + mpr_loss
-            # print(total_loss, self.update_counter)
             self.optimizer.zero_grad()
             total_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(
