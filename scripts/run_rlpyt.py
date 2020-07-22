@@ -56,6 +56,13 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     config['sampler']['batch_B'] = args.batch_b
     config['sampler']['batch_T'] = args.batch_t
 
+    config['agent']['eps_init'] = args.eps_init
+    config['agent']['eps_final'] = args.eps_final
+    config["model"]["noisy_nets_std"] = args.noisy_nets_std
+
+    if args.noisy_nets:
+        config['agent']['eps_eval'] = 0.001
+
     # New MPR Arguments
     config["model"]["imagesize"] = args.imagesize
     config["model"]["jumps"] = args.jumps
@@ -89,11 +96,6 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     config["algo"]["distributional"] = args.distributional
     config["algo"]["delta_clip"] = args.delta_clip
     config["algo"]["prioritized_replay"] = args.prioritized_replay
-
-    if args.noisy_nets:
-        config['agent']['eps_init'] = 0
-        config['agent']['eps_final'] = 0
-        config['agent']['eps_eval'] = 0.001
 
     sampler = SerialSampler(
         EnvCls=env,
@@ -192,6 +194,7 @@ if __name__ == "__main__":
     parser.add_argument('--local-mpr', type=int, default=0)
     parser.add_argument('--global-mpr', type=int, default=1)
     parser.add_argument('--noisy-nets', type=int, default=1)
+    parser.add_argument('--noisy-nets-std', type=float, default=0.1)
     parser.add_argument('--classifier', type=str, default='q_l1', choices=["mlp", "bilinear", "q_l1", "q_l2", "none"], help='Style of NCE classifier')
     parser.add_argument('--final-classifier', type=str, default='linear', choices=["mlp", "linear", "none"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=["shift", "intensity"], nargs="+",
@@ -206,7 +209,9 @@ if __name__ == "__main__":
     parser.add_argument('--model-rl-weight', type=float, default=0.)
     parser.add_argument('--model-mpr-weight', type=float, default=5.)
     parser.add_argument('--t0-mpr-loss-weight', type=float, default=0.)
-    parser.add_argument('--eps-steps', type=int, default=50000)
+    parser.add_argument('--eps-steps', type=int, default=2001)
+    parser.add_argument('--eps-init', type=float, default=1.)
+    parser.add_argument('--eps-final', type=float, default=0.)
     parser.add_argument('--final-eval-only', type=int, default=1)
     parser.add_argument('--time-offset', type=int, default=0)
     parser.add_argument('--project', type=str, default="mpr")

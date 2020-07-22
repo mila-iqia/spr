@@ -123,6 +123,7 @@ class MPRActionSelection(torch.nn.Module):
         self.network = network
         self.epsilon = distribution._epsilon
         self.device = device
+        self.first_call = True
 
     def to_device(self, idx):
         self.device = idx
@@ -135,6 +136,10 @@ class MPRActionSelection(torch.nn.Module):
 
         value = self.network.select_action(obs)
         action = self.select_action(value)
+        # Stupid, stupid hack because rlpyt does _not_ handle batch_b=1 well.
+        if self.first_call:
+            action = action.squeeze()
+            self.first_call = False
         return action, value.squeeze()
 
     def select_action(self, value):

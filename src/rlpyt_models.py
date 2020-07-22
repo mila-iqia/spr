@@ -48,6 +48,7 @@ class MPRCatDqnModel(torch.nn.Module):
             dropout,
             final_classifier,
             model_rl,
+            noisy_nets_std,
             use_maxpool=False,
             channels=None,  # None uses default.
             kernel_sizes=None,
@@ -136,14 +137,16 @@ class MPRCatDqnModel(torch.nn.Module):
                                                           hidden_size=self.dqn_hidden_size,
                                                           pixels=self.pixels,
                                                           noisy=self.noisy,
-                                                          n_atoms=n_atoms)
+                                                          n_atoms=n_atoms,
+                                                          std_init=noisy_nets_std)
         else:
             self.head = DQNDistributionalHeadModel(self.hidden_size,
                                                    output_size,
                                                    hidden_size=self.dqn_hidden_size,
                                                    pixels=self.pixels,
                                                    noisy=self.noisy,
-                                                   n_atoms=n_atoms)
+                                                   n_atoms=n_atoms,
+                                                   std_init=noisy_nets_std)
 
         if self.jumps > 0:
             self.dynamics_model = TransitionModel(channels=self.hidden_size,
@@ -554,14 +557,17 @@ class DQNDistributionalHeadModel(torch.nn.Module):
                  hidden_size=256,
                  pixels=30,
                  n_atoms=51,
-                 noisy=0):
+                 noisy=0,
+                 std_init=0.1):
         super().__init__()
         if noisy:
             linear = NoisyLinear
+            self.linears = [linear(input_channels*pixels, hidden_size, std_init=std_init),
+                            linear(hidden_size, output_size * n_atoms, std_init=std_init)]
         else:
             linear = nn.Linear
-        self.linears = [linear(input_channels*pixels, hidden_size),
-                        linear(hidden_size, output_size * n_atoms)]
+            self.linears = [linear(input_channels*pixels, hidden_size),
+                            linear(hidden_size, output_size * n_atoms)]
         layers = [nn.Flatten(-3, -1),
                   self.linears[0],
                   nn.ReLU(),
@@ -594,14 +600,21 @@ class DQNDistributionalDuelingHeadModel(torch.nn.Module):
                  n_atoms=51,
                  hidden_size=256,
                  grad_scale=2 ** (-1 / 2),
-                 noisy=0):
+                 noisy=0,
+                 std_init=0.1):
         super().__init__()
-        linear = NoisyLinear if noisy else nn.Linear
-        self.linears = [linear(pixels * input_channels, hidden_size),
-                        linear(hidden_size, output_size * n_atoms),
-                        linear(pixels * input_channels, hidden_size),
-                        linear(hidden_size, n_atoms)
-                        ]
+        if noisy:
+            self.linears = [NoisyLinear(pixels * input_channels, hidden_size, std_init=std_init),
+                            NoisyLinear(hidden_size, output_size * n_atoms, std_init=std_init),
+                            NoisyLinear(pixels * input_channels, hidden_size, std_init=std_init),
+                            NoisyLinear(hidden_size, n_atoms, std_init=std_init)
+                            ]
+        else:
+            self.linears = [nn.Linear(pixels * input_channels, hidden_size),
+                            nn.Linear(hidden_size, output_size * n_atoms),
+                            nn.Linear(pixels * input_channels, hidden_size),
+                            nn.Linear(hidden_size, n_atoms)
+                            ]
         self.advantage_layers = [nn.Flatten(-3, -1),
                                  self.linears[0],
                                  nn.ReLU(),
