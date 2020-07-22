@@ -5,6 +5,7 @@ from rlpyt.samplers.serial.collectors import SerialEvalCollector
 from rlpyt.utils.buffer import buffer_from_example, torchify_buffer, numpify_buffer
 from rlpyt.utils.logging import logger
 from rlpyt.utils.quick_args import save__init__args
+from rlpyt.utils.seed import set_seed
 
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
 from rlpyt.runners.sync_rl import SyncRlMixin, SyncWorkerEval
@@ -22,6 +23,7 @@ from rlpyt.samplers.collections import (Samples, AgentSamples, AgentSamplesBsv,
     EnvSamples)
 
 import wandb
+import psutil
 
 import torch
 import numpy as np
@@ -91,6 +93,58 @@ class MinibatchRlEvalWandb(MinibatchRlEval):
         self.wandb_info = {'cum_steps': cum_steps}
         super().log_diagnostics(itr, eval_traj_infos, eval_time)
         wandb.log(self.wandb_info)
+
+    def startup(self):
+        """
+        Sets hardware affinities, initializes the following: 1) sampler (which
+        should initialize the agent), 2) agent device and data-parallel wrapper (if applicable),
+        3) algorithm, 4) logger.
+        """
+        p = psutil.Process()
+        try:
+            if (self.affinity.get("master_cpus", None) is not None and
+                    self.affinity.get("set_affinity", True)):
+                p.cpu_affinity(self.affinity["master_cpus"])
+            cpu_affin = p.cpu_affinity()
+        except AttributeError:
+            cpu_affin = "UNAVAILABLE MacOS"
+        logger.log(f"Runner {getattr(self, 'rank', '')} master CPU affinity: "
+            f"{cpu_affin}.")
+        if self.affinity.get("master_torch_threads", None) is not None:
+            torch.set_num_threads(self.affinity["master_torch_threads"])
+        logger.log(f"Runner {getattr(self, 'rank', '')} master Torch threads: "
+            f"{torch.get_num_threads()}.")
+        set_seed(self.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+        self.rank = rank = getattr(self, "rank", 0)
+        self.world_size = world_size = getattr(self, "world_size", 1)
+        examples = self.sampler.initialize(
+            agent=self.agent,  # Agent gets initialized in sampler.
+            affinity=self.affinity,
+            seed=self.seed + 1,
+            bootstrap_value=getattr(self.algo, "bootstrap_value", False),
+            traj_info_kwargs=self.get_traj_info_kwargs(),
+            rank=rank,
+            world_size=world_size,
+        )
+        self.itr_batch_size = self.sampler.batch_spec.size * world_size
+        n_itr = self.get_n_itr()
+        self.agent.to_device(self.affinity.get("cuda_idx", None))
+        if world_size > 1:
+            self.agent.data_parallel()
+        self.algo.initialize(
+            agent=self.agent,
+            n_itr=n_itr,
+            batch_spec=self.sampler.batch_spec,
+            mid_batch_reset=self.sampler.mid_batch_reset,
+            examples=examples,
+            world_size=world_size,
+            rank=rank,
+        )
+        self.initialize_logging()
+        return n_itr
 
     def _log_infos(self, traj_infos=None):
         """
