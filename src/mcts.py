@@ -30,7 +30,7 @@ class MinMaxStats(object):
 
 
 class Node(object):
-    def __init__(self, prior: float, value: float = 0.):
+    def __init__(self, prior: float, value: float = 0., c1: float = 0.5):
         self.visit_count = 0
         self.to_play = -1
         self.prior = prior
@@ -38,6 +38,7 @@ class Node(object):
         self.children = {}
         self.hidden_state = None
         self.reward = 0
+        self.c1 = c1
 
     def expanded(self) -> bool:
         return len(self.children) > 0
@@ -49,8 +50,9 @@ class Node(object):
 
     def compute_pi_bar(self):
         q_values = np.array([self.children[i].value() for i in self.children])
+        prior = np.array([self.children[i].prior for i in self.children])
         lambda_n = self.c1 * math.sqrt(self.visit_count) / self.visit_count
-        alpha = self.binary_search_alpha(lambda_n, q_values, self.prior)
+        alpha = self.binary_search_alpha(lambda_n, q_values, prior)
         pi_bar = lambda_n * self.prior / (alpha - q_values)
         return pi_bar
 
@@ -73,11 +75,12 @@ class Node(object):
 
 
 class MCTS:
-    def __init__(self, args, n_actions, network):
+    def __init__(self, args, n_actions, network, eval=False):
         self.args = args
         self.network = network
         self.n_actions = n_actions
         self.min_max_stats = MinMaxStats()
+        self.eval = eval
 
     def run(self, obs):
         root = Node(0)
@@ -129,10 +132,9 @@ class MCTS:
         return action, child
 
     def backup(self, search_path: List[Node], value: float):
-        # TODO: Rename to backup
         for node in reversed(search_path):
             node.value_sum += value
             node.visit_count += 1
-            self.min_max_stats.update(node.value().item())
+            self.min_max_stats.update(node.value())
 
             value = node.reward + self.args.discount * value
