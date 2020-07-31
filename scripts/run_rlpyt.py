@@ -38,7 +38,7 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     config['env']['seed'] = args.seed
     config['eval_env']['seed'] = args.seed
     config["model"]["dueling"] = bool(args.dueling)
-    config["algo"]["min_steps_learn"] = 2000
+    config["algo"]["min_steps_learn"] = args.min_steps_learn
     config["algo"]["n_step_return"] = args.n_step
     config["algo"]["batch_size"] = args.batch_size
     config["algo"]["learning_rate"] = 0.0001
@@ -88,6 +88,7 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     config['model']['momentum_tau'] = args.momentum_tau
     config["model"]["dqn_hidden_size"] = args.dqn_hidden_size
     config["model"]["model_rl"] = args.model_rl_weight
+    config["model"]["residual_tm"] = args.residual_tm
     config["algo"]["model_rl_weight"] = args.model_rl_weight
     config["algo"]["reward_loss_weight"] = args.reward_loss_weight
     config["algo"]["model_mpr_weight"] = args.model_mpr_weight
@@ -178,6 +179,7 @@ if __name__ == "__main__":
     parser.add_argument('--dueling', type=int, default=1)
     parser.add_argument('--replay-ratio', type=int, default=64)
     parser.add_argument('--dynamics-blocks', type=int, default=0)
+    parser.add_argument('--residual-tm', type=int, default=0.)
     parser.add_argument('--n-step', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--tag', type=str, default='', help='Tag for wandb run.')
@@ -210,6 +212,7 @@ if __name__ == "__main__":
     parser.add_argument('--model-mpr-weight', type=float, default=5.)
     parser.add_argument('--t0-mpr-loss-weight', type=float, default=0.)
     parser.add_argument('--eps-steps', type=int, default=2001)
+    parser.add_argument('--min-steps-learn', type=int, default=2000)
     parser.add_argument('--eps-init', type=float, default=1.)
     parser.add_argument('--eps-final', type=float, default=0.)
     parser.add_argument('--final-eval-only', type=int, default=1)
