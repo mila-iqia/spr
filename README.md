@@ -9,8 +9,7 @@ export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
 # Install requirements
-pip install --user opencv-python wandb matplotlib scikit-learn 'gym[atari]' recordclass pyprind psutil dill
-pip install --user git+git://github.com/astooke/rlpyt
+pip install -r requirements.txt
 
 # Login to W&B
 wandb login {wandb_key}
@@ -19,12 +18,8 @@ wandb login {wandb_key}
 pip install --user -e git+git://ithub.com/ankeshanand/abstract-world-models
 ```
 
-## Running on Philly
-The file `ms_run_pizero.yaml` contains the required YAML setup to run the project on Philly.
-
 ## Usage:
-The default branch for the latest and stable changes is `master`. Features we are trying live in a feature branch and merged
-back to master when they seem to work. 
+The default branch for the latest and stable changes is `release`. 
 
 * Sample run script
 ```bash
