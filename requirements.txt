@@ -4,6 +4,8 @@ wandb
 opencv-python
 scikit-learn
 recordclass
+matplotlib
+wandb
 torch
 torchvision
 kornia

@@ -49,6 +49,7 @@ class MPRCatDqnModel(torch.nn.Module):
             final_classifier,
             model_rl,
             noisy_nets_std,
+            residual_tm,
             use_maxpool=False,
             channels=None,  # None uses default.
             kernel_sizes=None,
@@ -156,7 +157,8 @@ class MPRCatDqnModel(torch.nn.Module):
                                                   limit=1,
                                                   blocks=dynamics_blocks,
                                                   norm_type=norm_type,
-                                                  renormalize=renormalize)
+                                                  renormalize=renormalize,
+                                                  residual=residual_tm)
         else:
             self.dynamics_model = nn.Identity()
 
@@ -916,12 +918,14 @@ class TransitionModel(nn.Module):
                  limit=300,
                  action_dim=6,
                  norm_type="bn",
-                 renormalize=True):
+                 renormalize=True,
+                 residual=False):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_actions = num_actions
         self.args = args
         self.renormalize = renormalize
+        self.residual = residual
         layers = [Conv2dSame(channels+num_actions, hidden_size, 3),
                   nn.ReLU(),
                   init_normalization(hidden_size, norm_type)]
@@ -929,8 +933,7 @@ class TransitionModel(nn.Module):
             layers.append(ResidualBlock(hidden_size,
                                         hidden_size,
                                         norm_type))
-        layers.extend([Conv2dSame(hidden_size, channels, 3),
-                      nn.ReLU()])
+        layers.extend([Conv2dSame(hidden_size, channels, 3)])
 
         self.action_embedding = nn.Embedding(num_actions, pixels*action_dim)
 
@@ -951,6 +954,9 @@ class TransitionModel(nn.Module):
         action_onehot[batch_range, action, :, :] = 1
         stacked_image = torch.cat([x, action_onehot], 1)
         next_state = self.network(stacked_image)
+        if self.residual:
+            next_state = next_state + x
+        next_state = F.relu(next_state)
         if self.renormalize:
             next_state = renormalize(next_state, 1)
         next_reward = self.reward_predictor(next_state)
