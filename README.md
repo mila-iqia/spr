@@ -1,4 +1,8 @@
-# abstract-world-models
+# Data-Efficient Reinforcement Learning with Self-Predictive Representations
+
+*Max Schwarzer\*, Ankesh Anand\*, Rishab Goel, R Devon Hjelm, Aaron Courville, Philip Bachman*
+
+This repo provides code for implementing the [SPR paper](https://arxiv.org/abs/2007.05929)
 
 ## Installation 
 To install the requirements, follow these steps:
@@ -15,31 +19,16 @@ pip install -r requirements.txt
 wandb login {wandb_key}
 
 # Finally, install the project
-pip install --user -e git+git://ithub.com/ankeshanand/abstract-world-models
+pip install --user -e git+git://github.com/ankeshanand/abstract-world-models
 ```
 
 ## Usage:
 The default branch for the latest and stable changes is `release`. 
 
-* Sample run script
+* Sample run script with augmentation
 ```bash
 python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --num-trainers 3 --no-gpu-0-train 
 ```
-This will launch a MuZero run with NCE enabled on 4GPUs where GPU0 is used only for search / reanalyze. 
-For all our experiments, we are using `--batch-size-per-worker 200` too, but this can change depending on the amount of GPU memory.
-
-Here are some options that might be useful when running experiments:
-* For disabling NCE loss during training, pass the flag `--no-nce`
-* For running purely Q-learning (no search), use the following options: 
-```bash
-python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net --num-simulations 0 --eval-simulations 0 --jumps 0  --num-trainers 3 --no-gpu-0-train 
-```
-* To run Q-learning with search, use the following options:
-```bash
-python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --q-learning --no-nce --policy-loss-weight 0. --reward-loss-weight 0. --no-search-value-targets --local-target-net --c1 0.25 --num-trainers 3 --no-gpu-0-train 
-```
-A WIP implementation of the C51 Q-learning in currently located in the `c51` branch.
-
 
 ## What does each file do? 
 
