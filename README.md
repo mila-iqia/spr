@@ -28,9 +28,14 @@ pip install --user -e git+git://github.com/ankeshanand/abstract-world-models
 ## Usage:
 The default branch for the latest and stable changes is `release`. 
 
-* Sample run script with augmentation
+* To run with augmentation
 ```bash
-python -m scripts.run_pizero --grayscale --game ms_pacman --num-envs 64 --num-trainers 3 --no-gpu-0-train 
+python -m scripts.run_rlpyt --game pong --momentum-tau 1.
+```
+
+* To run without augmentation
+```bash
+python -m scripts.run_rlpyt --game pong --augmentation none --target-augmentation 0 --dropout 0.5
 ```
 
 ## What does each file do? 
