@@ -4,11 +4,14 @@
 
 This repo provides code for implementing the [SPR paper](https://arxiv.org/abs/2007.05929)
 
-## Installation 
+* [📦 Install ](#install) -- Install relevant dependencies and the project
+* [🔧 Usage ](#usage) -- Commands to run different experiments from the paper
+
+## Install 
 To install the requirements, follow these steps:
 ```bash
 # PyTorch
-conda install pytorch torchvision -c pytorch dill
+conda install pytorch torchvision -c pytorch
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
