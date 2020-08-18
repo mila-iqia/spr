@@ -6,7 +6,6 @@ from rlpyt.utils.buffer import buffer_from_example, torchify_buffer, numpify_buf
 from rlpyt.utils.logging import logger
 from rlpyt.utils.quick_args import save__init__args
 from rlpyt.utils.seed import set_seed
-
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
 
 import wandb

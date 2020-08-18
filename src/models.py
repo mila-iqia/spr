@@ -14,6 +14,7 @@ from kornia.filters import GaussianBlur2d
 import copy
 import wandb
 
+
 class MPRCatDqnModel(torch.nn.Module):
     """2D conlutional network feeding into MLP with ``n_atoms`` outputs
     per action, representing a discrete probability distribution of Q-values."""

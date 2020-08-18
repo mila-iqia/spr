@@ -13,10 +13,10 @@ from rlpyt.envs.atari.atari_env import AtariTrajInfo
 from rlpyt.utils.logging.context import logger_context
 import wandb
 
-from src.rlpyt_models import MPRCatDqnModel
-from src.rlpyt_framework import OneToOneSerialEvalCollector, SerialSampler, MinibatchRlEvalWandb
-from src.rlpyt_algos import MPRCategoricalDQN
-from src.rlpyt_agents import MPRAgent
+from src.models import MPRCatDqnModel
+from src.rlpyt_utils import OneToOneSerialEvalCollector, SerialSampler, MinibatchRlEvalWandb
+from src.algos import MPRCategoricalDQN
+from src.agent import MPRAgent
 from src.rlpyt_atari_env import AtariEnv
 
 import torch

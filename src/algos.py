@@ -8,7 +8,7 @@ from rlpyt.algos.utils import valid_from_done
 from rlpyt.utils.logging import logger
 from src.rlpyt_buffer import AsyncPrioritizedSequenceReplayFrameBufferExtended, \
     AsyncUniformSequenceReplayFrameBufferExtended
-from src.rlpyt_models import from_categorical, to_categorical
+from src.models import from_categorical, to_categorical
 SamplesToBuffer = namedarraytuple("SamplesToBuffer",
     ["observation", "action", "reward", "done"])
 ModelSamplesToBuffer = namedarraytuple("SamplesToBuffer",
