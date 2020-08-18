@@ -73,6 +73,13 @@ class Node(object):
             alpha = (low + high) / 2
         return alpha
 
+    def select_action(self, pi_bar=None):
+        if pi_bar is None:
+            pi_bar = self.compute_pi_bar()
+        d = torch.distributions.Categorical(probs=pi_bar)
+        action = d.sample()
+        return action
+
 
 class MCTS:
     def __init__(self, args, n_actions, network, eval=False):
@@ -103,7 +110,9 @@ class MCTS:
                 network_output = self.network.inference(parent.hidden_state, action)
             self.expand_node(node, network_output)
             self.backup(search_path, network_output.value)
-        return root
+        pi_bar = root.compute_pi_bar()
+        action = root.select_action(pi_bar)
+        return action, pi_bar
 
     def expand_node(self, node, network_output):
         node.hidden_state = network_output.next_state
