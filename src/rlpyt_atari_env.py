@@ -1,4 +1,7 @@
-
+"""
+Modifies the default rlpyt AtariEnv to be closer to DeepMind's setup,
+tries to follow Kaixin/Rainbow's env for the most part.
+"""
 import numpy as np
 import os
 import atari_py
