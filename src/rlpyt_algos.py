@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 
 from rlpyt.utils.collections import namedarraytuple
 from collections import namedtuple
@@ -14,7 +13,6 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
     ["observation", "action", "reward", "done"])
 ModelSamplesToBuffer = namedarraytuple("SamplesToBuffer",
     ["observation", "action", "reward", "done", "value"])
-import time
 
 OptInfo = namedtuple("OptInfo", ["loss", "gradNorm", "tdAbsErr"])
 ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
