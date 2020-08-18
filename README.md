@@ -30,27 +30,25 @@ The default branch for the latest and stable changes is `release`.
 
 * To run with augmentation
 ```bash
-python -m scripts.run_rlpyt --game pong --momentum-tau 1.
+python -m scripts.run --game pong --momentum-tau 1.
 ```
 
 * To run without augmentation
 ```bash
-python -m scripts.run_rlpyt --game pong --augmentation none --target-augmentation 0 --dropout 0.5
+python -m scripts.run --game pong --augmentation none --target-augmentation 0 --dropout 0.5
 ```
 
 ## What does each file do? 
 
     .
     ├── scripts
-    │   └── run_pizero.py         # The main runner script to launch jobs.
+    │   └── run.py                # The main runner script to launch jobs.
     ├── src                     
-    │   ├── async_mcts.py         # Legacy / Defunct. Ignore this. 
-    │   ├── async_reanalyze.py    # An async worker that performs ReAnalyze MCTS. Episodes are read and written to disk.
-    │   ├── encoders.py           # Legacy / Defunt. Contains old nature conv encoders
-    │   ├── logging.py            # Utils for logging metrics during training
-    │   ├── mcts_memory.py        # Extends rlpyt's buffer for storing additional items such as the prior policy.
-    │   ├── model_trainer.py      # The main file that contrains training code for everything. Also includes all the network architectures for MuZero. 
-    │   ├── pizero.py             # Legacy / Defunct. Old MCTS implemetation.
+    │   ├── agent.py              # Implements the Agent API for action selection 
+    │   ├── algos.py              # Distributional RL loss
+    │   ├── models.py             # Network architecture and forward passes.
+    │   ├── rlpyt_atari_env.py    # Slightly modified Atari env from rlpyt
+    │   ├── rlpyt_utils.py        # Utility methods that we use to extend rlpyt's functionality
     │   └── utils.py              # Command line arguments and helper functions 
     │
-    └── ms_run_pizero.yaml        # YAML file to run experiments on Philly
+    └── requirements.txt          # Dependencies
