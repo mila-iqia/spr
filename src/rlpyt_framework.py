@@ -8,19 +8,6 @@ from rlpyt.utils.quick_args import save__init__args
 from rlpyt.utils.seed import set_seed
 
 from rlpyt.runners.minibatch_rl import MinibatchRlEval
-from rlpyt.runners.sync_rl import SyncRlMixin, SyncWorkerEval
-from rlpyt.agents.base import AgentInputs
-from rlpyt.samplers.parallel.base import ParallelSamplerBase
-from rlpyt.samplers.parallel.gpu.action_server import ActionServer
-from rlpyt.samplers.parallel.gpu.collectors import (GpuResetCollector,
-    GpuEvalCollector)
-from rlpyt.utils.collections import namedarraytuple, AttrDict
-from rlpyt.utils.synchronize import drain_queue
-from rlpyt.samplers.collectors import (DecorrelatingStartCollector,
-    BaseEvalCollector)
-from rlpyt.agents.base import AgentInputs
-from rlpyt.samplers.collections import (Samples, AgentSamples, AgentSamplesBsv,
-    EnvSamples)
 
 import wandb
 import psutil
@@ -307,61 +294,6 @@ class OneToOneSerialEvalCollector(SerialEvalCollector):
         return completed_traj_infos
 
 
-class SerialEvalCollector(BaseEvalCollector):
-    """Does not record intermediate data."""
-    def __init__(
-            self,
-            envs,
-            agent,
-            TrajInfoCls,
-            max_T,
-            max_trajectories=None,
-            ):
-        save__init__args(locals())
-
-    def collect_evaluation(self, itr):
-        traj_infos = [self.TrajInfoCls() for _ in range(len(self.envs))]
-        completed_traj_infos = list()
-        observations = list()
-        for env in self.envs:
-            observations.append(env.reset())
-        observation = buffer_from_example(observations[0], len(self.envs))
-        for b, o in enumerate(observations):
-            observation[b] = o
-        action = buffer_from_example(self.envs[0].action_space.null_value(),
-            len(self.envs))
-        reward = np.zeros(len(self.envs), dtype="float32")
-        obs_pyt, act_pyt, rew_pyt = torchify_buffer((observation, action, reward))
-        self.agent.reset()
-        self.agent.eval_mode(itr)
-        for t in range(self.max_T):
-            act_pyt, agent_info = self.agent.step(obs_pyt, act_pyt, rew_pyt)
-            action = numpify_buffer(act_pyt)
-            for b, env in enumerate(self.envs):
-                o, r, d, env_info = env.step(action[b])
-                traj_infos[b].step(observation[b], action[b], r, d,
-                    agent_info[b], env_info)
-                if getattr(env_info, "traj_done", d):
-                    completed_traj_infos.append(traj_infos[b].terminate(o))
-                    traj_infos[b] = self.TrajInfoCls()
-                    o = env.reset()
-                if d:
-                    action[b] = 0  # Prev_action for next step.
-                    r = 0
-                    self.agent.reset_one(idx=b)
-                observation[b] = o
-                reward[b] = r
-            if (self.max_trajectories is not None and
-                    len(completed_traj_infos) >= self.max_trajectories):
-                logger.log("Evaluation reached max num trajectories "
-                    f"({self.max_trajectories}).")
-                break
-        if t == self.max_T - 1:
-            logger.log("Evaluation reached max num time steps "
-                f"({self.max_T}).")
-        return completed_traj_infos
-
-
 class SerialSampler(BaseSampler):
     """The simplest sampler; no parallelism, everything occurs in same, master
     Python process.  This can be easier for debugging (e.g. can use
@@ -369,6 +301,8 @@ class SerialSampler(BaseSampler):
     experiment purposes.  Should be used with collectors which generate the
     agent's actions internally, i.e. CPU-based collectors but not GPU-based
     ones.
+    NOTE: We modify this class from rlpyt to pass an id to EnvCls when creating
+    environments.
     """
 
     def __init__(self, *args, CollectorCls=CpuResetCollector,
