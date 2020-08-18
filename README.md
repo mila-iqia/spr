@@ -28,12 +28,12 @@ pip install --user -e git+git://github.com/ankeshanand/abstract-world-models
 ## Usage:
 The default branch for the latest and stable changes is `release`. 
 
-* To run with augmentation
+* To run MPR with augmentation
 ```bash
 python -m scripts.run --game pong --momentum-tau 1.
 ```
 
-* To run without augmentation
+* To run MPR without augmentation
 ```bash
 python -m scripts.run --game pong --augmentation none --target-augmentation 0 --dropout 0.5
 ```
