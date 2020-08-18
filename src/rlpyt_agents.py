@@ -1,22 +1,12 @@
 import torch
-import numpy as np
-import torch.nn.functional as F
 from rlpyt.agents.dqn.atari.atari_catdqn_agent import AtariCatDqnAgent
-from rlpyt.models.dqn.atari_catdqn_model import AtariCatDqnModel
-from rlpyt.agents.dqn.atari.mixin import AtariMixin
 from rlpyt.utils.buffer import buffer_to
-from rlpyt.utils.logging import logger
 from rlpyt.utils.collections import namedarraytuple
-import time
-MAXIMUM_FLOAT_VALUE = torch.finfo().max / 10
-MINIMUM_FLOAT_VALUE = torch.finfo().min / 10
 AgentInputs = namedarraytuple("AgentInputs",
     ["observation", "prev_action", "prev_reward"])
 AgentInfo = namedarraytuple("AgentInfo", "p")
 AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.nn.parallel import DistributedDataParallelCPU as DDPC
 
 class MPRAgent(AtariCatDqnAgent):
     """Agent for Categorical DQN algorithm with search."""
@@ -37,30 +27,6 @@ class MPRAgent(AtariCatDqnAgent):
             model_inputs = buffer_to((observation, prev_action, prev_reward),
                 device=self.device)
             return self.model(*model_inputs).cpu()
-
-    def data_parallel(self):
-        """Wraps the model with PyTorch's DistributedDataParallel.  The
-        intention is for rlpyt to create a separate Python process to drive
-        each GPU (or CPU-group for CPU-only, MPI-like configuration). Agents
-        with additional model components (beyond ``self.model``) which will
-        have gradients computed through them should extend this method to wrap
-        those, as well.
-
-        Typically called in the runner during startup.
-        """
-        if self.device.type == "cpu":
-            self.model = DDPC(self.model,
-                              broadcast_buffers=False,
-                              find_unused_parameters=True)
-            logger.log("Initialized DistributedDataParallelCPU agent model.")
-        else:
-            self.model = DDP(self.model,
-                             device_ids=[self.device.index],
-                             output_device=self.device.index,
-                             broadcast_buffers=False,
-                             find_unused_parameters=True)
-            logger.log("Initialized DistributedDataParallel agent model on "
-                f"device {self.device}.")
 
     def initialize(self,
                    env_spaces,
