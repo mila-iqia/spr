@@ -38,6 +38,8 @@ python -m scripts.run --game pong --momentum-tau 1.
 python -m scripts.run --game pong --augmentation none --target-augmentation 0 --dropout 0.5
 ```
 
+When reporting scores, we average across 10 seeds. 
+
 ## What does each file do? 
 
     .
