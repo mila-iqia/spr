@@ -1,5 +1,4 @@
 gym[atari]
-matplotlib
 wandb
 opencv-python
 scikit-learn
