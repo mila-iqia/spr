@@ -32,7 +32,7 @@ python -m scripts.run --game pong --momentum-tau 1.
 
 * To run MPR without augmentation
 ```bash
-python -m scripts.run --game pong --augmentation none --target-augmentation 0 --dropout 0.5
+python -m scripts.run --game pong --augmentation none --target-augmentation 0 --momentum-tau 0.01 --dropout 0.5
 ```
 
 When reporting scores, we average across 10 seeds. 
