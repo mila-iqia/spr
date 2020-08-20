@@ -18,9 +18,6 @@ export LANG=C.UTF-8
 # Install requirements
 pip install -r requirements.txt
 
-# Login to W&B
-wandb login {wandb_key}
-
 # Finally, install the project
 pip install --user -e git+git://github.com/ankeshanand/abstract-world-models
 ```
