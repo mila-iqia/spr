@@ -19,7 +19,7 @@ export LANG=C.UTF-8
 pip install -r requirements.txt
 
 # Finally, install the project
-pip install --user -e git+git://github.com/ankeshanand/abstract-world-models
+pip install --user -e git+git://github.com/mila-iqia/spr
 ```
 
 ## Usage:
