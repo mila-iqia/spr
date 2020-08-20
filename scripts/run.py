@@ -22,7 +22,9 @@ from src.rlpyt_atari_env import AtariEnv
 import torch
 import numpy as np
 
+
 def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
+    # TODO: Use Hydra to manage configs
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     config = configs['ernbw']
@@ -128,40 +130,18 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
     )
     config = dict(game=game)
     name = "dqn_" + game
-    log_dir = "example_1"
+    log_dir = "logs"
     with logger_context(log_dir, run_ID, name, config, snapshot_mode="last"):
         runner.train()
 
     quit()
 
 
-def convert_affinity(affinity, cpus):
-    affinity.all_cpus = cpus[:len(affinity.all_cpus)]
-    cpu_tracker = 0
-    for optimizer in affinity.optimizer:
-        cpus_to_alloc = len(optimizer["cpus"])
-        optimizer["cpus"] = cpus[cpu_tracker:cpu_tracker+cpus_to_alloc]
-        cpu_tracker = cpu_tracker + cpus_to_alloc
-    for sampler in affinity.sampler:
-        cpus_to_alloc = len(sampler["all_cpus"])
-        sampler["all_cpus"] = cpus[cpu_tracker:cpu_tracker+cpus_to_alloc]
-        sampler["master_cpus"] = cpus[cpu_tracker:cpu_tracker+cpus_to_alloc]
-        new_workers_cpus = []
-        for worker in sampler["workers_cpus"]:
-            cpus_to_alloc = len(worker)
-            worker = cpus[cpu_tracker:cpu_tracker+cpus_to_alloc]
-            cpu_tracker = cpu_tracker + cpus_to_alloc
-            new_workers_cpus.append(worker)
-
-        sampler["workers_cpus"] = tuple(new_workers_cpus)
-
-    return affinity
-
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='ms_pacman')
-    parser.add_argument('--seed', type=int, default=69)
+    parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--grayscale', type=int, default=1)
     parser.add_argument('--framestack', type=int, default=4)
     parser.add_argument('--imagesize', type=int, default=84)
@@ -221,13 +201,13 @@ if __name__ == "__main__":
     parser.add_argument('--entity', type=str, default="abs-world-models")
     parser.add_argument('--cuda_idx', help='gpu to use ', type=int, default=0)
     parser.add_argument('--max-grad-norm', type=float, default=10., help='Max Grad Norm')
+    parser.add_argument('--public', type=bool, help='If set, uses anonymous wandb logging')
     args = parser.parse_args()
 
-    wandb.init(project=args.project,
-               entity=args.entity,
-               config=args,
-               tags=[args.tag],
-               dir=args.wandb_dir)
+    if args.public:
+        wandb.init(anonymous="allow", config=args, tags=[args.tag], dir=args.wandb_dir)
+    else:
+        wandb.init(project=args.project, entity=args.entity, config=args, tags=[args.tag], dir=args.wandb_dir)
     wandb.config.update(vars(args))
     build_and_train(game=args.game,
                     cuda_idx=args.cuda_idx,
