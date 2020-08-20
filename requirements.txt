@@ -7,4 +7,5 @@ matplotlib
 wandb
 kornia
 numpy
--e git+https://github.com/astooke/rlpyt.git@75e96cda433626868fd2a30058be67b99bbad810
+pyprind
+-e git+https://github.com/astooke/rlpyt.git@75e96cda433626868fd2a30058be67b99bbad810#egg=rlpyt
