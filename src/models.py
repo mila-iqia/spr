@@ -394,8 +394,7 @@ class MPRCatDqnModel(torch.nn.Module):
         return list(self.conv.parameters()) + list(self.head.parameters())
 
     def stem_forward(self, img, prev_action=None, prev_reward=None):
-        """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
-        for each state/observation, using softmax output nonlinearity."""
+        """Returns the normalized output of convolutional layers."""
         # Infer (presence of) leading dimensions: [T,B], [B], or [].
         lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
 
@@ -427,9 +426,7 @@ class MPRCatDqnModel(torch.nn.Module):
     def forward(self, observation,
                 prev_action, prev_reward,
                 train=False, eval=False):
-        """Returns the probability masses ``num_atoms x num_actions`` for the Q-values
-        for each state/observation, using softmax output nonlinearity.
-
+        """
         For convenience reasons with DistributedDataParallel the forward method
         has been split into two cases, one for training and one for eval.
         """
