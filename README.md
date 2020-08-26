@@ -27,12 +27,12 @@ The default branch for the latest and stable changes is `release`.
 
 * To run MPR with augmentation
 ```bash
-python -m scripts.run --game pong --momentum-tau 1.
+python -m scripts.run --public --game pong --momentum-tau 1.
 ```
 
 * To run MPR without augmentation
 ```bash
-python -m scripts.run --game pong --augmentation none --target-augmentation 0 --momentum-tau 0.01 --dropout 0.5
+python -m scripts.run --public --game pong --augmentation none --target-augmentation 0 --momentum-tau 0.01 --dropout 0.5
 ```
 
 When reporting scores, we average across 10 seeds. 
