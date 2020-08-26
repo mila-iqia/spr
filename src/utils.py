@@ -86,3 +86,5 @@ def set_config(args, game):
     config["algo"]["distributional"] = args.distributional
     config["algo"]["delta_clip"] = args.delta_clip
     config["algo"]["prioritized_replay"] = args.prioritized_replay
+
+    return config
