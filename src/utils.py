@@ -10,6 +10,7 @@ import io
 from PIL import Image
 import dill
 import socket
+import torch.nn as nn
 
 
 def get_args():
@@ -259,3 +260,13 @@ class dummy_context_mgr:
     def __exit__(self, exc_type, exc_value, traceback):
         return False
 
+
+class Intensity(nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x):
+        r = torch.randn((x.size(0), 1, 1, 1), device=x.device)
+        noise = 1.0 + (self.scale * r.clamp(-2.0, 2.0))
+        return x * noise

@@ -28,7 +28,7 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
 SamplesFromReplayExt = namedarraytuple("SamplesFromReplayPriExt",
                                        SamplesFromReplay._fields + ("values", "age"))
 SamplesFromReplayPriExt = namedarraytuple("SamplesFromReplayPriExt",
-                                       SamplesFromReplayPri._fields + ("values", "age"))
+                                       SamplesFromReplayPri._fields + ("values", "policy"))
 EPS = 1e-6
 
 
@@ -70,10 +70,11 @@ class AsyncUniformSequenceReplayFrameBufferExtended(AsyncUniformSequenceReplayFr
                     print("Batch_T:", self.batch_T, flush=True)
                     print("Buffer T:", self.T, flush=True)
 
-            elapsed_iters = self.t + self.T - T_idxs % self.T
-            elapsed_samples = self.B*(elapsed_iters)
             values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
-            batch = SamplesFromReplayExt(*batch, values=values, age=elapsed_samples)
+            policies = torch.from_numpy(extract_sequences(self.samples.policy, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
+            batch = SamplesFromReplayPriExt(*batch,
+                                            values=values,
+                                            policies=policies)
             if self.batch_T > 1:
                 batch = self.sanitize_batch(batch)
             return batch
@@ -120,13 +121,12 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             is_weights /= max(is_weights)  # Normalize.
             is_weights = torchify_buffer(is_weights).float()
 
-            elapsed_iters = self.t + self.T - T_idxs % self.T
-            elapsed_samples = self.B*(elapsed_iters)
             values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
+            policies = torch.from_numpy(extract_sequences(self.samples.policy, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
             batch = SamplesFromReplayPriExt(*batch,
                                             values=values,
-                                            is_weights=is_weights,
-                                            age=elapsed_samples)
+                                            policies=policies,
+                                            is_weights=is_weights,)
             if self.batch_T > 1:
                 batch = self.sanitize_batch(batch)
             return batch

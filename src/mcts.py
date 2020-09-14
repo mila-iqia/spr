@@ -112,7 +112,8 @@ class MCTS:
             self.backup(search_path, network_output.value)
         pi_bar = root.compute_pi_bar()
         action = root.select_action(pi_bar)
-        return action, pi_bar
+        # TODO: Clarify: should the returned values be pi_bar*q_values?
+        return action, pi_bar, root.value()
 
     def expand_node(self, node, network_output):
         node.hidden_state = network_output.next_state

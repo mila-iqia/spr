@@ -4,7 +4,7 @@ from rlpyt.utils.collections import namedarraytuple
 from src.mcts import MCTS
 import torch
 
-AgentInfo = namedarraytuple("AgentInfo", "p")
+AgentInfo = namedarraytuple("AgentInfo", "policy", "value")
 AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 
 
@@ -50,10 +50,10 @@ class MCTSAgent(AtariDqnAgent):
     def step(self, observation, prev_action, prev_reward):
         """Compute the discrete distribution for the Q-value for each
         action for each state/observation (no grad)."""
-        action, pi_bar = self.search.run(observation.to(self.search.device))
+        action, pi_bar, value = self.search.run(observation.to(self.search.device))
         p = pi_bar.cpu()
         action = action.cpu()
 
-        agent_info = AgentInfo(p=p)
+        agent_info = AgentInfo(policy=p, value=value.cpu())
         action, agent_info = buffer_to((action, agent_info), device="cpu")
         return AgentStep(action=action, agent_info=agent_info)
