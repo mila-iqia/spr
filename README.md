@@ -25,12 +25,12 @@ pip install --user -e git+git://github.com/mila-iqia/spr
 ## Usage:
 The default branch for the latest and stable changes is `release`. 
 
-* To run MPR with augmentation
+* To run SPR with augmentation
 ```bash
 python -m scripts.run --public --game pong --momentum-tau 1.
 ```
 
-* To run MPR without augmentation
+* To run SPR without augmentation
 ```bash
 python -m scripts.run --public --game pong --augmentation none --target-augmentation 0 --momentum-tau 0.01 --dropout 0.5
 ```
