@@ -1,6 +1,7 @@
 # Data-Efficient Reinforcement Learning with Self-Predictive Representations
 
 XXX
+
 This repo provides code for implementing the SPR paper.
 
 * [📦 Install ](#install) -- Install relevant dependencies and the project
