@@ -1,8 +1,7 @@
 # Data-Efficient Reinforcement Learning with Self-Predictive Representations
 
-*Max Schwarzer\*, Ankesh Anand\*, Rishab Goel, R Devon Hjelm, Aaron Courville, Philip Bachman*
-
-This repo provides code for implementing the [SPR paper](https://arxiv.org/abs/2007.05929)
+XXX
+This repo provides code for implementing the SPR paper.
 
 * [📦 Install ](#install) -- Install relevant dependencies and the project
 * [🔧 Usage ](#usage) -- Commands to run different experiments from the paper
@@ -19,11 +18,10 @@ export LANG=C.UTF-8
 pip install -r requirements.txt
 
 # Finally, install the project
-pip install --user -e git+git://github.com/mila-iqia/spr
+pip install --user -e <this url>
 ```
 
 ## Usage:
-The default branch for the latest and stable changes is `release`. 
 
 * To run SPR with augmentation
 ```bash
