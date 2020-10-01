@@ -17,9 +17,6 @@ export LANG=C.UTF-8
 
 # Install requirements
 pip install -r requirements.txt
-
-# Finally, install the project
-pip install --user -e https://github.com/mila-iqia/spr/tree/anonymized
 ```
 
 ## Usage:

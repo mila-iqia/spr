@@ -82,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument('--momentum-tau', type=float, default=0.01)
     parser.add_argument('--batch-b', type=int, default=1)
     parser.add_argument('--batch-t', type=int, default=1)
-    parser.add_argument('--beluga', action="store_true")
+    parser.add_argument('--XXX', action="store_true")
     parser.add_argument('--jumps', type=int, default=5)
     parser.add_argument('--num-logs', type=int, default=10)
     parser.add_argument('--renormalize', type=int, default=1)
