@@ -108,5 +108,4 @@ venv.bak/
 *.pt
 tmp/
 wandb
-philly/
 results/
