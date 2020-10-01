@@ -18,8 +18,8 @@ export LANG=C.UTF-8
 # Install requirements
 pip install -r requirements.txt
 
-# Finally, install the project
-pip install --user -e git+git://github.com/mila-iqia/spr
+# Finally, clone the project
+git clone https://github.com/mila-iqia/spr
 ```
 
 ## Usage:
