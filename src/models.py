@@ -993,3 +993,47 @@ def renormalize(tensor, first_dim=1):
     flat_tensor = (flat_tensor - min)/(max - min)
 
     return flat_tensor.view(*tensor.shape)
+
+# raw aug vector -> MLP -> aug embedding.
+# for each layer, aug embedding -> MLP -> gamma, beta
+
+
+class FiLM(nn.Module):
+    def __init__(self,
+                 input_dim,
+                 embed_dim,
+                 norm_type="bn",
+                 hidden_size=256):
+        super().__init__()
+        self.input_dim = input_dim
+        self.embed_dim = embed_dim
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, input_dim * 2)
+        )
+        self.bn = init_normalization(input_dim, norm_type, affine=False)
+
+    def forward(self, input, embedding):
+        conditioning = self.mlp(embedding)
+        gamma = conditioning[..., :self.input_dim, None, None]
+        beta = conditioning[..., self.input_dim:, None, None]
+        input = self.bn(input)
+
+        return input * gamma + beta
+
+
+class FiLMedDQNEncoder(nn.Module):
+    def __init__(self, in_channels, embed_dim):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Conv2d(in_channels=in_channels, out_channels=32, kernel_size=8, stride=4, padding=0),
+            FiLM(32, embed_dim), nn.ReLU(),
+            nn.Conv2d(in_channels=in_channels, out_channels=64, kernel_size=4, stride=2, padding=0),
+            FiLM(64, embed_dim), nn.ReLU(),
+            nn.Conv2d(in_channels=in_channels, out_channels=64, kernel_size=3, stride=1, padding=0),
+            FiLM(64, embed_dim), nn.ReLU()
+        )
+
+    def forward(self, input):
+        return self.network(input)
