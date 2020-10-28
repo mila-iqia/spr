@@ -90,6 +90,7 @@ if __name__ == "__main__":
     parser.add_argument('--replay-ratio', type=int, default=64)
     parser.add_argument('--dynamics-blocks', type=int, default=0)
     parser.add_argument('--residual-tm', type=int, default=0.)
+    parser.add_argument('--distaug', action="store_true")
     parser.add_argument('--n-step', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--tag', type=str, default='', help='Tag for wandb run.')

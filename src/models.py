@@ -51,6 +51,7 @@ class MPRCatDqnModel(torch.nn.Module):
             model_rl,
             noisy_nets_std,
             residual_tm,
+            distaug=False,
             use_maxpool=False,
             channels=None,  # None uses default.
             kernel_sizes=None,
@@ -75,6 +76,7 @@ class MPRCatDqnModel(torch.nn.Module):
         self.eval_transforms = []
 
         self.uses_augmentation = False
+        aug_vector = np.zeros(len(augmentation) + 1)
         for aug in augmentation:
             if aug == "affine":
                 transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
@@ -110,18 +112,23 @@ class MPRCatDqnModel(torch.nn.Module):
         self.dueling = dueling
         f, c = image_shape[:2]
         in_channels = np.prod(image_shape[:2])
-        self.conv = Conv2dModel(
-            in_channels=in_channels,
-            channels=[32, 64, 64],
-            kernel_sizes=[8, 4, 3],
-            strides=[4, 2, 1],
-            paddings=[0, 0, 0],
-            use_maxpool=False,
-            dropout=dropout,
-        )
+        if self.distaug:
+            self.conv = FiLMedDQNEncoder(in_channels=in_channels, embed_dim=256, aug_vector_dim=len(aug_vector))
+            fake_input = torch.zeros(1, f * c, imagesize, imagesize)
+            fake_output = self.conv(fake_input, aug_vector)
+        else:
+            self.conv = Conv2dModel(
+                in_channels=in_channels,
+                channels=[32, 64, 64],
+                kernel_sizes=[8, 4, 3],
+                strides=[4, 2, 1],
+                paddings=[0, 0, 0],
+                use_maxpool=False,
+                dropout=dropout,
+            )
+            fake_input = torch.zeros(1, f * c, imagesize, imagesize)
+            fake_output = self.conv(fake_input)
 
-        fake_input = torch.zeros(1, f*c, imagesize, imagesize)
-        fake_output = self.conv(fake_input)
         self.hidden_size = fake_output.shape[1]
         self.pixels = fake_output.shape[-1]*fake_output.shape[-2]
         print("Spatial latent size is {}".format(fake_output.shape[1:]))
@@ -374,31 +381,48 @@ class MPRCatDqnModel(torch.nn.Module):
                                         eval_transform, p=self.aug_prob)
         return image
 
+    def sample_and_apply_transforms(self, transforms, eval_transforms, images, train=True):
+        """Samples each augmentation uniformly at random and applies it.
+        If train is False, returns the original images and a zero aug vector.
+        """
+        aug_vector = np.zeros((images.shape[0], len(transforms)))
+        if not train:
+            return images, aug_vector
+        sampled_aug_indices = np.random.randint(0, len(transforms), size=(images.shape[0],))
+        aug_vector[np.arange(images.shape[0]), len(transforms)] = 1.
+        for image, idx in enumerate(images):
+            images[idx] = transforms[sampled_aug_indices[idx]](image)
+        return images, aug_vector
+
     @torch.no_grad()
     def transform(self, images, augment=False):
         images = images.float()/255. if images.dtype == torch.uint8 else images
         flat_images = images.reshape(-1, *images.shape[-3:])
         if augment:
-            processed_images = self.apply_transforms(self.transforms,
+            processed_images, aug_vector = self.sample_and_apply_transforms(self.transforms,
                                                      self.eval_transforms,
                                                      flat_images)
         else:
-            processed_images = self.apply_transforms(self.eval_transforms,
+            processed_images, aug_vector = self.sample_and_apply_transforms(self.eval_transforms,
                                                      None,
-                                                     flat_images)
+                                                     flat_images,
+                                                                train=False)
         processed_images = processed_images.view(*images.shape[:-3],
                                                  *processed_images.shape[1:])
-        return processed_images
+        return processed_images, aug_vector
 
     def stem_parameters(self):
         return list(self.conv.parameters()) + list(self.head.parameters())
 
-    def stem_forward(self, img, prev_action=None, prev_reward=None):
+    def stem_forward(self, img, prev_action=None, prev_reward=None, aug_vector=None):
         """Returns the normalized output of convolutional layers."""
         # Infer (presence of) leading dimensions: [T,B], [B], or [].
         lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
 
-        conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
+        if aug_vector:
+            conv_out = self.conv(img.view(T * B, *img_shape), aug_vector)  # Fold if T dimension.
+        else:
+            conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
         if self.renormalize:
             conv_out = renormalize(conv_out, -3)
         return conv_out
@@ -435,10 +459,11 @@ class MPRCatDqnModel(torch.nn.Module):
             pred_reward = []
             pred_latents = []
             input_obs = observation[0].flatten(1, 2)
-            input_obs = self.transform(input_obs, augment=True)
+            input_obs, aug_vector = self.transform(input_obs, augment=True)
             latent = self.stem_forward(input_obs,
                                        prev_action[0],
-                                       prev_reward[0])
+                                       prev_reward[0],
+                                       aug_vector=aug_vector)
             log_pred_ps.append(self.head_forward(latent,
                                                  prev_action[0],
                                                  prev_reward[0],
@@ -476,12 +501,14 @@ class MPRCatDqnModel(torch.nn.Module):
             stacked_observation = observation.unsqueeze(1).repeat(1, max(1, aug_factor), 1, 1, 1)
             stacked_observation = stacked_observation.view(-1, *observation.shape[1:])
 
-            img = self.transform(stacked_observation, aug_factor)
+            img, aug_vector = self.transform(stacked_observation, aug_factor)
 
             # Infer (presence of) leading dimensions: [T,B], [B], or [].
             lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
-
-            conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
+            if self.distaug:
+                conv_out = self.conv(img.view(T * B, *img_shape), aug_vector=aug_vector)  # Fold if T dimension.
+            else:
+                conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
             if self.renormalize:
                 conv_out = renormalize(conv_out, -3)
             p = self.head(conv_out)
@@ -1024,8 +1051,13 @@ class FiLM(nn.Module):
 
 
 class FiLMedDQNEncoder(nn.Module):
-    def __init__(self, in_channels, embed_dim):
+    def __init__(self, in_channels, embed_dim, aug_vector_dim, hidden_size=256):
         super().__init__()
+        self.aug_embedding_mlp = nn.Sequential(
+            nn.Linear(aug_vector_dim, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, embed_dim)
+        )
         self.network = nn.Sequential(
             nn.Conv2d(in_channels=in_channels, out_channels=32, kernel_size=8, stride=4, padding=0),
             FiLM(32, embed_dim), nn.ReLU(),
@@ -1035,5 +1067,12 @@ class FiLMedDQNEncoder(nn.Module):
             FiLM(64, embed_dim), nn.ReLU()
         )
 
-    def forward(self, input):
-        return self.network(input)
+    def forward(self, input, aug_vector):
+        aug_embedding = self.aug_embedding_mlp(aug_vector)
+        out = self.network[0](input)  # conv1
+        out = self.network[1](out, aug_embedding) # FiLM1
+        out = self.network[2:4](out)  # relu,conv2
+        out = self.network[4](out, aug_embedding) # FiLM2
+        out = self.network[5:7](out)  # relu, conv3
+        out = self.network[7](out, aug_embedding)  # FiLM3
+        return out

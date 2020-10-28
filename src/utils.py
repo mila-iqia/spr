@@ -78,6 +78,7 @@ def set_config(args, game):
     config["model"]["dqn_hidden_size"] = args.dqn_hidden_size
     config["model"]["model_rl"] = args.model_rl_weight
     config["model"]["residual_tm"] = args.residual_tm
+    config["model"]["distaug"] = args.distaug
     config["algo"]["model_rl_weight"] = args.model_rl_weight
     config["algo"]["reward_loss_weight"] = args.reward_loss_weight
     config["algo"]["model_mpr_weight"] = args.model_mpr_weight
