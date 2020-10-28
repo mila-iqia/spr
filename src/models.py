@@ -389,10 +389,10 @@ class MPRCatDqnModel(torch.nn.Module):
         aug_vector = torch.zeros((images.shape[0], len(transforms)+1))
         if not train:
             return images, aug_vector
-        sampled_aug_indices = np.random.randint(0, len(transforms), size=(images.shape[0],))
-        aug_vector[np.arange(images.shape[0]), len(transforms)] = 1.
-        for image, idx in enumerate(images):
-            images[idx] = transforms[sampled_aug_indices[idx]](image)
+        sampled_aug_indices = torch.randint(0, len(transforms), size=(images.shape[0],), dtype=torch.long)
+        aug_vector[np.arange(images.shape[0]), sampled_aug_indices] = 1.
+        for idx, image in enumerate(images):
+            images[idx] = transforms[sampled_aug_indices[idx]](image.unsqueeze(0)).squeeze()
         return images, aug_vector
 
     @torch.no_grad()
@@ -420,7 +420,7 @@ class MPRCatDqnModel(torch.nn.Module):
         # Infer (presence of) leading dimensions: [T,B], [B], or [].
         lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
 
-        if aug_vector:
+        if aug_vector is not None:
             conv_out = self.conv(img.view(T * B, *img_shape), aug_vector)  # Fold if T dimension.
         else:
             conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
