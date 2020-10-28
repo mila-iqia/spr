@@ -386,7 +386,7 @@ class MPRCatDqnModel(torch.nn.Module):
         """Samples each augmentation uniformly at random and applies it.
         If train is False, returns the original images and a zero aug vector.
         """
-        aug_vector = torch.zeros((images.shape[0], len(transforms)+1))
+        aug_vector = torch.zeros((images.shape[0], len(transforms)+1), device=images.device)
         if not train:
             return images, aug_vector
         sampled_aug_indices = torch.randint(0, len(transforms), size=(images.shape[0],), dtype=torch.long)
