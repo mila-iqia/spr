@@ -67,6 +67,7 @@ class MPRCatDqnModel(torch.nn.Module):
         self.time_offset = time_offset
         self.aug_prob = aug_prob
         self.classifier_type = classifier
+        self.distaug = distaug
 
         self.distributional = distributional
         n_atoms = 1 if not self.distributional else n_atoms
@@ -76,7 +77,7 @@ class MPRCatDqnModel(torch.nn.Module):
         self.eval_transforms = []
 
         self.uses_augmentation = False
-        aug_vector = np.zeros(len(augmentation) + 1)
+        aug_vector = torch.zeros(len(augmentation) + 1)
         for aug in augmentation:
             if aug == "affine":
                 transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
@@ -385,7 +386,7 @@ class MPRCatDqnModel(torch.nn.Module):
         """Samples each augmentation uniformly at random and applies it.
         If train is False, returns the original images and a zero aug vector.
         """
-        aug_vector = np.zeros((images.shape[0], len(transforms)))
+        aug_vector = torch.zeros((images.shape[0], len(transforms)+1))
         if not train:
             return images, aug_vector
         sampled_aug_indices = np.random.randint(0, len(transforms), size=(images.shape[0],))
@@ -1061,9 +1062,9 @@ class FiLMedDQNEncoder(nn.Module):
         self.network = nn.Sequential(
             nn.Conv2d(in_channels=in_channels, out_channels=32, kernel_size=8, stride=4, padding=0),
             FiLM(32, embed_dim), nn.ReLU(),
-            nn.Conv2d(in_channels=in_channels, out_channels=64, kernel_size=4, stride=2, padding=0),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2, padding=0),
             FiLM(64, embed_dim), nn.ReLU(),
-            nn.Conv2d(in_channels=in_channels, out_channels=64, kernel_size=3, stride=1, padding=0),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=0),
             FiLM(64, embed_dim), nn.ReLU()
         )
 
