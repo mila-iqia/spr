@@ -62,7 +62,7 @@ atari_random_scores = dict(
 
 
 def maybe_update_summary(key, value):
-    if key not in wandb.run.summary:
+    if key not in wandb.run.summary.keys():
         wandb.run.summary[key] = value
     else:
         wandb.run.summary[key] = max(value, wandb.run.summary[key])
