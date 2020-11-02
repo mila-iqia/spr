@@ -128,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument('--eps-final', type=float, default=0.)
     parser.add_argument('--final-eval-only', type=int, default=1)
     parser.add_argument('--time-offset', type=int, default=0)
-    parser.add_argument('--project', type=str, default="mpr")
+    parser.add_argument('--project', type=str, default="distaug")
     parser.add_argument('--entity', type=str, default="abs-world-models")
     parser.add_argument('--cuda_idx', help='gpu to use ', type=int, default=0)
     parser.add_argument('--max-grad-norm', type=float, default=10., help='Max Grad Norm')
