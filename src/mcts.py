@@ -88,10 +88,11 @@ class MCTS:
         self.n_actions = n_actions
         self.min_max_stats = MinMaxStats()
         self.eval = eval
+        self.device = torch.device('cpu')
 
     def run(self, obs):
         root = Node(0)
-        obs = obs.to(self.args.device)
+        obs = obs.to(self.device)
         root.hidden_state = obs
         self.expand_node(root, network_output=self.network.initial_inference(obs))
         for s in range(self.args.num_simulations):
@@ -106,7 +107,7 @@ class MCTS:
             # hidden state given an action and the previous hidden state.
             parent = search_path[-2]
             with torch.no_grad():
-                action = torch.tensor(action, device=self.args.device)
+                action = torch.tensor(action, device=self.device)
                 network_output = self.network.inference(parent.hidden_state, action)
             self.expand_node(node, network_output)
             self.backup(search_path, network_output.value)

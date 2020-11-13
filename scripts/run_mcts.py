@@ -2,6 +2,10 @@ import wandb
 import os
 
 from rlpyt.utils.logging.context import logger_context
+
+from src.mcts_agent import MCTSAgent
+from src.mcts_algo import ValueLearning
+from src.mcts_models import MCTSModel
 from src.rlpyt_atari_env import AtariEnv, AtariTrajInfo
 from src.rlpyt_models import MinibatchRlEvalWandb
 from src.sampler import SerialSampler, OneToOneSerialEvalCollector, SerialEvalCollector
@@ -12,7 +16,7 @@ def run_mcts(args=None):
     config = dict(
         agent=dict(),
         algo=dict(
-            discount=args.discount,
+            discount=0.99,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
             prioritized_replay=args.prioritized_replay,
@@ -61,15 +65,15 @@ def run_mcts(args=None):
     )
 
     # TODO: Implement new simpler algo, agnet and model classes
-    algo = PizeroModelCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"])
-    agent = DQNSearchAgent(ModelCls=PizeroSearchCatDqnModel, search_args=args, model_kwargs=config["model"], **config["agent"])
+    algo = ValueLearning(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"])
+    agent = MCTSAgent(ModelCls=MCTSModel, search_args=args, model_kwargs=config["model"], **config["agent"])
     wandb.config.update(config)
     runner = MinibatchRlEvalWandb(
         algo=algo,
         agent=agent,
         sampler=sampler,
         n_steps=args.n_steps,
-        affinity=dict(cuda_idx=0),
+        affinity=dict(cuda_idx=None),
         log_interval_steps=args.n_steps//args.num_logs,
         seed=args.seed,
         final_eval_only=args.final_eval_only,
@@ -88,16 +92,24 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--game', help='Atari game', default='ms_pacman')
-    parser.add_argument('--fasteval', type=int, default=1)
+    parser.add_argument('--fasteval', type=int, default=0)
     parser.add_argument('--seed', type=int, default=69)
     parser.add_argument('--n-steps', type=int, default=100000)
+    parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--learning-rate', type=float, default=3e-4)
+    parser.add_argument('--n-step', type=int, default=5)
+    parser.add_argument('--batch-t', type=int, default=1)
+    parser.add_argument('--batch-b', type=int, default=1)
     parser.add_argument('--target-update-interval', type=int, default=2000)
     parser.add_argument('--target-update-tau', type=float, default=1.)
     parser.add_argument('--prioritized-replay', type=int, default=1)
+    parser.add_argument('--jumps', type=int, default=5)
+    parser.add_argument('--final-eval-only', type=int, default=False)
+    parser.add_argument('--num-logs', type=int, default=10)
     parser.add_argument('--beluga', action="store_true")
 
     # MCTS arguments
-    parser.add_argument('--num-simulations', type=int, default=0)
+    parser.add_argument('--num-simulations', type=int, default=5)
     parser.add_argument('--eval-simulations', type=int, default=0)
     parser.add_argument('--c1', type=float, default=1.25, help='UCB c1 constant')
 
@@ -106,6 +118,6 @@ if __name__ == "__main__":
     if args.beluga:
         os.environ["WANDB_MODE"] = "dryrun"
 
-    wandb.init(project='mcts', entity='abs-world-models', config=args, tags=[args.tag], dir=args.wandb_dir)
+    wandb.init(project='mcts', entity='abs-world-models')
     wandb.config.update(vars(args))
     run_mcts(args)

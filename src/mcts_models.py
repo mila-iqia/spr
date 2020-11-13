@@ -20,19 +20,20 @@ import wandb
 
 
 class MCTSModel(torch.nn.Module):
-    def __init__(self, image_shape, output_size, jumps, mpr, imagesize,
-                 augmentation, target_augmentation, eval_augmentation,
-                 dynamics_blocks,
-                 norm_type,
-                 dqn_hidden_size,
-                 model_rl,
-                 momentum_tau,
-                 renormalize,
-                 dropout,
-                 residual_tm,
-                 projection,
-                 predictor,
-                 q_l1_type):
+    def __init__(self, image_shape, output_size, jumps=0, spr=0, imagesize=84,
+                 augmentation=['none'], target_augmentation=0, eval_augmentation=0,
+                 dynamics_blocks=0,
+                 norm_type='bn',
+                 dqn_hidden_size=256,
+                 model_rl=0,
+                 momentum_tau=0.01,
+                 renormalize=1,
+                 dropout=0.,
+                 residual_tm=0.,
+                 projection='q_l1',
+                 predictor='linear',
+                 q_l1_type=''):
+        super().__init__()
         f, c = image_shape[:2]
         in_channels = np.prod(image_shape[:2])
         self.conv = Conv2dModel(
@@ -89,7 +90,7 @@ class MCTSModel(torch.nn.Module):
 
         self.jumps = jumps
         self.model_rl = model_rl
-        self.use_mpr = mpr
+        self.use_spr = spr
         self.target_augmentation = target_augmentation
         self.eval_augmentation = eval_augmentation
         self.num_actions = output_size
