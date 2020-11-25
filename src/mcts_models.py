@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rlpyt.models.mlp import MlpModel
+from src.model_trainer import from_categorical, NetworkOutput
 from src.rlpyt_models import Conv2dModel
 
 from rlpyt.models.utils import scale_grad, update_state_dict
@@ -32,7 +33,8 @@ class MCTSModel(torch.nn.Module):
                  residual_tm=0.,
                  projection='q_l1',
                  predictor='linear',
-                 q_l1_type=''):
+                 q_l1_type='',
+                 distributional=0):
         super().__init__()
         f, c = image_shape[:2]
         in_channels = np.prod(image_shape[:2])
@@ -48,7 +50,7 @@ class MCTSModel(torch.nn.Module):
 
         self.transforms = []
         self.eval_transforms = []
-
+        self.distributional = distributional
         self.uses_augmentation = False
         for aug in augmentation:
             if aug == "affine":
@@ -317,6 +319,36 @@ class MCTSModel(torch.nn.Module):
             p = restore_leading_dims(p, lead_dim, T, B)
 
             return p
+
+    def initial_inference(self, obs, actions=None, logits=False):
+        if len(obs.shape) == 5:
+            obs = obs.flatten(1, 2)
+        obs = self.transform(obs, self.eval_augmentation)
+        hidden_state = self.conv(obs)
+        policy_logits = self.policy_model(hidden_state)
+        value_logits = self.head(hidden_state)
+        reward_logits = self.dynamics_model.reward_predictor(hidden_state)
+
+        if logits:
+            return NetworkOutput(hidden_state, reward_logits, policy_logits, value_logits)
+
+        value = from_categorical(value_logits, logits=True, limit=10)  # TODO Make these configurable
+        reward = from_categorical(reward_logits, logits=True, limit=1)
+        return NetworkOutput(hidden_state, reward, policy_logits, value)
+
+    def inference(self, state, action):
+        next_state, reward_logits, \
+        policy_logits, value_logits = self.step(state, action)
+        value = from_categorical(value_logits, logits=True, limit=10)  # TODO Make these configurable
+        reward = from_categorical(reward_logits, logits=True, limit=1)
+
+        return NetworkOutput(next_state, reward, policy_logits, value)
+
+    def step(self, state, action):
+        next_state, reward_logits = self.dynamics_model(state, action)
+        policy_logits = None
+        value_logits = self.head(next_state)
+        return next_state, reward_logits, policy_logits, value_logits
 
     def apply_transforms(self, transforms, eval_transforms, image):
         if eval_transforms is None:
