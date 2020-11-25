@@ -93,6 +93,8 @@ class MCTS:
     def run(self, obs):
         root = Node(0)
         obs = obs.to(self.device)
+        if len(obs.shape) <= 4:
+            obs.unsqueeze_(0)
         root.hidden_state = obs
         self.expand_node(root, network_output=self.network.initial_inference(obs))
         for s in range(self.args.num_simulations):

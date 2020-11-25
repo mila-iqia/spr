@@ -34,7 +34,9 @@ def run_mcts(args=None):
             episodic_lives=False,
             horizon=int(27e3),
         ),
-        model=dict(),
+        model=dict(
+            jumps=args.jumps
+        ),
         optim=dict(),
         runner=dict(
             n_steps=args.n_steps,

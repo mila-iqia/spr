@@ -26,6 +26,7 @@ ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
 
 EPS = 1e-6  # (NaN-guard)
 
+
 class ValueLearning(DQN):
     def __init__(self,
                  t0_mpr_loss_weight=1.,
