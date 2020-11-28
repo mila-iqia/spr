@@ -97,16 +97,13 @@ class MCTSModel(torch.nn.Module):
         self.eval_augmentation = eval_augmentation
         self.num_actions = output_size
 
-        self.head = MLPHead(input_channels=self.hidden_size,
-                            pixels=self.pixels,
-                            output_size=1,
-                            hidden_size=dqn_hidden_size,
-                            )
+        self.head = ValueHead(input_channels=self.hidden_size,
+                              pixels=self.pixels,
+                              output_size=1)
 
-        self.policy_head = MLPHead(input_channels=self.hidden_size,
-                                   pixels=self.pixels,
-                                   output_size=output_size,
-                                   hidden_size=dqn_hidden_size)
+        self.policy_head = PolicyHead(input_channels=self.hidden_size,
+                                      output_size=self.num_actions,
+                                      pixels=self.pixels)
 
         if self.jumps > 0:
             self.dynamics_model = TransitionModel(channels=self.hidden_size,
@@ -442,10 +439,9 @@ class TransitionModel(nn.Module):
         self.action_embedding = nn.Embedding(num_actions, pixels*action_dim)
 
         self.network = nn.Sequential(*layers)
-        self.reward_predictor = RewardPredictor(channels,
-                                                pixels=pixels,
-                                                limit=limit,
-                                                norm_type=norm_type)
+        self.reward_predictor = RewardHead(channels, output_size=1,
+                                           pixels=pixels,
+                                           norm_type=norm_type)
         self.train()
 
     def forward(self, x, action):
@@ -670,3 +666,68 @@ def to_categorical(value, limit=300):
     distribution.scatter_add_(-1, upper.unsqueeze(-1), upper_weight.unsqueeze(-1))
     return distribution
 
+
+class PolicyHead(nn.Module):
+    def __init__(self,
+                 input_channels,
+                 output_size,
+                 filters=1,
+                 pixels=36,
+                 norm_type="bn"):
+        super().__init__()
+        layers = [nn.Conv2d(input_channels, filters, kernel_size=1, stride=1),
+                  nn.ReLU(),
+                  init_normalization(filters, norm_type),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*filters, 256),
+                  nn.ReLU(),
+                  nn.Linear(256, output_size)]
+        self.network = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x):
+        return self.network(x)
+
+
+class RewardHead(nn.Module):
+    def __init__(self,
+                 input_channels,
+                 output_size=1,
+                 filters=1,
+                 pixels=36,
+                 norm_type="bn"):
+        super().__init__()
+        layers = [nn.Conv2d(input_channels, filters, kernel_size=1, stride=1),
+                  nn.ReLU(),
+                  init_normalization(filters, norm_type),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*filters, 256),
+                  nn.ReLU(),
+                  nn.Linear(256, output_size)]
+        self.network = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x):
+        return self.network(x)
+
+
+class ValueHead(nn.Module):
+    def __init__(self,
+                 input_channels,
+                 output_size=1,
+                 filters=1,
+                 pixels=36,
+                 norm_type="bn"):
+        super().__init__()
+        layers = [nn.Conv2d(input_channels, filters, kernel_size=1, stride=1),
+                  nn.ReLU(),
+                  init_normalization(filters, norm_type),
+                  nn.Flatten(-3, -1),
+                  nn.Linear(pixels*filters, 256),
+                  nn.ReLU(),
+                  nn.Linear(256, output_size)]
+        self.network = nn.Sequential(*layers)
+        self.train()
+
+    def forward(self, x):
+        return self.network(x)
