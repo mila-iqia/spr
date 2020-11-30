@@ -51,9 +51,10 @@ class Node(object):
     def compute_pi_bar(self):
         q_values = np.array([self.children[i].value() for i in self.children])
         prior = np.array([self.children[i].prior for i in self.children])
-        lambda_n = self.c1 * math.sqrt(self.visit_count) / self.visit_count
+        # Should we just initialize visit_count by 1 instead?
+        lambda_n = self.c1 * math.sqrt(self.visit_count + 1) / (self.visit_count + 1)
         alpha = self.binary_search_alpha(lambda_n, q_values, prior)
-        pi_bar = lambda_n * self.prior / (alpha - q_values)
+        pi_bar = torch.distributions.Categorical(probs=torch.from_numpy(lambda_n * prior / (alpha - q_values)))
         return pi_bar
 
     def binary_search_alpha(self, lambda_n, q_values, prior,  eps=1e-8):
@@ -121,7 +122,7 @@ class MCTS:
     def expand_node(self, node, network_output):
         node.hidden_state = network_output.next_state
         node.reward = network_output.reward
-        policy_probs = F.softmax(network_output.policy_logits, dim=-1)
+        policy_probs = F.softmax(network_output.policy_logits, dim=-1).squeeze()
         for action in range(self.n_actions):
             node.children[action] = Node(policy_probs[action].item(), self.min_max_stats.minimum)
 
@@ -135,13 +136,13 @@ class MCTS:
             node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
 
     def select_child(self, node):
-        pi_bar = node.compute_pi_bar(node)
+        pi_bar = node.compute_pi_bar()
         # pi_bar is a torch categorical distribution
         if self.eval:
             action = pi_bar.probs.mode.indices.item()
         else:
             action = pi_bar.sample()
-        child = node[action]
+        child = node.children[action.item()]
         return action, child
 
     def backup(self, search_path: List[Node], value: float):
