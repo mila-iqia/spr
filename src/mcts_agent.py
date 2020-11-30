@@ -30,19 +30,19 @@ class MCTSAgent(AtariDqnAgent):
         super().eval_mode(itr)
         self.search.set_eval()
         self.search.epsilon = self.distribution.epsilon
-        self.search.network.head.set_sampling(False)
+        # self.search.network.head.set_sampling(False)
         self.itr = itr
 
     def sample_mode(self, itr):
         """Extend method to set epsilon for sampling (including annealing)."""
         super().sample_mode(itr)
         self.search.epsilon = self.distribution.epsilon
-        self.search.network.head.set_sampling(True)
+        # self.search.network.head.set_sampling(True)
         self.itr = itr
 
     def train_mode(self, itr):
         super().train_mode(itr)
-        self.search.network.head.set_sampling(True)
+        # self.search.network.head.set_sampling(True)
         self.itr = itr
 
     @torch.no_grad()
