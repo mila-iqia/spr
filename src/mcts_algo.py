@@ -35,6 +35,8 @@ class ValueLearning(DQN):
                  model_mpr_weight=1.,
                  policy_loss_weight=1.,
                  jumps=0,
+                 discount=0.99,
+                 n_step_return=10,
                  **kwargs):
         super().__init__(**kwargs)
         self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy
@@ -45,6 +47,8 @@ class ValueLearning(DQN):
         self.reward_loss_weight = reward_loss_weight
         self.model_rl_weight = model_rl_weight
         self.jumps = jumps
+        self.discount = discount
+        self.n_step_return = n_step_return
 
     def initialize_replay_buffer(self, examples, batch_spec, async_=False):
         example_to_buffer = ModelSamplesToBuffer(
@@ -59,7 +63,7 @@ class ValueLearning(DQN):
             example=example_to_buffer,
             size=self.replay_size,
             B=batch_spec.B,
-            batch_T=self.jumps+1+self.time_offset,
+            batch_T=self.jumps+1,
             discount=self.discount,
             n_step_return=self.n_step_return,
             rnn_state_interval=0,
