@@ -155,3 +155,6 @@ class MCTS:
             self.min_max_stats.update(node.value())
 
             value = node.reward + self.discount * value
+
+    def set_eval(self):
+        pass
