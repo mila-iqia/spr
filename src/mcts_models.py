@@ -322,7 +322,7 @@ class MCTSModel(torch.nn.Module):
             obs = obs.flatten(1, 2)
         obs = self.transform(obs, self.eval_augmentation)
         hidden_state = self.conv(obs)
-        policy_logits = self.policy_model(hidden_state)
+        policy_logits = self.policy_head(hidden_state)
         value_logits = self.head(hidden_state)
         reward_logits = self.dynamics_model.reward_predictor(hidden_state)
 
