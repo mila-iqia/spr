@@ -78,7 +78,7 @@ class Node(object):
         if pi_bar is None:
             pi_bar = self.compute_pi_bar()
         action = pi_bar.sample()
-        return action
+        return action.unsqueeze(0)
 
 
 class MCTS:

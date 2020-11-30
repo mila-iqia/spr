@@ -46,8 +46,8 @@ def run_mcts(args=None):
             batch_T=args.batch_t,
             batch_B=args.batch_b,
             max_decorrelation_steps=0,
-            eval_n_envs=100,
-            eval_max_steps=100*28000,
+            eval_n_envs=1,
+            eval_max_steps=28000,
             eval_max_trajectories=100
         ),
     )
