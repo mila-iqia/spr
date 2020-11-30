@@ -31,16 +31,33 @@ import time
 
 
 atari_human_scores = dict(
-    alien=7127.7, amidar=1719.5, assault=742.0, asterix=8503.3,
-    bank_heist=753.1, battle_zone=37187.5, boxing=12.1,
-    breakout=30.5, chopper_command=7387.8, crazy_climber=35829.4,
-    demon_attack=1971.0, freeway=29.6, frostbite=4334.7,
-    gopher=2412.5, hero=30826.4, jamesbond=302.8, kangaroo=3035.0,
-    krull=2665.5, kung_fu_master=22736.3, ms_pacman=6951.6, pong=14.6,
-    private_eye=69571.3, qbert=13455.0, road_runner=7845.0,
-    seaquest=42054.7, up_n_down=11693.2
+    alien=7127.7,
+    amidar=1719.5,
+    assault=742,
+    asterix=8503.3,
+    bank_heist=753.1,
+    battle_zone=37187.5,
+    boxing=12.1,
+    breakout=30.5,
+    chopper_command=7387.8,
+    crazy_climber=35829.4,
+    demon_attack=1971,
+    freeway=29.6,
+    frostbite=4334.7,
+    gopher=2412.5,
+    hero=30826.4,
+    jamesbond=302.8,
+    kangaroo=3035.0,
+    krull=2665.5,
+    kung_fu_master=22736.3,
+    ms_pacman=6951.6,
+    pong=14.6,
+    private_eye=69571.3,
+    qbert=13455.0,
+    road_runner=7845.0,
+    seaquest=42054.7,
+    up_n_down=11693.2
 )
-
 atari_der_scores = dict(
     alien=739.9, amidar=188.6, assault=431.2, asterix=470.8,
     bank_heist=51.0, battle_zone=10124.6, boxing=0.2,
@@ -53,27 +70,44 @@ atari_der_scores = dict(
 )
 
 atari_nature_scores = dict(
-    alien=3069, amidar=739.5, assault=3359,
-    asterix=6012, bank_heist=429.7, battle_zone=26300.,
-    boxing=71.8, breakout=401.2, chopper_command=6687.,
-    crazy_climber=114103, demon_attack=9711., freeway=30.3,
-    frostbite=328.3, gopher=8520., hero=19950., jamesbond=576.7,
-    kangaroo=6740., krull=3805., kung_fu_master=23270.,
-    ms_pacman=2311., pong=18.9, private_eye=1788.,
-    qbert=10596., road_runner=18257., seaquest=5286., up_n_down=8456.
+    alien=1620, amidar=978, assault=4280.4,
+    asterix=4359.0, bank_heist=455, battle_zone=29900.,
+    boxing=88, breakout=385.5, chopper_command=6126.,
+    crazy_climber=110763, demon_attack=12149.4, freeway=30.8,
+    frostbite=797.4, gopher=8777.4, hero=20437.8, jamesbond=768.5,
+    kangaroo=7259., krull=8422.3, kung_fu_master=26059.,
+    ms_pacman=3085.6, pong=19.5, private_eye=146.7,
+    qbert=13117.3, road_runner=39544.0, seaquest=5860.6, up_n_down=9989.9
 )
 
 atari_random_scores = dict(
-    alien=227.8, amidar=5.8, assault=222.4,
-    asterix=210.0, bank_heist=14.2, battle_zone=2360.0,
-    boxing=0.1, breakout=1.7, chopper_command=811.0,
-    crazy_climber=10780.5, demon_attack=152.1, freeway=0.0,
-    frostbite=65.2, gopher=257.6, hero=1027.0, jamesbond=29.0,
-    kangaroo=52.0, krull=1598.0, kung_fu_master=258.5,
-    ms_pacman=307.3, pong=-20.7, private_eye=24.9,
-    qbert=163.9, road_runner=11.5, seaquest=68.4, up_n_down=533.4
+    alien=227.8,
+    amidar=5.8,
+    assault=222.4,
+    asterix=210.0,
+    bank_heist=14.2,
+    battle_zone=2360,
+    boxing=0.1,
+    breakout=1.7,
+    chopper_command=811.0,
+    crazy_climber=10780.5,
+    demon_attack=152.1,
+    freeway=0.0,
+    frostbite=65.2,
+    gopher=257.6,
+    hero=1027.0,
+    jamesbond=29.0,
+    kangaroo=52.0,
+    krull=1598.0,
+    kung_fu_master=258.5,
+    ms_pacman=307.3,
+    pong=-20.7,
+    private_eye=24.9,
+    qbert=163.9,
+    road_runner=11.5,
+    seaquest=68.4,
+    up_n_down=533.4
 )
-
 
 def maybe_update_summary(key, value):
     if key not in wandb.run.summary:

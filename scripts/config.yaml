@@ -1,0 +1,126 @@
+cuda_idx: 0
+run_id: 0
+public: 0 # false
+entity: maxa-schwarzer
+project: amble
+tag: ''
+wandb_dir: ''
+final_eval_only: 1
+n_steps: 100000
+num_logs: 10
+
+rollout_depth: 10
+rollout_rl_weight: 1
+rollout_rl_type: offset
+distributional: quantile
+use_dones: 1
+#  rollout_rl_style: standard # standard, model_backup and target_backup
+#  # in model_backup, the agent's predictions are backed up and all time steps
+#  # predict the same target.  Requires jumps > n_step
+#  # For target_backup, the same target predictions are backed up _jumps_ different ways
+
+hydra:
+  run:
+    dir: ./
+
+agent:
+  eps_eval: 0.001
+  eps_final: 0
+  eps_init: 1
+algo:
+  batch_size: 32
+  online_buffer_size: 1000
+  clip_grad_norm: 10
+  min_steps_learn: 2000
+  eps_steps: 2001
+  transfer_freq: 16
+  lambda_rollout_depth: ${rollout_depth}
+  learning_rate: 0.0001
+  model_spr_weight: 5
+  n_step_return: 5
+  pri_alpha: 0.5
+  reset_target_noise: true
+  pri_beta_steps: 100000
+  prioritized_replay: 1
+  replay_ratio: 64
+  distributional: ${distributional}
+  rl_weight: 1
+  rollout_rl_weight: ${rollout_rl_weight}
+  rollout_rl_type: ${rollout_rl_type}
+  model_rl_weight: 1
+  counterfactual_runs: 1
+  done_loss_weight: 1
+  reward_loss_weight: 1
+  t0_spr_loss_weight: 0
+  target_update_interval: 1
+  target_update_tau: 1.
+  counterfactual_from_obs: false
+  counterfactual_with_target: false
+  double_dqn: 0
+  head_only_search: 0
+  search_start_offset: 0
+  use_dones: ${use_dones}
+  delta_clip: 1.
+  debug_step: -1
+env:
+  game: ms_pacman
+  grayscale: 1
+  imagesize: 84
+  num_img_obs: 4
+  seed: 0
+eval_env: ${env}
+model:
+  aug_prob: 1
+  augmentation: [shift, intensity] # [none, rrc, affine, crop, blur, shift, intensity]
+  target_augmentation: [shift, intensity]
+  dqn_hidden_size: 256
+  dropout: 0
+  dueling: 1
+  dynamics_blocks: 4
+  block_drop_prob: 0
+  eval_augmentation: 0
+  imagesize: 84
+  jumps: 5
+  momentum_tau: 1.
+  noisy_nets_std: 0.5
+  noisy_nets: 1
+  tm_hidden_size: -1
+  norm_type: bn
+  use_ws: false
+  distributional: ${distributional}
+  encoder: nature
+  model_rl: 1
+  rollout_rl: ${rollout_rl_weight}
+  predictor: linear
+  projections: [advantage, value] #[advantage, value, done, reward]
+  selection_temperature: 0.5
+  target_entropy: -1
+  q_l1_type: []
+  renormalize: max
+  residual_tm: 0
+  rollout_rl_type: ${rollout_rl_type}
+  lambda_from_state: 1
+  resblock: inverted
+  expand_ratio: 2
+  lambda_type: softmax
+  rollout_depth: ${rollout_depth}
+  eval_depth: ${rollout_depth}
+  target_depth: ${rollout_depth}
+  train_quantiles: 32
+  eval_runs: 0
+  target_runs: 0
+  spr: 1
+  batch_thresh: 0.1
+  search_policy: fixed_t
+  separate_spr_pass: False
+  use_dones: ${use_dones}
+
+optim:
+  eps: 0.00015
+  weight_decay: 0.0001
+sampler:
+  batch_B: 1
+  batch_T: 1
+  eval_max_steps: 2800000  # 28k is just a safe ceiling
+  eval_max_trajectories: 100
+  eval_n_envs: 100
