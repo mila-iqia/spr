@@ -343,7 +343,7 @@ class MCTSModel(torch.nn.Module):
 
     def step(self, state, action):
         next_state, reward_logits = self.dynamics_model(state, action)
-        policy_logits = None
+        policy_logits = self.policy_head(next_state)
         value_logits = self.head(next_state)
         return next_state, reward_logits, policy_logits, value_logits
 
@@ -445,6 +445,8 @@ class TransitionModel(nn.Module):
         self.train()
 
     def forward(self, x, action):
+        if action.dim() < 1:
+            action = action.unsqueeze(0)
         batch_range = torch.arange(action.shape[0], device=action.device)
         action_onehot = torch.zeros(action.shape[0],
                                     self.num_actions,

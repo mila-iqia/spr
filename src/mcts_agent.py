@@ -4,7 +4,7 @@ from rlpyt.utils.collections import namedarraytuple
 from src.mcts import MCTS
 import torch
 
-AgentInfo = namedarraytuple("AgentInfo", "policy", "value")
+AgentInfo = namedarraytuple("AgentInfo", ["policy", "value"])
 AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 
 
@@ -36,7 +36,6 @@ class MCTSAgent(AtariDqnAgent):
     def sample_mode(self, itr):
         """Extend method to set epsilon for sampling (including annealing)."""
         super().sample_mode(itr)
-        self.search.set_train()
         self.search.epsilon = self.distribution.epsilon
         self.search.network.head.set_sampling(True)
         self.itr = itr
@@ -51,7 +50,7 @@ class MCTSAgent(AtariDqnAgent):
         """Compute the discrete distribution for the Q-value for each
         action for each state/observation (no grad)."""
         action, pi_bar, value = self.search.run(observation.to(self.search.device))
-        p = pi_bar.cpu()
+        p = pi_bar.probs.cpu()
         action = action.cpu()
 
         agent_info = AgentInfo(policy=p, value=value.cpu())

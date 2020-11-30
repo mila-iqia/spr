@@ -77,8 +77,7 @@ class Node(object):
     def select_action(self, pi_bar=None):
         if pi_bar is None:
             pi_bar = self.compute_pi_bar()
-        d = torch.distributions.Categorical(probs=pi_bar)
-        action = d.sample()
+        action = pi_bar.sample()
         return action
 
 
@@ -90,6 +89,7 @@ class MCTS:
         self.min_max_stats = MinMaxStats()
         self.eval = eval
         self.device = torch.device('cpu')
+        self.discount = 0.99
 
     def run(self, obs):
         root = Node(0)
@@ -97,7 +97,10 @@ class MCTS:
         if len(obs.shape) <= 4:
             obs.unsqueeze_(0)
         root.hidden_state = obs
-        self.expand_node(root, network_output=self.network.initial_inference(obs))
+        root_inference = self.network.initial_inference(obs)
+        self.min_max_stats.update(root_inference.value.item())
+        self.expand_node(root, network_output=root_inference)
+        self.min_max_stats
         for s in range(self.args.num_simulations):
             node = root
             search_path = [node]
@@ -113,7 +116,7 @@ class MCTS:
                 action = torch.tensor(action, device=self.device)
                 network_output = self.network.inference(parent.hidden_state, action)
             self.expand_node(node, network_output)
-            self.backup(search_path, network_output.value)
+            self.backup(search_path, network_output.value.item())
         pi_bar = root.compute_pi_bar()
         action = root.select_action(pi_bar)
         # TODO: Clarify: should the returned values be pi_bar*q_values?
@@ -151,4 +154,4 @@ class MCTS:
             node.visit_count += 1
             self.min_max_stats.update(node.value())
 
-            value = node.reward + self.args.discount * value
+            value = node.reward + self.discount * value
