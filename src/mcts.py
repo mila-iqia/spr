@@ -100,7 +100,6 @@ class MCTS:
         root_inference = self.network.initial_inference(obs)
         self.min_max_stats.update(root_inference.value.item())
         self.expand_node(root, network_output=root_inference)
-        self.min_max_stats
         for s in range(self.args.num_simulations):
             node = root
             search_path = [node]
