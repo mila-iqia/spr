@@ -105,7 +105,8 @@ class ValueLearning(DQN):
             action=samples.agent.action,
             reward=samples.env.reward,
             done=samples.env.done,
-            value=samples.agent.agent_info.p,
+            value=samples.agent.agent_info.value,
+            policy=samples.agent.agent_info.policy
         )
 
     def optimize_agent(self, itr, samples=None, sampler_itr=None):
