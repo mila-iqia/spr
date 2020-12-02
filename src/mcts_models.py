@@ -34,7 +34,8 @@ class MCTSModel(torch.nn.Module):
                  projection='q_l1',
                  predictor='linear',
                  q_l1_type='',
-                 distributional=0):
+                 distributional=0,
+                 aug_prob=0.8):
         super().__init__()
         f, c = image_shape[:2]
         in_channels = np.prod(image_shape[:2])
@@ -52,6 +53,7 @@ class MCTSModel(torch.nn.Module):
         self.eval_transforms = []
         self.distributional = distributional
         self.uses_augmentation = False
+        self.aug_prob = aug_prob
         for aug in augmentation:
             if aug == "affine":
                 transformation = RandomAffine(5, (.14, .14), (.9, 1.1), (-5, 5))
@@ -256,11 +258,10 @@ class MCTSModel(torch.nn.Module):
                 pred_reward.append(F.log_softmax(pred_rew, -1))
 
                 for j in range(1, self.jumps + 1):
-                    latent, pred_rew = self.step(latent, prev_action[j])
+                    latent, pred_rew, policy, value = self.step(latent, prev_action[j])
                     pred_rew = pred_rew[:observation.shape[1]]
                     pred_latents.append(latent)
                     pred_reward.append(F.log_softmax(pred_rew, -1))
-                    policy = self.policy_head(latent)
                     pred_policy_logits.append(F.log_softmax(policy, -1))
 
             if self.model_rl > 0:

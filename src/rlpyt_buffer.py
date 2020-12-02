@@ -28,7 +28,7 @@ SamplesToBuffer = namedarraytuple("SamplesToBuffer",
 SamplesFromReplayExt = namedarraytuple("SamplesFromReplayPriExt",
                                        SamplesFromReplay._fields + ("values", "age"))
 SamplesFromReplayPriExt = namedarraytuple("SamplesFromReplayPriExt",
-                                       SamplesFromReplayPri._fields + ("values", "policy"))
+                                       SamplesFromReplayPri._fields + ("value", "policy"))
 EPS = 1e-6
 
 
@@ -124,8 +124,8 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             values = torch.from_numpy(extract_sequences(self.samples.value, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
             policies = torch.from_numpy(extract_sequences(self.samples.policy, T_idxs, B_idxs, self.batch_T+self.n_step_return+1))
             batch = SamplesFromReplayPriExt(*batch,
-                                            values=values,
-                                            policies=policies,
+                                            value=values,
+                                            policy=policies,
                                             is_weights=is_weights,)
             if self.batch_T > 1:
                 batch = self.sanitize_batch(batch)

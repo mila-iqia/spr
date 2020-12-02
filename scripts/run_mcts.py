@@ -23,7 +23,9 @@ def run_mcts(args=None):
             n_step_return=args.n_step,
             replay_size=int(1e6),
             target_update_interval=args.target_update_interval,
-            target_update_tau=args.target_update_tau
+            target_update_tau=args.target_update_tau,
+            replay_ratio=args.replay_ratio,
+            min_steps_learn=int(2e3)
         ),
         env=dict(
             game=args.game,
@@ -48,7 +50,7 @@ def run_mcts(args=None):
             max_decorrelation_steps=0,
             eval_n_envs=1,
             eval_max_steps=28000,
-            eval_max_trajectories=100
+            eval_max_trajectories=10
         ),
     )
 
@@ -105,8 +107,9 @@ if __name__ == "__main__":
     parser.add_argument('--target-update-interval', type=int, default=2000)
     parser.add_argument('--target-update-tau', type=float, default=1.)
     parser.add_argument('--prioritized-replay', type=int, default=1)
+    parser.add_argument('--replay-ratio', type=int, default=32)
     parser.add_argument('--jumps', type=int, default=5)
-    parser.add_argument('--final-eval-only', type=int, default=False)
+    parser.add_argument('--final-eval-only', type=int, default=0)
     parser.add_argument('--num-logs', type=int, default=10)
     parser.add_argument('--beluga', action="store_true")
 

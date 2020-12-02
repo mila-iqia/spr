@@ -168,8 +168,8 @@ class ValueLearning(DQN):
         with cross-entropy loss.
         Returns loss and KL-divergence-errors for use in prioritization.
         """
-        if self.model.noisy:
-            self.model.head.reset_noise()
+        # if self.model.noisy:
+        #     self.model.head.reset_noise()
         # start = time.time()
         log_pred_ps, pred_rew, mpr_loss, pred_policy_logits \
             = self.agent(samples.all_observation.to(self.agent.device),
