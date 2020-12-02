@@ -15,6 +15,18 @@ class MCTSAgent(AtariDqnAgent):
         self.search_args = search_args
         self.eval = eval
 
+    def __call__(self, observation, prev_action, prev_reward, train=False):
+        """Returns Q-values for states/observations (with grad)."""
+        if train:
+            model_inputs = buffer_to((observation, prev_action, prev_reward),
+                device=self.device)
+            return self.model(*model_inputs, train=train)
+        else:
+            prev_action = self.distribution.to_onehot(prev_action)
+            model_inputs = buffer_to((observation, prev_action, prev_reward),
+                device=self.device)
+            return self.model(*model_inputs).cpu()
+
     def initialize(self,
                    env_spaces,
                    share_memory=False,
