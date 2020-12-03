@@ -136,7 +136,7 @@ class ValueLearning(DQN):
             self.optimizer.zero_grad()
             total_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.stem_parameters(), self.clip_grad_norm)
+                self.model.parameters(), self.clip_grad_norm)
             if len(list(self.model.dynamics_model.parameters())) > 0:
                 model_grad_norm = torch.nn.utils.clip_grad_norm_(
                     self.model.dynamics_model.parameters(), self.clip_grad_norm)
@@ -196,8 +196,7 @@ class ValueLearning(DQN):
                 model_rl_loss = model_rl_loss + jump_rl_loss
 
         nonterminals = 1. - torch.sign(torch.cumsum(samples.done.to(self.agent.device), 0)).float()
-        nonterminals = nonterminals[self.model.time_offset:
-                                    self.jumps + self.model.time_offset+1]
+        nonterminals = nonterminals[:self.jumps+1]
         mpr_loss = mpr_loss*nonterminals
         if self.jumps > 0:
             model_mpr_loss = mpr_loss[1:].mean(0)

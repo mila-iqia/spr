@@ -26,7 +26,7 @@ class MCTSModel(torch.nn.Module):
                  dynamics_blocks=0,
                  norm_type='bn',
                  dqn_hidden_size=256,
-                 model_rl=0,
+                 model_rl=1,
                  momentum_tau=0.01,
                  renormalize=1,
                  dropout=0.,

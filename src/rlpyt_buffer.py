@@ -140,5 +140,5 @@ class AsyncPrioritizedSequenceReplayFrameBufferExtended(AsyncPrioritizedSequence
             batch.all_reward[ind+1:, i] = 0
             batch.return_[ind+1:, i] = 0
             batch.done_n[ind+1:, i] = True
-            batch.values[ind+1:, i] = 0
+            batch.value[ind+1:, i] = 0
         return batch
