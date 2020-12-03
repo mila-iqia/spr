@@ -186,7 +186,7 @@ class ValueLearning(DQN):
         model_rl_loss = torch.zeros_like(reward_loss)
 
         pred_policy_logits = torch.stack(pred_policy_logits, 0).cpu()  # T, B, Actions
-        policy_loss = -torch.sum(samples.policy*pred_policy_logits, 2).mean(0)
+        policy_loss = -torch.sum(samples.policy[:self.jumps+1] * pred_policy_logits, 2).mean(0)
 
         if self.model_rl_weight > 0:
             for i in range(1, self.jumps+1):
