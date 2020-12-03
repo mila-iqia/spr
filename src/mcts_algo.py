@@ -178,10 +178,9 @@ class ValueLearning(DQN):
                          train=True)  # [B,A,P]
         rl_loss, KL = self.rl_loss(log_pred_ps[0], samples, 0)
         if len(pred_rew) > 0:
-            pred_rew = torch.stack(pred_rew, 0)
-            with torch.no_grad():
-                reward_target = to_categorical(samples.all_reward[:self.jumps+1].flatten().to(self.agent.device), limit=1).view(*pred_rew.shape)
-            reward_loss = -torch.sum(reward_target * pred_rew, 2).mean(0).cpu()
+            reward_target = samples.all_reward[:self.jumps+1]
+            pred_rew = torch.stack(pred_rew, 0).view(*reward_target.shape)
+            reward_loss = ((pred_rew - reward_target)**2).mean(0).cpu()
         else:
             reward_loss = torch.zeros(samples.all_observation.shape[1],)
         model_rl_loss = torch.zeros_like(reward_loss)
@@ -231,9 +230,9 @@ class ValueLearning(DQN):
         Computes value loss for all timesteps in t = [0..jumps)
         """
         with torch.no_grad():
-            target_v = self.agent.target(samples.all_observation[index + self.n_step],
-                                         samples.all_action[index + self.n_step],
-                                         samples.all_reward[index + self.n_step])
+            target_v = self.agent.target(samples.all_observation[index + self.n_step_return],
+                                         samples.all_action[index + self.n_step_return],
+                                         samples.all_reward[index + self.n_step_return])
         disc_target_v = (self.discount ** self.n_step_return) * target_v
         y = samples.return_[index] + (1 - samples.done_n[index].float()) * disc_target_v
         delta = y - pred_v

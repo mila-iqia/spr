@@ -273,7 +273,7 @@ class MCTSModel(torch.nn.Module):
 
             with torch.no_grad():
                 target_images = observation[:self.jumps+1].transpose(0, 1).flatten(2, 3)
-                target_latents = self.encode_targets(target_images)
+                target_latents = self.stem_forward(self.transform(target_images, augment=False))
 
             pred_latents = torch.stack(pred_latents, 1)
             if self.use_spr:
