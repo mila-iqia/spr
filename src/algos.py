@@ -117,6 +117,8 @@ class SPRCategoricalDQN(CategoricalDQN):
                  lambda_rollout_depth=5,
                  rl_weight=1.,
                  transfer_freq=16,
+                 transfer_with_actions=True,
+                 transfer_runs=1,
                  jumps=0,
                  debug_step=-1,
                  counterfactual_from_obs=1,
@@ -126,15 +128,19 @@ class SPRCategoricalDQN(CategoricalDQN):
                  use_dones=True,
                  search_start_offset=0,
                  head_only_search=0,
+                 model_backup_loss_type="policy",
                  **kwargs):
         super().__init__(**kwargs)
         self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy
         self.t0_spr_loss_weight = t0_spr_loss_weight
         self.model_spr_weight = model_spr_weight
+        self.model_backup_loss_type = model_backup_loss_type
 
         self.reward_loss_weight = reward_loss_weight
         self.model_rl_weight = model_rl_weight
         self.counterfactual_runs = counterfactual_runs
+        self.transfer_runs = transfer_runs
+        self.transfer_with_actions = transfer_with_actions
         self.rollout_rl_type = rollout_rl_type
         self.jumps = jumps
         self.done_loss_weight = done_loss_weight*float(use_dones)
@@ -205,12 +211,19 @@ class SPRCategoricalDQN(CategoricalDQN):
         actions = new_samples.all_action[1:].to(self.agent.device)
         if self.quantile:
             self.model.taus = torch.linspace(0, 1, 34, device=input.device)[None, 1:-1].expand(input.shape[1], -1)
-        latents, ps, _, _, _, _, _ = self.model.model_rollout(input,
+        expanded_input = input.unsqueeze(2).expand(-1, -1, self.transfer_runs, *[-1]*(len(input.shape[2:]))).flatten(1, 2)
+        actions = actions.unsqueeze(2).expand(-1, -1, self.transfer_runs, *[-1]*(len(actions.shape[2:]))).flatten(1, 2)
+        latents, ps, _, _, _, _, _ = self.model.model_rollout(expanded_input,
                                                               depth,
-                                                              override_actions=actions,
+                                                              override_actions=actions if
+                                                              self.transfer_with_actions else [actions[0]],
                                                               encode=True,
                                                               augment=False,
+                                                              no_averaging=True,
                                                               )
+
+        ps = ps.mean(1).contiguous()
+        # ps = select_at_indexes(actions[:depth+1].T.contiguous(), ps)
 
         target_inputs = (new_samples.all_observation[depth].to(self.agent.device),
                          new_samples.all_action[depth].to(self.agent.device),
@@ -220,7 +233,7 @@ class SPRCategoricalDQN(CategoricalDQN):
                                eval=False,
                                train=False,
                                force_no_rollout=True,
-                              )
+                               )
 
         return_, done_ = discount_return_n_step(new_samples.all_reward[1:depth+1],
                                                 new_samples.done,
@@ -229,8 +242,9 @@ class SPRCategoricalDQN(CategoricalDQN):
 
         return_ = return_.to(target_qs)[0]
         done_ = done_.to(target_qs)[0]
-        
-        target_qs = self.backup(depth, return_, 1-done_, target_qs, select_action=True)
+
+        target_qs = self.backup(depth, return_, 1-done_, target_qs, select_action=False)
+        target_qs = select_at_indexes(actions[depth], target_qs)
 
         buffer_input = [input[0], ps, target_qs.squeeze()]
         if self.quantile:
@@ -243,41 +257,40 @@ class SPRCategoricalDQN(CategoricalDQN):
         if self.head_only_search:
             latent = latent.detach()
         all_pred_ps = self.model.head_forward(latent, logits=False)
-
-        repeated_pred_ps = all_pred_ps.unsqueeze(1).expand(-1, rollouts, *([-1]*len(all_pred_ps.shape[1:]))).flatten(0, 1)
         with torch.no_grad():
-            if self.counterfactual_from_obs:
-                repeated_inputs = observation.unsqueeze(1).expand(-1, rollouts, *([-1]*len(observation.shape[1:]))).flatten(0, 1)
-                repeated_inputs = repeated_inputs.unsqueeze(0)
-            else:
-                repeated_inputs = latent.unsqueeze(1).expand(-1, rollouts, *([-1]*len(latent.shape[1:]))).flatten(0, 1)
-            initial_actions, _ = self.model.action_selection(all_pred_ps,
-                                                             temperature=0.5,
-                                                             adjust_temp=False,
-                                                             num_to_select=rollouts)
+            inputs = observation if self.counterfactual_from_obs else latent
             if self.counterfactual_with_target:
                 model = self.agent.target_model
                 if self.quantile:
                     self.agent.target_model.taus = self.model.taus
             else:
                 model = self.agent.model
+
+            # Turn off stochastic depth and so on for this
             model.eval()
-            _, target_ps, _, actions, _, _, lambdas = \
-                model.model_rollout(repeated_inputs,
+            _, target_ps, _, _, _, _, _ = \
+                model.model_rollout(inputs,
                                     encode=self.counterfactual_from_obs,
                                     augment=self.counterfactual_from_obs,
-                                    override_actions=[initial_actions],
+                                    override_actions=None,
                                     depth=self.model.target_depth,
                                     backup=True,
                                     adaptive_depth=True,
-                                    runs=1,
+                                    runs=rollouts,
                                     )
             model.train()
-            target_ps[:, 0] = select_at_indexes(initial_actions, repeated_pred_ps)
-            targets = average_targets(target_ps, lambdas)
-        pred_ps = select_at_indexes(initial_actions, repeated_pred_ps)
-        loss, _ = self.minimal_rl_loss(pred_ps, targets)
-        loss = loss.view(all_pred_ps.shape[0], -1, *loss.shape[1:]).mean(1)
+
+        if self.model_backup_loss_type == "policy":
+            _, probs = self.model.action_selection(all_pred_ps,
+                                                   temperature=self.model.get_temp(),
+                                                   )
+            _, target_probs = self.model.action_selection(target_ps,
+                                                          temperature=self.model.get_temp(),
+                                                          )
+
+            loss = -(target_probs*torch.log(probs)).sum(-1)
+        else:
+            loss, _ = self.minimal_rl_loss(all_pred_ps, target_ps)
         return loss
 
     def optim_initialize(self, rank=0):
@@ -483,13 +496,14 @@ class SPRCategoricalDQN(CategoricalDQN):
                 self.agent.target_model.head.reset_noise()
         # start = time.time()
         observation = samples.all_observation.to(self.agent.device)
-        pred_ps, pred_rew, pred_dones, spr_loss, diversity, lambdas,\
-             pred_latents, calibration_loss \
-            = self.agent(observation,
-                         samples.all_action.to(self.agent.device),
-                         samples.all_reward.to(self.agent.device),
+        actions = samples.all_action.to(self.agent.device)
+        rewards = samples.all_reward.to(self.agent.device)
+        all_pred_ps, pred_rew, pred_dones, spr_loss, diversity, lambdas,\
+            pred_latents, calibration_loss \
+            = self.agent(observation, actions, rewards,
                          train=True)  # [B,A,P]
 
+        pred_ps = select_at_indexes(actions[1:self.jumps+2].T.contiguous(), all_pred_ps)
         if self.rollout_rl_type == "offset":
             rl_loss, KL = self.rl_loss(pred_ps.flatten(0, 1), samples, range(0, self.jumps+1))
             rl_loss = rl_loss.view(pred_ps.shape[0], pred_ps.shape[1])
@@ -502,12 +516,12 @@ class SPRCategoricalDQN(CategoricalDQN):
         rl_loss, rollout_rl_loss = (rl_loss[:, 0], rl_loss[:, 1:].mean(1))
 
         with torch.no_grad():
-            reward_target = to_categorical(samples.all_reward[:self.jumps+1].flatten().to(self.agent.device), limit=1).view(*pred_rew.shape)
-        reward_loss = -torch.sum(reward_target * pred_rew, 2).mean(0)
+            reward_target = to_categorical(rewards[:self.jumps+1].T.flatten(), limit=1).view(*pred_rew.shape)
+        reward_loss = -torch.sum(reward_target * pred_rew, 2).mean(1)
 
-        done_target = samples.done[:self.jumps+1].float().to(pred_dones.device)
+        done_target = samples.done[:self.jumps+1].T.float().to(pred_dones.device)
         done_loss = F.binary_cross_entropy(pred_dones, done_target, reduction="none")
-        done_loss = done_loss.mean(0)
+        done_loss = done_loss.mean(1)
 
         if self.model_rl_weight > 0:
             model_rl_loss = self.model_backup_loss(observation[self.search_start_offset],

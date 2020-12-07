@@ -62,6 +62,8 @@ algo:
   use_dones: ${use_dones}
   delta_clip: 1.
   debug_step: -1
+  transfer_runs: 1
+  transfer_with_actions: true
 env:
   game: ms_pacman
   grayscale: 1
@@ -114,7 +116,7 @@ model:
   search_policy: fixed_t
   separate_spr_pass: False
   use_dones: ${use_dones}
-
+  backup_type: standard
 optim:
   eps: 0.00015
   weight_decay: 0.0001

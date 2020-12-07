@@ -80,12 +80,14 @@ class SPRCatDqnModel(torch.nn.Module):
             strides=None,
             paddings=None,
             framestack=4,
+            backup_type="standard"
     ):
         """Instantiates the neural network according to arguments; network defaults
         stored within this method."""
         super().__init__()
 
         self.rollout_rl_backup = rollout_rl_type == "backup"
+        self.backup_type = backup_type
 
         self.noisy = noisy_nets
         self.aug_prob = aug_prob
@@ -298,6 +300,12 @@ class SPRCatDqnModel(torch.nn.Module):
 
         print("Initialized model with {} parameters".format(count_parameters(self)))
 
+    def get_temp(self):
+        if self.search_policy == "on_policy" or self.search_policy == "off_policy":
+            return F.softplus(self.selection_temp)
+        else:
+            return self.selection_temp
+
     def calibration_loss(self, latents, actions, all_pred_ps):
         actions = actions.transpose(0, 1)
         with torch.no_grad():
@@ -307,7 +315,7 @@ class SPRCatDqnModel(torch.nn.Module):
             else:
                 true_qs = true_qs.mean(-1)
 
-        probs = F.log_softmax(true_qs/self.selection_temp, -1)
+        probs = F.log_softmax(true_qs/self.get_temp(), -1)
 
         with torch.no_grad():
             if self.search_policy == "on_policy":
@@ -360,40 +368,6 @@ class SPRCatDqnModel(torch.nn.Module):
         return latents.view(images.shape[0],
                             images.shape[1],
                             *latents.shape[1:])
-
-    @torch.no_grad()
-    def action_selection(self,
-                         q_values,
-                         temperature=1.,
-                         num_to_select=1,
-                         adjust_temp=True,
-                         ):
-
-        if self.distributional:
-            q_values = from_categorical(q_values, limit=10, logits=False)
-        else:
-            q_values = q_values.mean(-1)
-
-        if temperature == 0:
-            _, actions = torch.topk(q_values, num_to_select, -1)
-            actions = actions.flatten(0, 1)
-            probs = torch.zeros_like(q_values).unsqueeze(0).expand(num_to_select, *q_values.shape).flatten(0, 1)
-            probs[torch.arange(actions.shape[0], device=actions.device,
-                               dtype=torch.long), actions] = 1.
-        else:
-            probs = clamp_probs(F.softmax(q_values/temperature, -1))
-            dist = Categorical(probs=probs)
-            try:
-                actions = dist.sample((num_to_select,))
-            except Exception as e:
-                # Occasionally we get bizarre crashes here in the first
-                # iteration.  Probably nonrecoverable, so just print the values
-                # to see what's going wrong, then raise the exception again.
-                print(q_values)
-                print(probs)
-                raise e
-            actions = actions.T.flatten(0, 1)
-        return actions, probs
 
     def spr_loss(self, f_x1s, f_x2s):
         f_x1 = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
@@ -526,6 +500,38 @@ class SPRCatDqnModel(torch.nn.Module):
                               V_min=self.V_min,
                               discount=self.discount)
 
+    def action_selection(self,
+                         q_values,
+                         temperature=1.,
+                         num_to_select=1,
+                         ):
+
+        if self.distributional:
+            q_values = from_categorical(q_values, limit=10, logits=False)
+        else:
+            q_values = q_values.mean(-1)
+
+        if temperature == 0:
+            _, actions = torch.topk(q_values, num_to_select, -1)
+            actions = actions.flatten(0, 1)
+            probs = torch.zeros_like(q_values).unsqueeze(0).expand(num_to_select, *q_values.shape).flatten(0, 1)
+            probs[torch.arange(actions.shape[0], device=actions.device,
+                               dtype=torch.long), actions] = 1.
+        else:
+            probs = clamp_probs(F.softmax(q_values / temperature, -1))
+            dist = Categorical(probs=probs)
+            try:
+                actions = dist.sample((num_to_select,))
+            except Exception as e:
+                # Occasionally we get bizarre crashes here in the first
+                # iteration.  Probably nonrecoverable, so just print the values
+                # to see what's going wrong, then raise the exception again.
+                print(q_values)
+                print(probs)
+                raise e
+            actions = actions.T.flatten(0, 1)
+        return actions, probs
+
     def model_rollout(self,
                       input,
                       depth,
@@ -534,6 +540,7 @@ class SPRCatDqnModel(torch.nn.Module):
                       augment=False,
                       backup=True,
                       adaptive_depth=False,
+                      no_averaging=False,
                       runs=1):
         """
         :param input: Spatial latents at t=0 or image to encode at t=0
@@ -551,10 +558,18 @@ class SPRCatDqnModel(torch.nn.Module):
             latent = self.encode_images(input, augment=augment, target=False)[0]
         else:
             latent = input
+
+        value_q_t = self.head_forward(latent, logits=False)
+
+        # Depth == 0 is a fairly common case, so try to make things fast
+        if depth == 0:
+            return None, value_q_t, None, None, None, None, None
+
         with torch.no_grad():
             lambdas = self.lambda_predictor(latent)
             if adaptive_depth:
                 depth = self.adaptive_depth(lambdas)
+
         pred_latents = []
         pred_rewards = []
         pred_dones = []
@@ -562,94 +577,198 @@ class SPRCatDqnModel(torch.nn.Module):
         all_pred_values = []
         actions = override_actions if override_actions is not None else []
 
-        value_q_t = self.head_forward(latent, logits=False)
-        all_pred_values.append(value_q_t)
-
-        if override_actions is None:
-            selection_q_t = self.head_forward(latent, logits=False, noise_override=False)
-            action, probs = self.action_selection(selection_q_t,
-                                                  temperature=self.selection_temp,
-                                                  num_to_select=runs)
-            actions.append(action)
+        with torch.no_grad():
+            if override_actions is None:
+                selection_q_t = self.head_forward(latent, logits=False, noise_override=False)
+                action, probs = self.action_selection(selection_q_t,
+                                                      temperature=self.get_temp(),
+                                                      num_to_select=runs)
+                actions.append(action)
 
         if runs > 1:
             assert override_actions is None
-            latent = latent.unsqueeze(1).expand(-1, runs, *([-1]*len(latent.shape[1:])))
+            latent = latent.unsqueeze(1).expand(-1, runs, *([-1] * len(latent.shape[1:])))
             latent = latent.flatten(0, 1)
-            value_q_t = value_q_t.unsqueeze(1).expand(-1, runs, *([-1]*len(value_q_t.shape[1:])))
+            value_q_t = value_q_t.unsqueeze(1).expand(-1, runs, *([-1] * len(value_q_t.shape[1:])))
             value_q_t = value_q_t.flatten(0, 1)
-            lambdas = lambdas.unsqueeze(1).expand(-1, runs, *([-1]*len(lambdas.shape[1:])))
+            lambdas = lambdas.unsqueeze(1).expand(-1, runs, *([-1] * len(lambdas.shape[1:])))
             lambdas = lambdas.flatten(0, 1)
+
+
+        all_pred_values.append(value_q_t)
+        pred_latents.append(latent)
 
         # Don't take expectation until inside the rollout (i.e., e-sarsa)
         value_q_t = select_at_indexes(actions[0], value_q_t)
-
         pred_values.append(value_q_t)
-        pred_latents.append(latent)
-        if depth > 0:
-            for i in range(depth):
-                action = actions[i]
-                pred_dones.append(self.done_predictor(latent, action))
-                latent = self.dynamics_model(latent, action)
-                reward = self.reward_predictor(latent)
-                value_q_t = self.head_forward(latent, logits=False)
 
-                pred_rewards.append(reward)
-                pred_latents.append(latent)
-                all_pred_values.append(value_q_t)
+        # Main rollout loop
+        for i in range(depth):
+            action = actions[i]
+            pred_dones.append(self.done_predictor(latent, action))
+            latent = self.dynamics_model(latent, action)
+            reward = self.reward_predictor(latent)
+            value_q_t = self.head_forward(latent, logits=False)
 
-                # Check to see if the next action is already known,
-                # before choosing a new one
-                if len(actions) == i+1:
-                    selection_q_t = self.head_forward(latent, logits=False, noise_override=False)
-                    action, probs = self.action_selection(selection_q_t, temperature=self.selection_temp)
-                    actions.append(action)
-                    value_q_t = (value_q_t*probs.unsqueeze(-1)).sum(1)
-                else:
-                    value_q_t = select_at_indexes(actions[i+1], value_q_t)
+            pred_rewards.append(reward)
+            pred_latents.append(latent)
+            all_pred_values.append(value_q_t)
 
-                pred_values.append(value_q_t)
+            # Check to see if the next action is already known,
+            # before choosing a new one
+            if len(actions) == i+1:
+                selection_q_t = self.head_forward(latent, logits=False, noise_override=False)
+                action, probs = self.action_selection(selection_q_t, temperature=self.get_temp())
+                actions.append(action)
+                value_q_t = (value_q_t*probs.unsqueeze(-1)).sum(1)
+            else:
+                value_q_t = select_at_indexes(actions[i+1], value_q_t)
 
-            # Consolidate results
-            pred_dones = torch.stack(pred_dones, 0)
-            pred_rewards = F.log_softmax(torch.stack(pred_rewards, 0), -1)
-            pred_values = torch.stack(pred_values, 1)
+            pred_values.append(value_q_t)
 
-            if backup:
-                rewards = from_categorical(torch.exp(pred_rewards), limit=1, logits=False)
-                discounts = torch.cumprod(self.discount*(1 - pred_dones), 0)
-                returns = torch.cumsum(rewards*discounts, 0)
-                nonterminal = torch.cumprod(1 - pred_dones, 0)
-                backup_values = [(pred_values[:, 0])] + \
-                                [self.backup(i,
-                                 returns[i-1],
-                                 nonterminal[i-1],
-                                 (pred_values[:, i]),) for i in range(1, depth+1)]
-                pred_values = torch.stack(backup_values, 1)
+        # Consolidate results
+        if isinstance(actions, list):
+            actions = torch.stack(actions, 1)
+
+        pred_dones = torch.stack(pred_dones, 1)
+        pred_rewards = F.log_softmax(torch.stack(pred_rewards, 1), -1)
+        pred_values = torch.stack(pred_values, 1)
+        all_pred_values = torch.stack(all_pred_values, 1)
+
+        if backup:
+            pred_dones = pred_dones.view(-1, runs, *pred_dones.shape[1:])
+            pred_rewards = pred_rewards.view(-1, runs, *pred_rewards.shape[1:])
+            pred_values = pred_values.view(-1, runs, *pred_values.shape[1:])
+            actions = actions.view(-1, runs, *actions.shape[1:])
+
+            rewards = from_categorical(torch.exp(pred_rewards), limit=1, logits=False)
+            discounts = torch.cumprod(self.discount*(1 - pred_dones), -1)
+            returns = torch.cumsum(rewards*discounts, -1)
+            nonterminal = torch.cumprod(1 - pred_dones, -1)
+            if self.backup_type == "standard" or no_averaging:
+                backup_values = [(pred_values[:, :, 0])] + \
+                                [self.backup(i, returns[:, :, i-1],
+                                             nonterminal[:, :, i-1],
+                                             pred_values[:, :, i],)
+                                 for i in range(1, depth+1)]
+                backup_values = torch.stack(backup_values, 2)
+                if not no_averaging:
+                    backup_values = average_targets(backup_values, weights=lambdas)
+                    backup_values = self.merge_values(all_pred_values[:, 0], backup_values, actions[0].transpose(0, 1))
+            else:
+                pred_values = all_pred_values.view(-1, runs, *all_pred_values.shape[1:])
+                backup_values = self.merging_backup(lambdas, pred_values, actions, rewards,
+                                                    1 - pred_dones, self.get_temp(), True)
 
         else:
-            pred_values = torch.stack(pred_values, 1)
-            pred_dones = None
-            pred_rewards = None
+            backup_values = None
 
-        if override_actions is None:
-            actions = torch.stack(actions, 1)
-        all_pred_values = torch.stack(all_pred_values, 1).flatten(0, 1)
-        return pred_latents, pred_values, all_pred_values, actions, \
+        return pred_latents, backup_values, all_pred_values, actions, \
                pred_dones, pred_rewards, lambdas
 
-    def merge_values(self, original_qs, rollout_qs, actions):
-        counts = torch.zeros_like(original_qs)[..., 0]
+    @torch.no_grad()
+    def merge_values(self, values, actions, matching_matrix, previous_matches, i):
+        """
+        :param values: batch_size x runs x K x value_shape
+        :param actions: batch_size x runs x K
+        :param matching_matrix: batch_size x runs x runs x K
+        :param k: step to merge at
+        :return: source indices (num_to_merge x 4), target indices (num_to_merge x 4)
+        """
+        # Two runs should be merged at step i if they took the same actions up
+        # until step i, but different actions _at_ step i.  The merging
+        # matrix is offset by 1, so we check difference at i+2 and identity at i+1.
+        matches = (matching_matrix[..., i + 2] == 0) & (matching_matrix[..., i + 1] == 1)
 
-        counts = counts.scatter_add_(1, actions, torch.ones_like(actions).float())
-        values = torch.zeros_like(original_qs)
-        values = values.scatter_add_(1, actions.unsqueeze(-1).expand(-1, -1, values.shape[-1]), rollout_qs)
+        # Only allow upward merging, so that we ultimately converge to a single run
+        matches = torch.tril(matches)
 
-        mask = (counts > 0).float().unsqueeze(-1)
-        values = original_qs*(1 - mask) + values*mask
-        values = values/counts.clamp(1, None).unsqueeze(-1)
+        # If multiple runs converge, merge to the first of them.
+        first_legal_target = torch.cumsum(matches.float(), 2) == 1
 
-        return values
+        # don't merge already-merged runs, if there are any.
+        matches = matches & first_legal_target & (~previous_matches.bool())
+        previous_matches = previous_matches + matches.sum(-1, keepdim=True)
+
+        # Get the indices for the source and targets
+        batch_inds, source_inds, target_inds = torch.nonzero(matches, as_tuple=True)
+
+        # Get action indices
+        actions = actions[batch_inds, source_inds, i]
+
+        # Finally, finish the merge
+        values[batch_inds, target_inds, i, actions] = \
+            values[batch_inds, source_inds, i, actions]
+
+        return values, previous_matches
+
+    @torch.no_grad()
+    def merging_backup(self,
+                       weights,
+                       pred_ps,
+                       actions,
+                       rewards,
+                       nonterminals,
+                       temperature,
+                       adaptive_policy=True):
+        """
+        :param backup_fn: A function that does an n-step backup.
+        :param weights: batch_size x runs x K
+        :param pred_ps: batch_size x runs x K x actions x value_dim
+        :param actions: batch_size x runs x K
+        :param rewards: batch_size x runs x K
+        :param nonterminals: batch_size x runs x K
+        :param adaptive_policy: Whether to adjust the agent's predicted
+                                policy in light of new values.  Corresponds to
+                                the difference between search and simple Dyna.
+        :param temperature: Temperature to use to compute policies.
+        :return: predicted values: batch_size x value_dim
+        """
+        matching_matrix = (actions.unsqueeze(1) == actions.unsqueeze(2)).cumprod(-1)
+        matching_matrix = torch.cat([torch.ones_like(matching_matrix[..., 0:1]), matching_matrix], -1)
+        # the final actions were used only for value selection.
+        # Since they don't have any semantics, set the matching matrix here to be
+        # all zeros.  This allows us to collapse down redundant runs in the merging
+        # section, if they had entirely identical actions.
+        matching_matrix[..., -1].fill_(0)
+        previous_matches = torch.zeros((matching_matrix.shape[0], matching_matrix.shape[1], 1)).to(weights)
+
+        _, probs = self.action_selection(pred_ps[:, :, -1], temperature=temperature)
+        value_q_t = (pred_ps[:, :, -1] * probs.unsqueeze(-1)).sum(-2)
+
+        # We will be backing up _depth_ times, which is equal to 1-the number of
+        # timestep indices in the value tensor.
+        for i in reversed(range(pred_ps.shape[2] - 1)):
+            new_values = self.backup(1,
+                                     rewards[..., i],
+                                     nonterminals[..., i],
+                                     value_q_t, )
+
+            # Compute how much weight to give to the pre-existing values at the new
+            # step, compared to our new backup estimates.
+            # This is simply the fraction of the weight from step i onwards that is
+            # allocated to step i itself.
+            relative_weight = weights[..., i] / (weights[..., i:].sum(-1))
+
+            # Merge these new values into the tensor at their corresponding actions
+            # Recall that actions[..., i] were the actions taken to get to the value
+            # predictions at pred_values[:, :, i+1].
+            flat_ps = pred_ps.flatten(0, 1)
+            flat_values = new_values.flatten(0, 1)
+            flat_ps[torch.arange(flat_ps.shape[0]), i, actions[..., i].flatten()] = \
+                flat_ps[torch.arange(flat_ps.shape[0]), i, actions[..., i].flatten()] * \
+                relative_weight[:, None] + flat_values * (1 - relative_weight[:, None])
+            pred_ps = flat_ps.view(*pred_ps.shape)
+
+            pred_ps, previous_matches = self.merge_values(pred_ps, actions, matching_matrix, previous_matches, i)
+
+            if adaptive_policy:
+                _, probs = self.action_selection(pred_ps[:, :, i], temperature=temperature)
+            else:
+                _, probs = self.action_selection(new_values, temperature=temperature)
+            value_q_t = (pred_ps[:, :, i] * probs.unsqueeze(-1)).sum(-2)
+
+        return pred_ps[:, 0, 0, :, :]
 
     def forward(self,
                 observation,
@@ -691,11 +810,11 @@ class SPRCatDqnModel(torch.nn.Module):
                                    adaptive_depth=False)
 
             extra_pred_done = self.done_predictor(pred_latents[-1],
-                                                  prev_action[self.jumps+1]).unsqueeze(0)
-            extra_pred_reward = self.reward_predictor(latent).unsqueeze(0)
+                                                  prev_action[self.jumps+1]).unsqueeze(1)
+            extra_pred_reward = self.reward_predictor(latent).unsqueeze(1)
             extra_pred_reward = F.log_softmax(extra_pred_reward, -1)
-            pred_reward = extra_pred_reward if pred_reward is None else torch.cat([extra_pred_reward, pred_reward], 0)
-            pred_dones = extra_pred_done if pred_dones is None else torch.cat([pred_dones, extra_pred_done], 0)
+            pred_reward = extra_pred_reward if pred_reward is None else torch.cat([extra_pred_reward, pred_reward], 1)
+            pred_dones = extra_pred_done if pred_dones is None else torch.cat([pred_dones, extra_pred_done], 1)
 
             if self.separate_spr_pass:
                 pred_latents = [latent]
@@ -721,7 +840,7 @@ class SPRCatDqnModel(torch.nn.Module):
 
             calibration_loss = self.calibration_loss(pred_latents, prev_action[1:self.jumps+2], all_pred_ps)
 
-            return pred_ps,\
+            return all_pred_ps,\
                    pred_reward,\
                    pred_dones,\
                    spr_loss, \
@@ -742,24 +861,19 @@ class SPRCatDqnModel(torch.nn.Module):
             conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
             conv_out = self.renormalize(conv_out)
 
-            p = self.head_forward(conv_out)
-
             depth = self.eval_depth if eval else self.target_depth
             runs = self.eval_runs if eval else self.target_runs
-            if not force_no_rollout and depth > 0 and runs > 0:
-                _, model_ps, _, actions, _, _, lambdas =\
-                    self.model_rollout(conv_out,
-                                       depth,
-                                       override_actions=seed_actions,
-                                       backup=True,
-                                       adaptive_depth=True,
-                                       runs=runs)
-                if actions.shape[-1] > 1:
-                    model_ps = average_targets(model_ps, lambdas)
-                    model_ps = model_ps.view(p.shape[0], runs, *model_ps.shape[1:])
-                    actions = actions.view(p.shape[0], runs, *actions.shape[1:])
 
-                    p = self.merge_values(p, model_ps, actions[..., 0])
+            # Runs=0 actually breaks things, so set depth=0 instead in this case
+            depth = 0 if runs == 0 or force_no_rollout else depth
+
+            _, p, _, actions, _, _, lambdas =\
+                self.model_rollout(conv_out,
+                                   depth,
+                                   override_actions=seed_actions,
+                                   backup=True,
+                                   adaptive_depth=True,
+                                   runs=max(runs, 1))
 
             if not self.distributional and eval:
                 p = p.mean(-1)
@@ -824,6 +938,7 @@ class Projection(nn.Module):
 
 class LambdaPredictor(nn.Module):
     def __init__(self,
+                 encoder,
                  state_size=(64, 7, 7),
                  rl_loss_function=minimal_c51_loss,
                  batch_size=32,
@@ -832,7 +947,6 @@ class LambdaPredictor(nn.Module):
                  prediction_type="softmax",
                  needs_tau=False,
                  rollout_depth=5,
-                 encoder=None,
                  ):
         super().__init__()
         pixels = state_size[-2]*state_size[-1]
@@ -889,13 +1003,13 @@ class LambdaPredictor(nn.Module):
         samples = buffer.sample(self.batch_size)
         states, predictions, targets = samples[:3]
 
-        if self.encoder is not None and self.use_state:
+        if self.use_state:
             states = self.encoder(states.unsqueeze(0))[0]
         lambdas = self.predict(states)
         predictions = average_targets(predictions, lambdas)
 
         if self.needs_tau:
-            loss, _ = self.rl_loss_function(predictions, targets, samples[3])
+            loss, _ = self.rl_loss_function(predictions, targets, samples[-1])
         else:
             loss, _ = self.rl_loss_function(predictions, targets)
 

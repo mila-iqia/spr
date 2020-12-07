@@ -1,15 +1,19 @@
-import torch
 import time
-EPS = 1e-6
-LOG_EPS = -13.8155
 
+import torch
+import torch.nn.functional as F
+import torch.nn as nn
+from torch.distributions.categorical import Categorical
 
 from kornia.augmentation import RandomAffine,\
     RandomCrop,\
     CenterCrop, \
     RandomResizedCrop
 from kornia.filters import GaussianBlur2d
-from torch import nn
+
+EPS = 1e-6
+LOG_EPS = -13.8155
+
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -63,10 +67,13 @@ def average_targets(targets, weights):
     :return:
     """
     # Cut down the weights, in case we didn't search all the way.
-    if targets.shape[1] != weights.shape[1]:
+    if targets.shape[-2] != weights.shape[-1]:
         weights = weights.clone()
-        weights = weights[:, :targets.shape[1]]
+        weights = weights[:, :targets.shape[-2]]
         weights[:, -1] = weights[:, -1] + (1 - torch.sum(weights, -1, keepdim=False))
+
+    num_extra_dims = len(targets.shape) - len(weights.shape) - 1
+    weights = weights.view(weights.shape[0], *([1]*num_extra_dims), *weights.shape[1:])
 
     targets = (targets*weights.unsqueeze(-1)).sum(-2)
     return targets
@@ -132,12 +139,16 @@ def c51_backup(n_step,
     # Make 2-D tensor of contracted z_domain for each data point,
     # with zeros where next value should not be added.
     next_z = z * (discount ** n_step)  # [P']
-    next_z = torch.ger(nonterminal, next_z)  # [B,P']
-    ret = returns.unsqueeze(1)  # [B,1]
+    next_z = nonterminal.unsqueeze(-1)*next_z.unsqueeze(-2)  # [B,P']
+    ret = returns.unsqueeze(-1)  # [B,1]
+
+    num_extra_dims = len(ret.shape) - len(next_z.shape)
+    next_z = next_z.view(*([1]*num_extra_dims), *next_z.shape)
+
     next_z = torch.clamp(ret + next_z, V_min, V_max)  # [B,P']
 
-    z_bc = z.view(1, -1, 1)  # [1,P,1]
-    next_z_bc = next_z.unsqueeze(1)  # [B,1,P']
+    z_bc = z.view(*([1]*num_extra_dims), 1, -1, 1)  # [1,P,1]
+    next_z_bc = next_z.unsqueeze(-2)  # [B,1,P']
     abs_diff_on_delta = abs(next_z_bc - z_bc) / delta_z
     projection_coeffs = torch.clamp(1 - abs_diff_on_delta, 0, 1)  # Most 0.
 
@@ -146,7 +157,9 @@ def c51_backup(n_step,
     # dim-1: base_z atoms (remains after projection)
     # dim-2: next_z atoms (summed in projection)
 
-    target_ps = target_ps.unsqueeze(1)  # [B,1,P']
+    target_ps = target_ps.unsqueeze(-2)  # [B,1,P']
+    if not select_action and len(projection_coeffs.shape) != len(target_ps.shape):
+        projection_coeffs = projection_coeffs.unsqueeze(-3)
     target_p = (target_ps * projection_coeffs).sum(-1)  # [B,P]
     target_p = torch.clamp(target_p, EPS, 1)
     return target_p
@@ -308,4 +321,3 @@ def renormalize(tensor, first_dim=-3):
     flat_tensor = (flat_tensor - min)/(max - min)
 
     return flat_tensor.view(*tensor.shape)
-
