@@ -570,6 +570,11 @@ class SPRCatDqnModel(torch.nn.Module):
             if adaptive_depth:
                 depth = self.adaptive_depth(lambdas)
 
+                # One possible outcome is that we don't do any planning.
+                if depth == 0:
+                    # Nothing to do here, then, might as well return now.
+                    return None, value_q_t, None, None, None, None, None
+
         pred_latents = []
         pred_rewards = []
         pred_dones = []
