@@ -131,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument('--entity', type=str, default="abs-world-models")
     parser.add_argument('--cuda_idx', help='gpu to use ', type=int, default=0)
     parser.add_argument('--max-grad-norm', type=float, default=10., help='Max Grad Norm')
-    parser.add_argument('--public', type=bool, help='If set, uses anonymous wandb logging')
+    parser.add_argument('--public', action='store_true', help='If set, uses anonymous wandb logging')
     args = parser.parse_args()
 
     if args.public:
