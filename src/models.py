@@ -15,7 +15,7 @@ import copy
 import wandb
 
 
-class MPRCatDqnModel(torch.nn.Module):
+class SPRCatDqnModel(torch.nn.Module):
     """2D conlutional network feeding into MLP with ``n_atoms`` outputs
     per action, representing a discrete probability distribution of Q-values."""
 
@@ -26,7 +26,7 @@ class MPRCatDqnModel(torch.nn.Module):
             n_atoms,
             dueling,
             jumps,
-            mpr,
+            spr,
             augmentation,
             target_augmentation,
             eval_augmentation,
@@ -37,8 +37,8 @@ class MPRCatDqnModel(torch.nn.Module):
             classifier,
             imagesize,
             time_offset,
-            local_mpr,
-            global_mpr,
+            local_spr,
+            global_spr,
             momentum_encoder,
             shared_encoder,
             distributional,
@@ -128,7 +128,7 @@ class MPRCatDqnModel(torch.nn.Module):
 
         self.jumps = jumps
         self.model_rl = model_rl
-        self.use_mpr = mpr
+        self.use_spr = spr
         self.target_augmentation = target_augmentation
         self.eval_augmentation = eval_augmentation
         self.num_actions = output_size
@@ -165,19 +165,19 @@ class MPRCatDqnModel(torch.nn.Module):
 
         self.renormalize = renormalize
 
-        if self.use_mpr:
-            self.local_mpr = local_mpr
-            self.global_mpr = global_mpr
+        if self.use_spr:
+            self.local_spr = local_spr
+            self.global_spr = global_spr
             self.momentum_encoder = momentum_encoder
             self.momentum_tau = momentum_tau
             self.shared_encoder = shared_encoder
             assert not (self.shared_encoder and self.momentum_encoder)
 
-            # in case someone tries something silly like --local-mpr 2
-            self.num_mprs = int(bool(self.local_mpr)) + \
-                            int(bool(self.global_mpr))
+            # in case someone tries something silly like --local-spr 2
+            self.num_sprs = int(bool(self.local_spr)) + \
+                            int(bool(self.global_spr))
 
-            if self.local_mpr:
+            if self.local_spr:
                 self.local_final_classifier = nn.Identity()
                 if self.classifier_type == "mlp":
                     self.local_classifier = nn.Sequential(nn.Linear(self.hidden_size,
@@ -204,7 +204,7 @@ class MPRCatDqnModel(torch.nn.Module):
                 self.local_target_classifier = self.local_classifier
             else:
                 self.local_classifier = self.local_target_classifier = nn.Identity()
-            if self.global_mpr:
+            if self.global_spr:
                 self.global_final_classifier = nn.Identity()
                 if self.classifier_type == "mlp":
                     self.global_classifier = nn.Sequential(
@@ -215,15 +215,15 @@ class MPRCatDqnModel(torch.nn.Module):
                                                 nn.Linear(512, 256)
                                                 )
                     self.global_target_classifier = self.global_classifier
-                    global_mpr_size = 256
+                    global_spr_size = 256
                 elif self.classifier_type == "q_l1":
                     self.global_classifier = QL1Head(self.head, dueling=dueling, type=q_l1_type)
-                    global_mpr_size = self.global_classifier.out_features
+                    global_spr_size = self.global_classifier.out_features
                     self.global_target_classifier = self.global_classifier
                 elif self.classifier_type == "q_l2":
                     self.global_classifier = nn.Sequential(self.head, nn.Flatten(-2, -1))
                     self.global_target_classifier = self.global_classifier
-                    global_mpr_size = 256
+                    global_spr_size = 256
                 elif self.classifier_type == "bilinear":
                     self.global_classifier = nn.Sequential(nn.Flatten(-3, -1),
                                                            nn.Linear(self.hidden_size*self.pixels,
@@ -233,17 +233,17 @@ class MPRCatDqnModel(torch.nn.Module):
                     self.global_classifier = nn.Flatten(-3, -1)
                     self.global_target_classifier = nn.Flatten(-3, -1)
 
-                    global_mpr_size = self.hidden_size*self.pixels
+                    global_spr_size = self.hidden_size*self.pixels
                 if final_classifier == "mlp":
                     self.global_final_classifier = nn.Sequential(
-                        nn.Linear(global_mpr_size, global_mpr_size*2),
-                        nn.BatchNorm1d(global_mpr_size*2),
+                        nn.Linear(global_spr_size, global_spr_size*2),
+                        nn.BatchNorm1d(global_spr_size*2),
                         nn.ReLU(),
-                        nn.Linear(global_mpr_size*2, global_mpr_size)
+                        nn.Linear(global_spr_size*2, global_spr_size)
                     )
                 elif final_classifier == "linear":
                     self.global_final_classifier = nn.Sequential(
-                        nn.Linear(global_mpr_size, global_mpr_size),
+                        nn.Linear(global_spr_size, global_spr_size),
                     )
                 elif final_classifier == "none":
                     self.global_final_classifier = nn.Identity()
@@ -284,13 +284,13 @@ class MPRCatDqnModel(torch.nn.Module):
         if self.noisy:
             self.head.set_sampling(sampling)
 
-    def mpr_loss(self, f_x1s, f_x2s):
+    def spr_loss(self, f_x1s, f_x2s):
         f_x1 = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
         f_x2 = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
         loss = F.mse_loss(f_x1, f_x2, reduction="none").sum(-1).mean(0)
         return loss
 
-    def global_mpr_loss(self, latents, target_latents, observation):
+    def global_spr_loss(self, latents, target_latents, observation):
         global_latents = self.global_classifier(latents)
         global_latents = self.global_final_classifier(global_latents)
         with torch.no_grad() if self.momentum_encoder else dummy_context_mgr():
@@ -299,10 +299,10 @@ class MPRCatDqnModel(torch.nn.Module):
                                              self.jumps+1, global_targets.shape[-1]).transpose(1, 2)
         latents = global_latents.view(-1, observation.shape[1],
                                              self.jumps+1, global_latents.shape[-1]).transpose(1, 2)
-        loss = self.mpr_loss(latents, targets)
+        loss = self.spr_loss(latents, targets)
         return loss
 
-    def local_mpr_loss(self, latents, target_latents, observation):
+    def local_spr_loss(self, latents, target_latents, observation):
         local_latents = latents.flatten(-2, -1).permute(2, 0, 1)
         local_latents = self.local_classifier(local_latents)
         local_latents = self.local_final_classifier(local_latents)
@@ -318,10 +318,10 @@ class MPRCatDqnModel(torch.nn.Module):
                                            observation.shape[1],
                                            self.jumps+1,
                                            local_targets.shape[-1]).transpose(1, 2)
-        local_loss = self.mpr_loss(local_latents, local_targets)
+        local_loss = self.spr_loss(local_latents, local_targets)
         return local_loss
 
-    def do_mpr_loss(self, pred_latents, observation):
+    def do_spr_loss(self, pred_latents, observation):
         pred_latents = torch.stack(pred_latents, 1)
         latents = pred_latents[:observation.shape[1]].flatten(0, 1)  # batch*jumps, *
         neg_latents = pred_latents[observation.shape[1]:].flatten(0, 1)
@@ -336,17 +336,17 @@ class MPRCatDqnModel(torch.nn.Module):
             if self.renormalize:
                 target_latents = renormalize(target_latents, -3)
 
-        if self.local_mpr:
-            local_loss = self.local_mpr_loss(latents, target_latents, observation)
+        if self.local_spr:
+            local_loss = self.local_spr_loss(latents, target_latents, observation)
         else:
             local_loss = 0
-        if self.global_mpr:
-            global_loss = self.global_mpr_loss(latents, target_latents, observation)
+        if self.global_spr:
+            global_loss = self.global_spr_loss(latents, target_latents, observation)
         else:
             global_loss = 0
 
-        mpr_loss = (global_loss + local_loss)/self.num_mprs
-        mpr_loss = mpr_loss.view(-1, observation.shape[1]) # split to batch, jumps
+        spr_loss = (global_loss + local_loss)/self.num_sprs
+        spr_loss = spr_loss.view(-1, observation.shape[1]) # split to batch, jumps
 
         if self.momentum_encoder:
             update_state_dict(self.target_encoder,
@@ -354,15 +354,15 @@ class MPRCatDqnModel(torch.nn.Module):
                               self.momentum_tau)
             if self.classifier_type != "bilinear":
                 # q_l1 is also bilinear for local
-                if self.local_mpr and self.classifier_type != "q_l1":
+                if self.local_spr and self.classifier_type != "q_l1":
                     update_state_dict(self.local_target_classifier,
                                       self.local_classifier.state_dict(),
                                       self.momentum_tau)
-                if self.global_mpr:
+                if self.global_spr:
                     update_state_dict(self.global_target_classifier,
                                       self.global_classifier.state_dict(),
                                       self.momentum_tau)
-        return mpr_loss
+        return spr_loss
 
     def apply_transforms(self, transforms, eval_transforms, image):
         if eval_transforms is None:
@@ -461,14 +461,12 @@ class MPRCatDqnModel(torch.nn.Module):
                                                          prev_reward[i],
                                                          logits=True))
 
-            if self.use_mpr:
-                mpr_loss = self.do_mpr_loss(pred_latents, observation)
+            if self.use_spr:
+                spr_loss = self.do_spr_loss(pred_latents, observation)
             else:
-                mpr_loss = torch.zeros((self.jumps + 1, observation.shape[1]), device=latent.device)
+                spr_loss = torch.zeros((self.jumps + 1, observation.shape[1]), device=latent.device)
 
-            return log_pred_ps,\
-                   pred_reward,\
-                   mpr_loss
+            return log_pred_ps, pred_reward, spr_loss
 
         else:
             aug_factor = self.target_augmentation if not eval else self.eval_augmentation

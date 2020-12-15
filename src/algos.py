@@ -20,29 +20,29 @@ ModelOptInfo = namedtuple("OptInfo", ["loss", "gradNorm",
                                       "modelRLLoss",
                                       "RewardLoss",
                                       "modelGradNorm",
-                                      "MPRLoss",
-                                      "ModelMPRLoss"])
+                                      "SPRLoss",
+                                      "ModelSPRLoss"])
 
 EPS = 1e-6  # (NaN-guard)
 
 
-class MPRCategoricalDQN(CategoricalDQN):
+class SPRCategoricalDQN(CategoricalDQN):
     """Distributional DQN with fixed probability bins for the Q-value of each
     action, a.k.a. categorical."""
 
     def __init__(self,
-                 t0_mpr_loss_weight=1.,
+                 t0_spr_loss_weight=1.,
                  model_rl_weight=1.,
                  reward_loss_weight=1.,
-                 model_mpr_weight=1.,
+                 model_spr_weight=1.,
                  time_offset=0,
                  distributional=1,
                  jumps=0,
                  **kwargs):
         super().__init__(**kwargs)
         self.opt_info_fields = tuple(f for f in ModelOptInfo._fields)  # copy
-        self.t0_mpr_loss_weight = t0_mpr_loss_weight
-        self.model_mpr_weight = model_mpr_weight
+        self.t0_spr_loss_weight = t0_spr_loss_weight
+        self.model_spr_weight = model_spr_weight
 
         self.reward_loss_weight = reward_loss_weight
         self.model_rl_weight = model_rl_weight
@@ -129,11 +129,11 @@ class MPRCategoricalDQN(CategoricalDQN):
         for _ in range(self.updates_per_optimize):
             samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
             loss, td_abs_errors, model_rl_loss, reward_loss,\
-            t0_mpr_loss, model_mpr_loss = self.loss(samples_from_replay)
-            mpr_loss = self.t0_mpr_loss_weight*t0_mpr_loss + self.model_mpr_weight*model_mpr_loss
+            t0_spr_loss, model_spr_loss = self.loss(samples_from_replay)
+            spr_loss = self.t0_spr_loss_weight*t0_spr_loss + self.model_spr_weight*model_spr_loss
             total_loss = loss + self.model_rl_weight*model_rl_loss \
                               + self.reward_loss_weight*reward_loss
-            total_loss = total_loss + mpr_loss
+            total_loss = total_loss + spr_loss
             self.optimizer.zero_grad()
             total_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -151,8 +151,8 @@ class MPRCategoricalDQN(CategoricalDQN):
             opt_info.modelRLLoss.append(model_rl_loss.item())
             opt_info.RewardLoss.append(reward_loss.item())
             opt_info.modelGradNorm.append(torch.tensor(model_grad_norm).item())
-            opt_info.MPRLoss.append(mpr_loss.item())
-            opt_info.ModelMPRLoss.append(model_mpr_loss.item())
+            opt_info.SPRLoss.append(spr_loss.item())
+            opt_info.ModelSPRLoss.append(model_spr_loss.item())
             opt_info.tdAbsErr.extend(td_abs_errors[::8].numpy())  # Downsample.
             self.update_counter += 1
             if self.update_counter % self.target_update_interval == 0:
@@ -266,7 +266,7 @@ class MPRCategoricalDQN(CategoricalDQN):
         if self.model.noisy:
             self.model.head.reset_noise()
         # start = time.time()
-        log_pred_ps, pred_rew, mpr_loss\
+        log_pred_ps, pred_rew, spr_loss\
             = self.agent(samples.all_observation.to(self.agent.device),
                          samples.all_action.to(self.agent.device),
                          samples.all_reward.to(self.agent.device),
@@ -292,20 +292,20 @@ class MPRCategoricalDQN(CategoricalDQN):
         nonterminals = 1. - torch.sign(torch.cumsum(samples.done.to(self.agent.device), 0)).float()
         nonterminals = nonterminals[self.model.time_offset:
                                     self.jumps + self.model.time_offset+1]
-        mpr_loss = mpr_loss*nonterminals
+        spr_loss = spr_loss*nonterminals
         if self.jumps > 0:
-            model_mpr_loss = mpr_loss[1:].mean(0)
-            mpr_loss = mpr_loss[0]
+            model_spr_loss = spr_loss[1:].mean(0)
+            spr_loss = spr_loss[0]
         else:
-            mpr_loss = mpr_loss[0]
-            model_mpr_loss = torch.zeros_like(mpr_loss)
-        mpr_loss = mpr_loss.cpu()
-        model_mpr_loss = model_mpr_loss.cpu()
+            spr_loss = spr_loss[0]
+            model_spr_loss = torch.zeros_like(spr_loss)
+        spr_loss = spr_loss.cpu()
+        model_spr_loss = model_spr_loss.cpu()
         reward_loss = reward_loss.cpu()
         if self.prioritized_replay:
             weights = samples.is_weights
-            mpr_loss = mpr_loss * weights
-            model_mpr_loss = model_mpr_loss * weights
+            spr_loss = spr_loss * weights
+            model_spr_loss = model_spr_loss * weights
             reward_loss = reward_loss * weights
 
             # RL losses are no longer scaled in the c51 function
@@ -315,5 +315,5 @@ class MPRCategoricalDQN(CategoricalDQN):
         return rl_loss.mean(), KL, \
                model_rl_loss.mean(),\
                reward_loss.mean(), \
-               mpr_loss.mean(), \
-               model_mpr_loss.mean(),
+               spr_loss.mean(), \
+               model_spr_loss.mean(),

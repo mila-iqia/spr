@@ -16,10 +16,10 @@ import wandb
 import torch
 import numpy as np
 
-from src.models import MPRCatDqnModel
+from src.models import SPRCatDqnModel
 from src.rlpyt_utils import OneToOneSerialEvalCollector, SerialSampler, MinibatchRlEvalWandb
-from src.algos import MPRCategoricalDQN
-from src.agent import MPRAgent
+from src.algos import SPRCategoricalDQN
+from src.agent import SPRAgent
 from src.rlpyt_atari_env import AtariEnv
 from src.utils import set_config
 
@@ -44,8 +44,8 @@ def build_and_train(game="pong", run_ID=0, cuda_idx=0, args=None):
         eval_max_trajectories=config["sampler"]["eval_max_trajectories"],
     )
     args.discount = config["algo"]["discount"]
-    algo = MPRCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"])  # Run with defaults.
-    agent = MPRAgent(ModelCls=MPRCatDqnModel, model_kwargs=config["model"], **config["agent"])
+    algo = SPRCategoricalDQN(optim_kwargs=config["optim"], jumps=args.jumps, **config["algo"])  # Run with defaults.
+    agent = SPRAgent(ModelCls=SPRCatDqnModel, model_kwargs=config["model"], **config["agent"])
 
     wandb.config.update(config)
     runner = MinibatchRlEvalWandb(
@@ -97,14 +97,14 @@ if __name__ == "__main__":
     parser.add_argument('--norm-type', type=str, default='bn', choices=["bn", "ln", "in", "none"], help='Normalization')
     parser.add_argument('--aug-prob', type=float, default=1., help='Probability to apply augmentation')
     parser.add_argument('--dropout', type=float, default=0., help='Dropout probability in convnet.')
-    parser.add_argument('--mpr', type=int, default=1)
+    parser.add_argument('--spr', type=int, default=1)
     parser.add_argument('--distributional', type=int, default=1)
     parser.add_argument('--delta-clip', type=float, default=1., help="Huber Delta")
     parser.add_argument('--prioritized-replay', type=int, default=1)
     parser.add_argument('--momentum-encoder', type=int, default=1)
     parser.add_argument('--shared-encoder', type=int, default=0)
-    parser.add_argument('--local-mpr', type=int, default=0)
-    parser.add_argument('--global-mpr', type=int, default=1)
+    parser.add_argument('--local-spr', type=int, default=0)
+    parser.add_argument('--global-spr', type=int, default=1)
     parser.add_argument('--noisy-nets', type=int, default=1)
     parser.add_argument('--noisy-nets-std', type=float, default=0.1)
     parser.add_argument('--classifier', type=str, default='q_l1', choices=["mlp", "bilinear", "q_l1", "q_l2", "none"], help='Style of NCE classifier')
@@ -119,8 +119,8 @@ if __name__ == "__main__":
     parser.add_argument('--eval-augmentation', type=int, default=0, help='Use augmentation on inputs at evaluation time')
     parser.add_argument('--reward-loss-weight', type=float, default=0.)
     parser.add_argument('--model-rl-weight', type=float, default=0.)
-    parser.add_argument('--model-mpr-weight', type=float, default=5.)
-    parser.add_argument('--t0-mpr-loss-weight', type=float, default=0.)
+    parser.add_argument('--model-spr-weight', type=float, default=5.)
+    parser.add_argument('--t0-spr-loss-weight', type=float, default=0.)
     parser.add_argument('--eps-steps', type=int, default=2001)
     parser.add_argument('--min-steps-learn', type=int, default=2000)
     parser.add_argument('--eps-init', type=float, default=1.)

@@ -8,7 +8,7 @@ AgentInfo = namedarraytuple("AgentInfo", "p")
 AgentStep = namedarraytuple("AgentStep", ["action", "agent_info"])
 
 
-class MPRAgent(AtariCatDqnAgent):
+class SPRAgent(AtariCatDqnAgent):
     """Agent for Categorical DQN algorithm with search."""
 
     def __init__(self, eval=False, **kwargs):
@@ -35,7 +35,7 @@ class MPRAgent(AtariCatDqnAgent):
                    env_ranks=None):
         super().initialize(env_spaces, share_memory, global_B, env_ranks)
         # Overwrite distribution.
-        self.search = MPRActionSelection(self.model, self.distribution)
+        self.search = SPRActionSelection(self.model, self.distribution)
 
     def to_device(self, cuda_idx=None):
         """Moves the model to the specified cuda device, if not ``None``.  If
@@ -83,7 +83,7 @@ class MPRAgent(AtariCatDqnAgent):
         return AgentStep(action=action, agent_info=agent_info)
 
 
-class MPRActionSelection(torch.nn.Module):
+class SPRActionSelection(torch.nn.Module):
     def __init__(self, network, distribution, device="cpu"):
         super().__init__()
         self.network = network

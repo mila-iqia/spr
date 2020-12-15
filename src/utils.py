@@ -52,16 +52,16 @@ def set_config(args, game):
     if args.noisy_nets:
         config['agent']['eps_eval'] = 0.001
 
-    # New MPR Arguments
+    # New SPR Arguments
     config["model"]["imagesize"] = args.imagesize
     config["model"]["jumps"] = args.jumps
     config["model"]["dynamics_blocks"] = args.dynamics_blocks
-    config["model"]["mpr"] = args.mpr
+    config["model"]["spr"] = args.spr
     config["model"]["noisy_nets"] = args.noisy_nets
     config["model"]["momentum_encoder"] = args.momentum_encoder
     config["model"]["shared_encoder"] = args.shared_encoder
-    config["model"]["local_mpr"] = args.local_mpr
-    config["model"]["global_mpr"] = args.global_mpr
+    config["model"]["local_spr"] = args.local_spr
+    config["model"]["global_spr"] = args.global_spr
     config["model"]["distributional"] = args.distributional
     config["model"]["renormalize"] = args.renormalize
     config["model"]["norm_type"] = args.norm_type
@@ -80,8 +80,8 @@ def set_config(args, game):
     config["model"]["residual_tm"] = args.residual_tm
     config["algo"]["model_rl_weight"] = args.model_rl_weight
     config["algo"]["reward_loss_weight"] = args.reward_loss_weight
-    config["algo"]["model_mpr_weight"] = args.model_mpr_weight
-    config["algo"]["t0_mpr_loss_weight"] = args.t0_mpr_loss_weight
+    config["algo"]["model_spr_weight"] = args.model_spr_weight
+    config["algo"]["t0_spr_loss_weight"] = args.t0_spr_loss_weight
     config["algo"]["time_offset"] = args.time_offset
     config["algo"]["distributional"] = args.distributional
     config["algo"]["delta_clip"] = args.delta_clip
