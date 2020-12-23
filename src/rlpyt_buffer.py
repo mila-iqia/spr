@@ -3,7 +3,6 @@ from __future__ import division
 from collections import namedtuple
 import numpy as np
 import torch
-from recordclass import recordclass
 
 from rlpyt.replays.sequence.prioritized import SamplesFromReplayPri
 from src.envs import get_example_outputs
@@ -16,10 +15,6 @@ from rlpyt.utils.buffer import torchify_buffer, numpify_buffer
 from rlpyt.utils.collections import namedarraytuple
 from rlpyt.utils.misc import extract_sequences
 import traceback
-
-Transition = recordclass('Transition', ('timestep', 'state', 'action', 'reward', 'value', 'policy', 'nonterminal'))
-blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)  # TODO: Set appropriate default policy value
-blank_batch_trans = Transition(0, torch.zeros(1, 84, 84, dtype=torch.uint8), 0, 0., 0., 0, False)
 
 PrioritizedSamples = namedarraytuple("PrioritizedSamples",
                                   ["samples", "priorities"])
