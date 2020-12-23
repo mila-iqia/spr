@@ -8,7 +8,6 @@ import wandb
 import matplotlib.pyplot as plt
 import io
 from PIL import Image
-import dill
 import socket
 import torch.nn as nn
 
@@ -219,17 +218,6 @@ def save_to_pil():
     im = Image.open(buf)
     im.load()
     return im
-
-class DillWrapper(object):
-    def __init__(self, x):
-        self.x = x
-
-    def __getstate__(self):
-        import dill
-        return dill.dumps(self.x)
-
-    def __setstate__(self, ob):
-        self.x = dill.loads(ob)
 
 def torch_set_device(args):
     if torch.cuda.is_available():
