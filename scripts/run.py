@@ -106,7 +106,7 @@ if __name__ == "__main__":
     parser.add_argument('--local-spr', type=int, default=0)
     parser.add_argument('--global-spr', type=int, default=1)
     parser.add_argument('--noisy-nets', type=int, default=1)
-    parser.add_argument('--noisy-nets-std', type=float, default=0.1)
+    parser.add_argument('--noisy-nets-std', type=float, default=0.5)
     parser.add_argument('--classifier', type=str, default='q_l1', choices=["mlp", "bilinear", "q_l1", "q_l2", "none"], help='Style of NCE classifier')
     parser.add_argument('--final-classifier', type=str, default='linear', choices=["mlp", "linear", "none"], help='Style of NCE classifier')
     parser.add_argument('--augmentation', type=str, default=["shift", "intensity"], nargs="+",
