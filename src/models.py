@@ -287,6 +287,8 @@ class SPRCatDqnModel(torch.nn.Module):
     def spr_loss(self, f_x1s, f_x2s):
         f_x1 = F.normalize(f_x1s.float(), p=2., dim=-1, eps=1e-3)
         f_x2 = F.normalize(f_x2s.float(), p=2., dim=-1, eps=1e-3)
+        # Gradients of norrmalized L2 loss and cosine similiarity are proportional.
+        # See: https://stats.stackexchange.com/a/146279
         loss = F.mse_loss(f_x1, f_x2, reduction="none").sum(-1).mean(0)
         return loss
 
